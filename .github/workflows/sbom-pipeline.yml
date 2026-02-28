@@ -40,6 +40,8 @@ jobs:
 
       - name: Validate SBOM (CycloneDX + NTIA) - before signing
         run: |
+          docker pull cyclonedx/cyclonedx-cli:latest
+          docker pull hoppr/hopctl:latest
           set +e
           docker run --rm -v "$GITHUB_WORKSPACE:/data" cyclonedx/cyclonedx-cli:latest validate --input-file "/data/$SBOM_DIR/sbom-source.enriched.json"
           raw_validate=$?
@@ -49,9 +51,9 @@ jobs:
           docker run --rm -v "$GITHUB_WORKSPACE:/work" -w /work mcr.microsoft.com/powershell:7.4-ubuntu-22.04 pwsh -File ./check-ntia.ps1 -SbomFile "$SBOM_DIR/sbom-source.enriched.json"
           ntia_local=$?
 
-          docker run --rm -v "$GITHUB_WORKSPACE:/data" -w /data hoppr/hopctl validate sbom --sbom "$SBOM_DIR/sbom-source.enriched.json" --profile ntia --log-file "/data/$REPORT_DIR/hoppr-source.log" --verbose
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" -w /data hoppr/hopctl validate sbom --sbom "$SBOM_DIR/sbom-source.enriched.json" --profile ntia --log-file "/data/$REPORT_DIR/hoppr-source.log" --verbose 2>&1 | tee "$REPORT_DIR/hoppr-source-console.txt"
           hoppr_source=$?
-          docker run --rm -v "$GITHUB_WORKSPACE:/data" -w /data hoppr/hopctl validate sbom --sbom "$SBOM_DIR/sbom-build.enriched.json" --profile ntia --log-file "/data/$REPORT_DIR/hoppr-build.log" --verbose
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" -w /data hoppr/hopctl validate sbom --sbom "$SBOM_DIR/sbom-build.enriched.json" --profile ntia --log-file "/data/$REPORT_DIR/hoppr-build.log" --verbose 2>&1 | tee "$REPORT_DIR/hoppr-build-console.txt"
           hoppr_build=$?
           set -e
 
@@ -63,6 +65,12 @@ jobs:
             echo "NTIA Minimum Elements (local):   $([ $ntia_local -eq 0 ] && echo PASS || echo FAIL)"
             echo "Hoppr NTIA (source):             $([ $hoppr_source -eq 0 ] && echo PASS || echo WARN)"
             echo "Hoppr NTIA (build):             $([ $hoppr_build -eq 0 ] && echo PASS || echo WARN)"
+            echo ""
+            echo "--- Hoppr Source Log ---"
+            cat "$REPORT_DIR/hoppr-source.log" 2>/dev/null || echo "(no log file)"
+            echo ""
+            echo "--- Hoppr Build Log ---"
+            cat "$REPORT_DIR/hoppr-build.log" 2>/dev/null || echo "(no log file)"
           } > "$REPORT_DIR/requirements-summary.txt"
 
           if [ $raw_validate -ne 0 ] || [ $enriched_validate -ne 0 ] || [ $ntia_local -ne 0 ]; then
