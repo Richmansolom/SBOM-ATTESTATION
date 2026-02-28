@@ -1,0 +1,128 @@
+stages:
+  - build
+
+variables:
+  SBOM_DIR: "sbom"
+  REPORT_DIR: "reports"
+  BUILD_LOG: "build-output.log"
+  APP_DIR: "example-app"
+
+build_sbom_scan:
+  stage: build
+  image: docker:24
+  services:
+    - name: docker:24-dind
+      command: ["--tls=false"]
+  variables:
+    DOCKER_HOST: "tcp://docker:2375"
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - apk add --no-cache bash curl jq python3 openssl build-base
+    - mkdir -p "$SBOM_DIR" "$REPORT_DIR" "$APP_DIR/build"
+  script:
+    - echo "==> Build example C++ application"
+    - make -C $APP_DIR 2>&1 | tee "$REPORT_DIR/$BUILD_LOG"
+    - echo "==> Generate SBOMs (CycloneDX) with Syft"
+    - docker pull anchore/syft:latest
+    - docker run --rm -v "$CI_PROJECT_DIR:/src" anchore/syft:latest dir:/src/$APP_DIR -o cyclonedx-json > "$SBOM_DIR/sbom-source.json"
+    - docker run --rm -v "$CI_PROJECT_DIR:/src" anchore/syft:latest dir:/src/$APP_DIR/build -o cyclonedx-json > "$SBOM_DIR/sbom-build.json"
+    - echo "==> Enrich SBOMs with custom application metadata"
+    - docker pull mcr.microsoft.com/powershell:7.4-ubuntu-22.04
+    - >
+      docker run --rm -v "$CI_PROJECT_DIR:/work" -w /work mcr.microsoft.com/powershell:7.4-ubuntu-22.04
+      pwsh -File merge-sbom.ps1
+      -InputSbom "$SBOM_DIR/sbom-source.json"
+      -AppMetadata "$APP_DIR/app-metadata.json"
+      -OutputSbom "$SBOM_DIR/sbom-source.enriched.json"
+    - >
+      docker run --rm -v "$CI_PROJECT_DIR:/work" -w /work mcr.microsoft.com/powershell:7.4-ubuntu-22.04
+      pwsh -File merge-sbom.ps1
+      -InputSbom "$SBOM_DIR/sbom-build.json"
+      -AppMetadata "$APP_DIR/app-metadata.json"
+      -OutputSbom "$SBOM_DIR/sbom-build.enriched.json"
+    - echo "==> Sign SBOMs and validate signatures"
+    - |
+      set -e
+      SBOM_SOURCE="$SBOM_DIR/sbom-source.enriched.json"
+      SBOM_BUILD="$SBOM_DIR/sbom-build.enriched.json"
+      SIGN_DIR="$SBOM_DIR/signatures"
+      SIGN_KEY="$SIGN_DIR/sbom-signing-private.pem"
+      SIGN_PUB="$SIGN_DIR/sbom-signing-public.pem"
+      mkdir -p "$SIGN_DIR"
+
+      openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$SIGN_KEY"
+      openssl pkey -in "$SIGN_KEY" -pubout -out "$SIGN_PUB"
+
+      for sbom in "$SBOM_SOURCE" "$SBOM_BUILD"; do
+        sbom_name="$(basename "$sbom")"
+        sbom_sig="$SIGN_DIR/$sbom_name.sig"
+        verify_report="$REPORT_DIR/$sbom_name.signature-check.txt"
+
+        openssl dgst -sha256 -sign "$SIGN_KEY" -out "$sbom_sig" "$sbom"
+        if openssl dgst -sha256 -verify "$SIGN_PUB" -signature "$sbom_sig" "$sbom" > "$verify_report" 2>&1; then
+          echo "Signature validation passed for $sbom_name" | tee -a "$verify_report"
+        else
+          echo "Signature validation failed for $sbom_name" | tee -a "$verify_report"
+          exit 1
+        fi
+      done
+    - echo "==> Validate SBOM structure (CycloneDX-CLI) and NTIA Minimum Elements"
+    - docker pull cyclonedx/cyclonedx-cli:latest
+    - docker pull hoppr/hopctl:latest
+    - |
+      set +e
+      docker run --rm -v "$CI_PROJECT_DIR:/data" cyclonedx/cyclonedx-cli:latest validate --input-file "/data/$SBOM_DIR/sbom-source.enriched.json"
+      raw_validate=$?
+      docker run --rm -v "$CI_PROJECT_DIR:/data" cyclonedx/cyclonedx-cli:latest validate --input-file "/data/$SBOM_DIR/sbom-build.enriched.json"
+      enriched_validate=$?
+
+      docker run --rm -v "$CI_PROJECT_DIR:/work" -w /work mcr.microsoft.com/powershell:7.4-ubuntu-22.04 pwsh -File ./check-ntia.ps1 -SbomFile "$SBOM_DIR/sbom-source.enriched.json"
+      ntia_local=$?
+
+      docker run --rm -v "$CI_PROJECT_DIR:/data" -w /data hoppr/hopctl validate sbom --sbom "$SBOM_DIR/sbom-source.enriched.json" --profile ntia --log-file "/data/$REPORT_DIR/hoppr-source.log" --verbose
+      hoppr_source=$?
+      docker run --rm -v "$CI_PROJECT_DIR:/data" -w /data hoppr/hopctl validate sbom --sbom "$SBOM_DIR/sbom-build.enriched.json" --profile ntia --log-file "/data/$REPORT_DIR/hoppr-build.log" --verbose
+      hoppr_build=$?
+      set -e
+
+      {
+        echo "SBOM Requirements Summary"
+        echo "========================="
+        echo "CycloneDX validate (source):      $([ $raw_validate -eq 0 ] && echo PASS || echo FAIL)"
+        echo "CycloneDX validate (build):      $([ $enriched_validate -eq 0 ] && echo PASS || echo FAIL)"
+        echo "NTIA Minimum Elements (local):   $([ $ntia_local -eq 0 ] && echo PASS || echo FAIL)"
+        echo "Hoppr NTIA (source):             $([ $hoppr_source -eq 0 ] && echo PASS || echo WARN)"
+        echo "Hoppr NTIA (build):             $([ $hoppr_build -eq 0 ] && echo PASS || echo WARN)"
+      } > "$REPORT_DIR/requirements-summary.txt"
+
+      if [ $raw_validate -ne 0 ] || [ $enriched_validate -ne 0 ] || [ $ntia_local -ne 0 ]; then
+        echo "SBOM requirement checks failed. See $REPORT_DIR/requirements-summary.txt"
+        exit 1
+      fi
+    - echo "==> SBOM vulnerability scan using Grype"
+    - docker pull anchore/grype:latest
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.json -o json > "$REPORT_DIR/grype-report.json"
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.json -o table > "$REPORT_DIR/grype-report.txt"
+    - echo "==> Generate vulnerability analysis report"
+    - >
+      jq -r '
+        def count(sev): ( [ .matches[]? | select(.vulnerability.severity == sev) ] | length );
+        "Vulnerability Analysis Summary",
+        "==============================",
+        ("Total: " + ( [ .matches[]? ] | length | tostring )),
+        ("Critical: " + (count("Critical") | tostring)),
+        ("High: " + (count("High") | tostring)),
+        ("Medium: " + (count("Medium") | tostring)),
+        ("Low: " + (count("Low") | tostring)),
+        ("Negligible: " + (count("Negligible") | tostring)),
+        "",
+        "Top Findings (up to 10):",
+        ( [ .matches[]? | "\(.vulnerability.id) | \(.vulnerability.severity) | \(.artifact.name) \(.artifact.version // "")" ][0:10] | .[] )
+      ' "$REPORT_DIR/grype-report.json" > "$REPORT_DIR/vulnerability-analysis.txt"
+  artifacts:
+    when: always
+    paths:
+      - example-app/build/
+      - sbom/
+      - reports/
+    expire_in: 1 week

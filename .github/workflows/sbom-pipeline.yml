@@ -1,0 +1,124 @@
+name: SBOM Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build_sbom_scan:
+    runs-on: ubuntu-latest
+    env:
+      SBOM_DIR: sbom
+      REPORT_DIR: reports
+      BUILD_LOG: build-output.log
+      APP_DIR: example-app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare directories
+        run: mkdir -p "$SBOM_DIR" "$REPORT_DIR" "$APP_DIR/build"
+
+      - name: Build example C++ application
+        run: make -C $APP_DIR 2>&1 | tee "$REPORT_DIR/$BUILD_LOG"
+
+      - name: Generate SBOMs with Syft
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" anchore/syft:latest dir:/src/$APP_DIR -o cyclonedx-json > "$SBOM_DIR/sbom-source.json"
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" anchore/syft:latest dir:/src/$APP_DIR/build -o cyclonedx-json > "$SBOM_DIR/sbom-build.json"
+
+      - name: Enrich SBOMs with custom metadata
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/work" -w /work mcr.microsoft.com/powershell:7.4-ubuntu-22.04 \
+            pwsh -File merge-sbom.ps1 -InputSbom "$SBOM_DIR/sbom-source.json" -AppMetadata "$APP_DIR/app-metadata.json" -OutputSbom "$SBOM_DIR/sbom-source.enriched.json"
+          docker run --rm -v "$GITHUB_WORKSPACE:/work" -w /work mcr.microsoft.com/powershell:7.4-ubuntu-22.04 \
+            pwsh -File merge-sbom.ps1 -InputSbom "$SBOM_DIR/sbom-build.json" -AppMetadata "$APP_DIR/app-metadata.json" -OutputSbom "$SBOM_DIR/sbom-build.enriched.json"
+
+      - name: Sign and validate SBOMs
+        run: |
+          set -e
+          SBOM_SOURCE="$SBOM_DIR/sbom-source.enriched.json"
+          SBOM_BUILD="$SBOM_DIR/sbom-build.enriched.json"
+          SIGN_DIR="$SBOM_DIR/signatures"
+          mkdir -p "$SIGN_DIR"
+          SIGN_KEY="$SIGN_DIR/sbom-signing-private.pem"
+          SIGN_PUB="$SIGN_DIR/sbom-signing-public.pem"
+
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$SIGN_KEY"
+          openssl pkey -in "$SIGN_KEY" -pubout -out "$SIGN_PUB"
+
+          for sbom in "$SBOM_SOURCE" "$SBOM_BUILD"; do
+            sbom_name="$(basename "$sbom")"
+            sbom_sig="$SIGN_DIR/$sbom_name.sig"
+            verify_report="$REPORT_DIR/$sbom_name.signature-check.txt"
+            openssl dgst -sha256 -sign "$SIGN_KEY" -out "$sbom_sig" "$sbom"
+            openssl dgst -sha256 -verify "$SIGN_PUB" -signature "$sbom_sig" "$sbom" && echo "Signature validation passed for $sbom_name" | tee "$verify_report" || { echo "Signature validation failed for $sbom_name" | tee "$verify_report"; exit 1; }
+          done
+
+      - name: Validate SBOM (CycloneDX + NTIA)
+        run: |
+          set +e
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" cyclonedx/cyclonedx-cli:latest validate --input-file "/data/$SBOM_DIR/sbom-source.enriched.json"
+          raw_validate=$?
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" cyclonedx/cyclonedx-cli:latest validate --input-file "/data/$SBOM_DIR/sbom-build.enriched.json"
+          enriched_validate=$?
+
+          docker run --rm -v "$GITHUB_WORKSPACE:/work" -w /work mcr.microsoft.com/powershell:7.4-ubuntu-22.04 pwsh -File ./check-ntia.ps1 -SbomFile "$SBOM_DIR/sbom-source.enriched.json"
+          ntia_local=$?
+
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" -w /data hoppr/hopctl validate sbom --sbom "$SBOM_DIR/sbom-source.enriched.json" --profile ntia --log-file "/data/$REPORT_DIR/hoppr-source.log" --verbose
+          hoppr_source=$?
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" -w /data hoppr/hopctl validate sbom --sbom "$SBOM_DIR/sbom-build.enriched.json" --profile ntia --log-file "/data/$REPORT_DIR/hoppr-build.log" --verbose
+          hoppr_build=$?
+          set -e
+
+          {
+            echo "SBOM Requirements Summary"
+            echo "========================="
+            echo "CycloneDX validate (source):      $([ $raw_validate -eq 0 ] && echo PASS || echo FAIL)"
+            echo "CycloneDX validate (build):      $([ $enriched_validate -eq 0 ] && echo PASS || echo FAIL)"
+            echo "NTIA Minimum Elements (local):   $([ $ntia_local -eq 0 ] && echo PASS || echo FAIL)"
+            echo "Hoppr NTIA (source):             $([ $hoppr_source -eq 0 ] && echo PASS || echo WARN)"
+            echo "Hoppr NTIA (build):             $([ $hoppr_build -eq 0 ] && echo PASS || echo WARN)"
+          } > "$REPORT_DIR/requirements-summary.txt"
+
+          if [ $raw_validate -ne 0 ] || [ $enriched_validate -ne 0 ] || [ $ntia_local -ne 0 ]; then
+            echo "SBOM requirement checks failed. See $REPORT_DIR/requirements-summary.txt"
+            exit 1
+          fi
+
+      - name: Grype vulnerability scan
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.json -o json > "$REPORT_DIR/grype-report.json"
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.json -o table > "$REPORT_DIR/grype-report.txt"
+
+      - name: Generate vulnerability analysis report
+        run: |
+          jq -r '
+            def count(sev): ( [ .matches[]? | select(.vulnerability.severity == sev) ] | length );
+            "Vulnerability Analysis Summary",
+            "==============================",
+            ("Total: " + ( [ .matches[]? ] | length | tostring )),
+            ("Critical: " + (count("Critical") | tostring)),
+            ("High: " + (count("High") | tostring)),
+            ("Medium: " + (count("Medium") | tostring)),
+            ("Low: " + (count("Low") | tostring)),
+            ("Negligible: " + (count("Negligible") | tostring)),
+            "",
+            "Top Findings (up to 10):",
+            ( [ .matches[]? | "\(.vulnerability.id) | \(.vulnerability.severity) | \(.artifact.name) \(.artifact.version // "")" ][0:10] | .[] )
+          ' "$REPORT_DIR/grype-report.json" > "$REPORT_DIR/vulnerability-analysis.txt"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-pipeline-artifacts
+          path: |
+            example-app/build/
+            sbom/
+            reports/
+          retention-days: 7
