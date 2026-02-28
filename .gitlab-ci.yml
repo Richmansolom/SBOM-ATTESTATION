@@ -40,17 +40,7 @@ build_sbom_scan:
       -InputSbom "$SBOM_DIR/sbom-build.json"
       -AppMetadata "$APP_DIR/app-metadata.json"
       -OutputSbom "$SBOM_DIR/sbom-build.enriched.json"
-    - echo "==> Sign SBOMs with embedded CycloneDX signature (PKI, RS384, CNSA 2.0)"
-    - |
-      set -e
-      chmod +x scripts/sign-sbom.sh
-      PKI_DIR="$SBOM_DIR/pki"
-      bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/sbom-source.enriched.signed.json" "$PKI_DIR"
-      mv "$SBOM_DIR/sbom-source.enriched.signed.json" "$SBOM_DIR/sbom-source.enriched.json"
-      bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.signed.json" "$PKI_DIR"
-      mv "$SBOM_DIR/sbom-build.enriched.signed.json" "$SBOM_DIR/sbom-build.enriched.json"
-      echo "Signature embedded in SBOM - public key in $PKI_DIR/sbom_public_key.pem"
-    - echo "==> Validate SBOM structure (CycloneDX-CLI) and NTIA Minimum Elements"
+    - echo "==> Validate SBOM structure (CycloneDX-CLI) and NTIA - before signing"
     - docker pull cyclonedx/cyclonedx-cli:latest
     - docker pull hoppr/hopctl:latest
     - |
@@ -83,6 +73,16 @@ build_sbom_scan:
         echo "SBOM requirement checks failed. See $REPORT_DIR/requirements-summary.txt"
         exit 1
       fi
+    - echo "==> Sign SBOMs with embedded CycloneDX signature (PKI, RS384, CNSA 2.0)"
+    - |
+      set -e
+      chmod +x scripts/sign-sbom.sh
+      PKI_DIR="$SBOM_DIR/pki"
+      bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/sbom-source.enriched.signed.json" "$PKI_DIR"
+      mv "$SBOM_DIR/sbom-source.enriched.signed.json" "$SBOM_DIR/sbom-source.enriched.json"
+      bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.signed.json" "$PKI_DIR"
+      mv "$SBOM_DIR/sbom-build.enriched.signed.json" "$SBOM_DIR/sbom-build.enriched.json"
+      echo "Signature embedded in SBOM - public key in $PKI_DIR/sbom_public_key.pem"
     - echo "==> SBOM vulnerability scan using Grype"
     - docker pull anchore/grype:latest
     - docker run --rm -v "$CI_PROJECT_DIR:/data" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.json -o json > "$REPORT_DIR/grype-report.json"

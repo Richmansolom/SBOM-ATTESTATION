@@ -38,18 +38,7 @@ jobs:
           docker run --rm -v "$GITHUB_WORKSPACE:/work" -w /work mcr.microsoft.com/powershell:7.4-ubuntu-22.04 \
             pwsh -File merge-sbom.ps1 -InputSbom "$SBOM_DIR/sbom-build.json" -AppMetadata "$APP_DIR/app-metadata.json" -OutputSbom "$SBOM_DIR/sbom-build.enriched.json"
 
-      - name: Sign SBOMs with embedded CycloneDX signature (PKI, RS384, CNSA 2.0)
-        run: |
-          set -e
-          chmod +x scripts/sign-sbom.sh
-          PKI_DIR="$SBOM_DIR/pki"
-          bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/sbom-source.enriched.signed.json" "$PKI_DIR"
-          mv "$SBOM_DIR/sbom-source.enriched.signed.json" "$SBOM_DIR/sbom-source.enriched.json"
-          bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.signed.json" "$PKI_DIR"
-          mv "$SBOM_DIR/sbom-build.enriched.signed.json" "$SBOM_DIR/sbom-build.enriched.json"
-          echo "Signature embedded in SBOM - public key in $PKI_DIR/sbom_public_key.pem"
-
-      - name: Validate SBOM (CycloneDX + NTIA)
+      - name: Validate SBOM (CycloneDX + NTIA) - before signing
         run: |
           set +e
           docker run --rm -v "$GITHUB_WORKSPACE:/data" cyclonedx/cyclonedx-cli:latest validate --input-file "/data/$SBOM_DIR/sbom-source.enriched.json"
@@ -80,6 +69,17 @@ jobs:
             echo "SBOM requirement checks failed. See $REPORT_DIR/requirements-summary.txt"
             exit 1
           fi
+
+      - name: Sign SBOMs with embedded CycloneDX signature (PKI, RS384, CNSA 2.0)
+        run: |
+          set -e
+          chmod +x scripts/sign-sbom.sh
+          PKI_DIR="$SBOM_DIR/pki"
+          bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/sbom-source.enriched.signed.json" "$PKI_DIR"
+          mv "$SBOM_DIR/sbom-source.enriched.signed.json" "$SBOM_DIR/sbom-source.enriched.json"
+          bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.signed.json" "$PKI_DIR"
+          mv "$SBOM_DIR/sbom-build.enriched.signed.json" "$SBOM_DIR/sbom-build.enriched.json"
+          echo "Signature embedded in SBOM - public key in $PKI_DIR/sbom_public_key.pem"
 
       - name: Grype vulnerability scan
         run: |
