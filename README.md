@@ -18,12 +18,7 @@ This project provides an SBOM generator and attestation pipeline for custom C/C+
 
 ## Example C++ Application
 
-The `example-app/` directory contains a minimal C++ application with:
-
-- **4 custom components:** `io`, `engine`, `math`, `util`
-- **2+ dependency levels:** `main → io/printer → engine/compute → (math/series, util/string_util)`
-
-This satisfies the requirement for "at least three custom components and at least two levels of custom component dependency."
+The `example-app/` directory contains a minimal C++ application used to demonstrate the pipeline. **This SBOM infrastructure is for any software** — replace `example-app/` with your own project and update `app-metadata.json`. The example satisfies pipeline requirements: ≥3 custom components, ≥2 dependency levels.
 
 ## Project Structure
 
@@ -100,19 +95,40 @@ docker build -t sbom-demo-app:1.0 .
 docker run --rm sbom-demo-app:1.0
 ```
 
+## Key Distribution Infrastructure (PKI)
+
+Per the attestation requirement, this project implements a PKI for signed SBOMs:
+
+- **RSA 3072-bit** keys (CNSA 2.0 aligned)
+- **RS384** (RSA-SHA384) signatures embedded in SBOM (CycloneDX 1.6)
+- **Script**: `scripts/sign-sbom.sh` — generates keys, signs canonical JSON, embeds signature
+- **Public key** distributed with SBOM (in `signature.publicKey`) and artifacts (`sbom/pki/sbom_public_key.pem`)
+
+For production PKI with root CA chain of trust, see `pki/README.md`. Manual verification: remove `signature` from JSON, canonicalize, then `openssl dgst -sha384 -verify pubkey.pem -signature sig.bin canonical.json`.
+
 ## COTS Tools Used
 
 | Tool           | Purpose                          |
 |----------------|----------------------------------|
 | Syft           | SBOM generation (CycloneDX)      |
 | CycloneDX-CLI  | SBOM structure validation        |
-| Hoppr          | NTIA Minimum Elements validation|
+| Hoppr          | NTIA Minimum Elements validation |
 | Grype          | SBOM vulnerability scanning     |
-| OpenSSL        | SBOM signing and verification   |
+| OpenSSL        | Key generation and signing       |
+
+## Using for Your Software
+
+This SBOM pipeline is **not tied to the example app**. To use it for your own software:
+
+1. Point the pipeline at your app path (update `APP_DIR` in CI or pass your path to Syft/merge-sbom)
+2. Create `app-metadata.json` for your application (name, version, supplier, etc.)
+3. Ensure your C/C++ project has ≥3 custom components and ≥2 dependency levels if that requirement applies
+
+The same pipeline, scripts, and PKI work for any software.
 
 ## Custom Metadata Format
 
-`example-app/app-metadata.json` defines the custom application component. It uses JSON for ease of maintenance in the source repository. Alternative formats (CSV, XML, lockfile) could be supported by adapting `merge-sbom.ps1`.
+`app-metadata.json` defines the custom application component. It uses JSON for ease of maintenance. Alternative formats (CSV, XML, lockfile) could be supported by adapting `merge-sbom.ps1`.
 
 ## License
 

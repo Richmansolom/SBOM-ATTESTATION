@@ -38,26 +38,16 @@ jobs:
           docker run --rm -v "$GITHUB_WORKSPACE:/work" -w /work mcr.microsoft.com/powershell:7.4-ubuntu-22.04 \
             pwsh -File merge-sbom.ps1 -InputSbom "$SBOM_DIR/sbom-build.json" -AppMetadata "$APP_DIR/app-metadata.json" -OutputSbom "$SBOM_DIR/sbom-build.enriched.json"
 
-      - name: Sign and validate SBOMs
+      - name: Sign SBOMs with embedded CycloneDX signature (PKI, RS384, CNSA 2.0)
         run: |
           set -e
-          SBOM_SOURCE="$SBOM_DIR/sbom-source.enriched.json"
-          SBOM_BUILD="$SBOM_DIR/sbom-build.enriched.json"
-          SIGN_DIR="$SBOM_DIR/signatures"
-          mkdir -p "$SIGN_DIR"
-          SIGN_KEY="$SIGN_DIR/sbom-signing-private.pem"
-          SIGN_PUB="$SIGN_DIR/sbom-signing-public.pem"
-
-          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$SIGN_KEY"
-          openssl pkey -in "$SIGN_KEY" -pubout -out "$SIGN_PUB"
-
-          for sbom in "$SBOM_SOURCE" "$SBOM_BUILD"; do
-            sbom_name="$(basename "$sbom")"
-            sbom_sig="$SIGN_DIR/$sbom_name.sig"
-            verify_report="$REPORT_DIR/$sbom_name.signature-check.txt"
-            openssl dgst -sha256 -sign "$SIGN_KEY" -out "$sbom_sig" "$sbom"
-            openssl dgst -sha256 -verify "$SIGN_PUB" -signature "$sbom_sig" "$sbom" && echo "Signature validation passed for $sbom_name" | tee "$verify_report" || { echo "Signature validation failed for $sbom_name" | tee "$verify_report"; exit 1; }
-          done
+          chmod +x scripts/sign-sbom.sh
+          PKI_DIR="$SBOM_DIR/pki"
+          bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/sbom-source.enriched.signed.json" "$PKI_DIR"
+          mv "$SBOM_DIR/sbom-source.enriched.signed.json" "$SBOM_DIR/sbom-source.enriched.json"
+          bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.signed.json" "$PKI_DIR"
+          mv "$SBOM_DIR/sbom-build.enriched.signed.json" "$SBOM_DIR/sbom-build.enriched.json"
+          echo "Signature embedded in SBOM - public key in $PKI_DIR/sbom_public_key.pem"
 
       - name: Validate SBOM (CycloneDX + NTIA)
         run: |

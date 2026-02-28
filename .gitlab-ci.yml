@@ -40,32 +40,16 @@ build_sbom_scan:
       -InputSbom "$SBOM_DIR/sbom-build.json"
       -AppMetadata "$APP_DIR/app-metadata.json"
       -OutputSbom "$SBOM_DIR/sbom-build.enriched.json"
-    - echo "==> Sign SBOMs and validate signatures"
+    - echo "==> Sign SBOMs with embedded CycloneDX signature (PKI, RS384, CNSA 2.0)"
     - |
       set -e
-      SBOM_SOURCE="$SBOM_DIR/sbom-source.enriched.json"
-      SBOM_BUILD="$SBOM_DIR/sbom-build.enriched.json"
-      SIGN_DIR="$SBOM_DIR/signatures"
-      SIGN_KEY="$SIGN_DIR/sbom-signing-private.pem"
-      SIGN_PUB="$SIGN_DIR/sbom-signing-public.pem"
-      mkdir -p "$SIGN_DIR"
-
-      openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$SIGN_KEY"
-      openssl pkey -in "$SIGN_KEY" -pubout -out "$SIGN_PUB"
-
-      for sbom in "$SBOM_SOURCE" "$SBOM_BUILD"; do
-        sbom_name="$(basename "$sbom")"
-        sbom_sig="$SIGN_DIR/$sbom_name.sig"
-        verify_report="$REPORT_DIR/$sbom_name.signature-check.txt"
-
-        openssl dgst -sha256 -sign "$SIGN_KEY" -out "$sbom_sig" "$sbom"
-        if openssl dgst -sha256 -verify "$SIGN_PUB" -signature "$sbom_sig" "$sbom" > "$verify_report" 2>&1; then
-          echo "Signature validation passed for $sbom_name" | tee -a "$verify_report"
-        else
-          echo "Signature validation failed for $sbom_name" | tee -a "$verify_report"
-          exit 1
-        fi
-      done
+      chmod +x scripts/sign-sbom.sh
+      PKI_DIR="$SBOM_DIR/pki"
+      bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/sbom-source.enriched.signed.json" "$PKI_DIR"
+      mv "$SBOM_DIR/sbom-source.enriched.signed.json" "$SBOM_DIR/sbom-source.enriched.json"
+      bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.signed.json" "$PKI_DIR"
+      mv "$SBOM_DIR/sbom-build.enriched.signed.json" "$SBOM_DIR/sbom-build.enriched.json"
+      echo "Signature embedded in SBOM - public key in $PKI_DIR/sbom_public_key.pem"
     - echo "==> Validate SBOM structure (CycloneDX-CLI) and NTIA Minimum Elements"
     - docker pull cyclonedx/cyclonedx-cli:latest
     - docker pull hoppr/hopctl:latest
