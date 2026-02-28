@@ -93,7 +93,7 @@ $ntiaExit = $LASTEXITCODE
 Write-Host "==> NTIA validation with Hoppr"
 & $containerCmd pull hoppr/hopctl:latest 2>&1 | Out-Host
 $hopprLog = Join-Path $reportPath "hoppr-ntia.log"
-& $containerCmd run --rm -v "${repoRoot}:/data" -w /data hoppr/hopctl validate sbom --sbom "$SbomDir/$enrichedLeaf" --profile ntia --log-file "/data/$ReportDir/hoppr-ntia.log" --verbose 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "hoppr-console.txt")
+& $containerCmd run --rm -v "${repoRoot}:/data" -w /data hoppr/hopctl validate sbom --sbom "$SbomDir/$enrichedLeaf" --profile ntia --log "/data/$ReportDir/hoppr-ntia.log" --output-file "/data/$ReportDir/hoppr-ntia-results.json" --basic-term 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "hoppr-console.txt")
 $hopprExit = $LASTEXITCODE
 
 Write-Host ""
