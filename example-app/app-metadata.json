@@ -9,7 +9,7 @@
   "build_system": "Makefile",
   "entry_point": "./build/sbom_demo_app",
   "source_file": "example-app/src/main.cpp",
-  "repository": "https://github.com/YOUR_ORG/sbom-attestation",
+  "repository": "https://github.com/Richmansolom/SBOM-ATTESTATION",
   "supplier": {
     "name": "Lockheed Martin Corporation",
     "url": ["https://www.lockheedmartin.com"]

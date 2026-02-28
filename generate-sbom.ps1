@@ -69,17 +69,17 @@ if ($Mode -eq "container") {
     & $containerCmd build -t $image . 2>&1 | Out-Host
   } finally { Pop-Location }
   Write-Host "==> Generate SBOM from image"
-  $rawContent = & $containerCmd run --rm -v "/var/run/docker.sock:/var/run/docker.sock" anchore/syft:latest $image -o cyclonedx-json 2>&1
+  $rawContent = & $containerCmd run --rm -v "/var/run/docker.sock:/var/run/docker.sock" anchore/syft:latest $image -o cyclonedx-json 2>$null
   if ($containerCmd -eq "podman") {
     $imageTar = Join-Path $sbomPath "image.tar"
     & $containerCmd save $image -o $imageTar 2>&1 | Out-Host
-    $rawContent = & $containerCmd run --rm -v "${sbomPath}:/data" anchore/syft:latest "oci-archive:/data/image.tar" -o cyclonedx-json 2>&1
+    $rawContent = & $containerCmd run --rm -v "${sbomPath}:/data" anchore/syft:latest "oci-archive:/data/image.tar" -o cyclonedx-json 2>$null
   }
   [System.IO.File]::WriteAllText($rawSbom, $rawContent, (New-Object System.Text.UTF8Encoding $false))
 } else {
   $resolvedSource = (Resolve-Path (Join-Path $repoRoot $SourcePath)).Path
   Write-Host "==> Generate SBOM from directory: $resolvedSource"
-  $rawContent = & $containerCmd run --rm -v "${resolvedSource}:/src" anchore/syft:latest dir:/src -o cyclonedx-json 2>&1
+  $rawContent = & $containerCmd run --rm -v "${resolvedSource}:/src" anchore/syft:latest dir:/src -o cyclonedx-json 2>$null
   [System.IO.File]::WriteAllText($rawSbom, $rawContent, (New-Object System.Text.UTF8Encoding $false))
 }
 
