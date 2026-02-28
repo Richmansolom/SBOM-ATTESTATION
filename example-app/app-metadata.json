@@ -2,7 +2,7 @@
   "name": "Software Bill of Materials (SBOM) Attestation",
   "component_type": "application",
   "version": "1.0.0",
-  "description": "SBOM attestation example - Lockheed Martin Corporation. C++ app with multi-level custom components.",
+  "description": "Batch scheduling algorithm (FIFO, SJF, SRT) - Lockheed Martin Corporation. C++ app with scheduler components: process, algorithms, display.",
   "language": "C++",
   "author": "Lockheed Martin Corporation",
   "license": "MIT",
