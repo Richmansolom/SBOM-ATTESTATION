@@ -10,7 +10,8 @@ This project provides an SBOM generator and attestation pipeline for custom C/C+
 ## Features
 
 - **Custom app + COTS components:** Captures both your application and its dependencies in a single SBOM
-- **Native and container support:** Scan source directories or Docker/Podman images
+- **Native and container support:** `generate-sbom.ps1 -Mode native` (directory) or `-Mode container` (Docker/Podman image)
+- **NTIA Minimum Elements:** Validated via `check-ntia.ps1` and **Hoppr** (`--profile ntia`)
 - **NTIA validation:** SBOMs validated against NTIA Minimum Elements (local script + Hoppr)
 - **SBOM signing & verification:** OpenSSL RSA signatures for attestation
 - **Vulnerability scanning:** Grype for SBOM-based vulnerability detection
@@ -74,18 +75,31 @@ make
 ./build/sbom_demo_app
 ```
 
-### Generate SBOM locally (Docker)
+### Generate SBOM locally (PowerShell)
 
-```bash
-# From project root
-docker run --rm -v "${PWD}:/src" anchore/syft:latest dir:/src/example-app -o cyclonedx-json > sbom/sbom-source.json
+Requires: Docker Desktop (or Podman), PowerShell 7+
 
-# Enrich with metadata
-pwsh ./merge-sbom.ps1 -InputSbom sbom/sbom-source.json -AppMetadata example-app/app-metadata.json -OutputSbom sbom/sbom-source.enriched.json
+**Native mode** (scan `example-app/` directory):
 
-# NTIA check
-pwsh ./check-ntia.ps1 -SbomFile sbom/sbom-source.enriched.json
+```powershell
+cd C:\path\to\sbom-attestation
+pwsh -ExecutionPolicy Bypass -File ./generate-sbom.ps1 -Mode native
 ```
+
+**Container mode** (build Docker image, then scan):
+
+```powershell
+cd C:\path\to\sbom-attestation
+pwsh -ExecutionPolicy Bypass -File ./generate-sbom.ps1 -Mode container
+```
+
+**With Podman instead of Docker:**
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File ./generate-sbom.ps1 -Mode native -ContainerRuntime podman
+```
+
+Outputs: `sbom/`, `reports/` (includes NTIA summary, Hoppr log).
 
 ### Container mode
 
