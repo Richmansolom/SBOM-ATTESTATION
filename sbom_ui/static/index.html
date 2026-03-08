@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -818,15 +818,21 @@ tr:hover td { background: var(--bg2); }
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 /* ═══ HELPERS ═══ */
-const GL = (tok, proj, path, opts={}) =>
-  fetch(`https://gitlab.com/api/v4/projects/${encodeURIComponent(proj)}${path}`, {
+const GL = (tok, proj, path, opts={}) => {
+  const url = new URL(`/api${path}`, window.location.origin);
+  if (proj) url.searchParams.set('project', proj);
+  return fetch(url.toString(), {
     ...opts,
     headers: {
       'Content-Type': 'application/json',
-      ...(tok ? { 'PRIVATE-TOKEN': tok } : {}),
       ...opts.headers
     }
-  }).then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.message || `${r.status}`); return d; });
+  }).then(async r => {
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.message || `${r.status}`);
+    return d;
+  });
+};
 
 const dur = s => { if (!s) return '—'; const m = Math.floor(s/60); return m ? `${m}m${Math.round(s%60)}s` : `${Math.round(s)}s`; };
 const ago = d => { if (!d) return '—'; const s = Math.round((Date.now()-new Date(d))/1000); if (s<60) return `${s}s ago`; if (s<3600) return `${Math.floor(s/60)}m ago`; if (s<86400) return `${Math.floor(s/3600)}h ago`; return `${Math.floor(s/86400)}d ago`; };
@@ -892,10 +898,10 @@ function ConnectModal({ onConnect }) {
   const [err, setErr] = useState('');
 
   async function connect() {
-    if (!pid || !tok) { setErr('Project path is required'); return; }
+    if (!pid) { setErr('Project path is required'); return; }
     setLoading(true); setErr('');
     try {
-      await GL('', pid, '');
+      await GL('', pid, '/pipelines?per_page=1');
       sessionStorage.setItem('sbom_cfg', JSON.stringify({ token: '', projectId: pid }));
       onConnect({ token: '', projectId: pid });
       toast('Connected successfully', 'ok');
@@ -908,10 +914,10 @@ function ConnectModal({ onConnect }) {
       <div className="modal">
         <div className="modal-icon">🛡️</div>
         <div className="modal-title">Authenticate</div>
-        <div className="modal-sub">Enter your GitLab project details to<br/>connect to the SBOM pipeline.</div>
+        <div className="modal-sub">Enter your GitHub repository path to<br/>connect to the SBOM pipeline.</div>
         <div className="modal-fields">
           <div className="field">
-            <span className="field-label">GitLab Project Path</span>
+            <span className="field-label">GitHub Repository</span>
             <input value={pid} onChange={e=>setPid(e.target.value)} placeholder="namespace/project-name"
               onKeyDown={e=>e.key==='Enter'&&connect()} autoFocus/>
           </div>
@@ -1212,8 +1218,8 @@ function PipelineDetail({ config, pipeline }) {
   async function viewLog(job) {
     setLogJob(job); setLog(''); setLogLoading(true);
     try {
-      const r = await fetch(`https://gitlab.com/api/v4/projects/${encodeURIComponent(config.projectId)}/jobs/${job.id}/trace`,
-        { headers: {'PRIVATE-TOKEN': config.token} });
+      const r = await fetch(`/api/jobs/${job.id}/trace?run_id=${encodeURIComponent(pipeline.id)}&project=${encodeURIComponent(config.projectId)}`);
+
       const t = await r.text();
       setLog(t.replace(/\x1B\[[0-9;]*[mGKH]/g,'').slice(-5000) || '(empty)');
     } catch(e) { setLog('Error: '+e.message); }

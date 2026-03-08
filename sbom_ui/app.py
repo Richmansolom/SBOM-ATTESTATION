@@ -4,6 +4,7 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -28,6 +29,17 @@ def run_cmd(cmd):
         shell=False,
     )
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+
+def iso_duration_seconds(started_at, completed_at):
+    try:
+        if not started_at or not completed_at:
+            return None
+        s = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        e = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+        return max(int((e - s).total_seconds()), 0)
+    except Exception:
+        return None
 
 
 def parse_json(path):
@@ -117,6 +129,18 @@ def parse_repo_slug():
     return "Richmansolom/SBOM-ATTESTATION"
 
 
+def get_requested_repo():
+    # Allow UI override, but default to current git remote.
+    repo = (request.args.get("project") or "").strip()
+    if repo and "/" in repo:
+        return repo
+    payload = request.get_json(silent=True) or {}
+    repo = str(payload.get("project") or "").strip()
+    if repo and "/" in repo:
+        return repo
+    return parse_repo_slug()
+
+
 def get_gh_json(path):
     if shutil.which("gh") is None:
         return None
@@ -127,6 +151,16 @@ def get_gh_json(path):
         return json.loads(out)
     except Exception:
         return None
+
+
+def gh_api(path, method="GET", data=None):
+    if shutil.which("gh") is None:
+        return 1, "gh CLI not found. Install GitHub CLI and run: gh auth login"
+    cmd = ["gh", "api", "-X", method, path]
+    if data:
+        for k, v in data.items():
+            cmd.extend(["-f", f"{k}={v}"])
+    return run_cmd(cmd)
 
 
 def get_stage_status_from_steps(steps):
@@ -146,6 +180,35 @@ def get_stage_status_from_steps(steps):
         elif "generate vulnerability analysis report" in name or "upload artifacts" in name:
             stage_state["Report"] = status
     return [{"name": s, "status": stage_state[s]} for s in STAGE_NAMES]
+
+
+def map_run_status(run):
+    status = (run.get("status") or "").lower()
+    conclusion = (run.get("conclusion") or "").lower()
+    if status == "completed":
+        if conclusion in ("success", "failure", "cancelled"):
+            return "success" if conclusion == "success" else ("failed" if conclusion == "failure" else "canceled")
+        return "pending"
+    if status == "in_progress":
+        return "running"
+    if status in ("queued", "requested", "waiting", "pending"):
+        return "pending"
+    return status or "pending"
+
+
+def map_job_stage(name):
+    n = (name or "").lower()
+    if "build" in n:
+        return "build"
+    if "generate" in n and "sbom" in n:
+        return "sbom_generate"
+    if "sign" in n and "sbom" in n:
+        return "sbom_sign"
+    if "scan" in n or "grype" in n:
+        return "sbom_scan"
+    if "report" in n or "artifact" in n:
+        return "report"
+    return "report"
 
 
 def get_github_snapshot():
@@ -321,6 +384,108 @@ def get_report():
     if not path.exists():
         return jsonify({"status": "error", "message": "No vulnerability report found"}), 404
     return send_from_directory(str(path.parent), path.name, mimetype="application/json")
+
+
+@app.route("/api/pipelines")
+def pipelines():
+    repo = get_requested_repo()
+    per_page = request.args.get("per_page", "15")
+    code, out = gh_api(f"repos/{repo}/actions/runs?per_page={per_page}")
+    if code != 0:
+        return jsonify({"message": out.strip() or "Failed to fetch workflows"}), 500
+    try:
+        runs = json.loads(out).get("workflow_runs", [])
+    except Exception:
+        return jsonify({"message": "Failed to parse GitHub response"}), 500
+
+    payload = []
+    for run in runs:
+        qs = parse_qs(urlparse(run.get("jobs_url") or "").query)
+        payload.append(
+            {
+                "id": run.get("id"),
+                "status": map_run_status(run),
+                "duration": iso_duration_seconds(run.get("run_started_at"), run.get("updated_at")),
+                "ref": run.get("head_branch"),
+                "sha": (run.get("head_sha") or "")[:7],
+                "created_at": run.get("created_at"),
+                "run_number": run.get("run_number"),
+                "workflow_id": (qs.get("workflow_id") or [None])[0],
+                "html_url": run.get("html_url"),
+            }
+        )
+    return jsonify(payload)
+
+
+@app.route("/api/pipelines/<int:run_id>/jobs")
+def pipeline_jobs(run_id):
+    repo = get_requested_repo()
+    code, out = gh_api(f"repos/{repo}/actions/runs/{run_id}/jobs")
+    if code != 0:
+        return jsonify({"message": out.strip() or "Failed to fetch jobs"}), 500
+    try:
+        jobs = json.loads(out).get("jobs", [])
+    except Exception:
+        return jsonify({"message": "Failed to parse jobs response"}), 500
+
+    mapped = []
+    for j in jobs:
+        mapped.append(
+            {
+                "id": j.get("id"),
+                "name": j.get("name"),
+                "status": map_run_status(j),
+                "stage": map_job_stage(j.get("name")),
+                "duration": iso_duration_seconds(j.get("started_at"), j.get("completed_at")),
+            }
+        )
+    return jsonify(mapped)
+
+
+@app.route("/api/pipeline", methods=["POST"])
+def trigger_pipeline():
+    repo = get_requested_repo()
+    body = request.get_json(silent=True) or {}
+    ref = body.get("ref") or "main"
+    workflow = body.get("workflow") or "sbom-pipeline.yml"
+
+    if shutil.which("gh") is None:
+        return jsonify({"message": "gh CLI not found. Install GitHub CLI first."}), 500
+
+    code, out = run_cmd(["gh", "workflow", "run", workflow, "--repo", repo, "--ref", str(ref)])
+    if code != 0:
+        return jsonify({"message": out.strip() or "Failed to trigger workflow"}), 500
+
+    # Return newest run as immediate feedback for the UI.
+    c2, o2 = gh_api(f"repos/{repo}/actions/runs?per_page=1")
+    if c2 != 0:
+        return jsonify({"id": None, "status": "queued", "message": out.strip() or "Workflow triggered"})
+    try:
+        latest = (json.loads(o2).get("workflow_runs") or [None])[0]
+    except Exception:
+        latest = None
+    return jsonify(
+        {
+            "id": latest.get("id") if latest else None,
+            "status": map_run_status(latest) if latest else "queued",
+            "html_url": latest.get("html_url") if latest else None,
+            "message": "Workflow trigger submitted",
+        }
+    )
+
+
+@app.route("/api/jobs/<int:job_id>/trace")
+def job_trace(job_id):
+    repo = get_requested_repo()
+    run_id = request.args.get("run_id")
+    if not run_id:
+        return "Missing run_id query parameter", 400
+    code, out = run_cmd(["gh", "run", "view", str(run_id), "--repo", repo, "--log"])
+    if code != 0:
+        if "still in progress" in (out or "").lower():
+            return out, 200, {"Content-Type": "text/plain; charset=utf-8"}
+        return out or "Unable to load workflow logs.", 500
+    return out, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 if __name__ == "__main__":
