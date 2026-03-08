@@ -92,6 +92,8 @@ build_sbom_scan:
       set -e
       chmod +x scripts/sign-sbom.sh
       PKI_DIR="$SBOM_DIR/pki"
+      cp "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/sbom-source.enriched.unsigned.json"
+      cp "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.unsigned.json"
       bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/sbom-source.enriched.signed.json" "$PKI_DIR"
       mv "$SBOM_DIR/sbom-source.enriched.signed.json" "$SBOM_DIR/sbom-source.enriched.json"
       bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.signed.json" "$PKI_DIR"
@@ -99,8 +101,8 @@ build_sbom_scan:
       echo "Signature embedded in SBOM - public key in $PKI_DIR/sbom_public_key.pem"
     - echo "==> SBOM vulnerability scan using Grype"
     - docker pull anchore/grype:latest
-    - docker run --rm -v "$CI_PROJECT_DIR:/data" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.json -o json > "$REPORT_DIR/grype-report.json"
-    - docker run --rm -v "$CI_PROJECT_DIR:/data" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.json -o table > "$REPORT_DIR/grype-report.txt"
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.json -o json > "$REPORT_DIR/grype-report.json"
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.json -o table > "$REPORT_DIR/grype-report.txt"
     - echo "==> Generate vulnerability analysis report"
     - >
       jq -r '
