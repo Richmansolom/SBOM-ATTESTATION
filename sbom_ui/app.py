@@ -480,7 +480,7 @@ def job_trace(job_id):
     run_id = request.args.get("run_id")
     if not run_id:
         return "Missing run_id query parameter", 400
-    code, out = run_cmd(["gh", "run", "view", str(run_id), "--repo", repo, "--log"])
+    code, out = run_cmd(["gh", "run", "view", str(run_id), "--repo", repo, "--job", str(job_id), "--log"])
     if code != 0:
         if "still in progress" in (out or "").lower():
             return out, 200, {"Content-Type": "text/plain; charset=utf-8"}

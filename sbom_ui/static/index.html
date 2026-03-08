@@ -551,8 +551,12 @@ a { color: inherit; text-decoration: none; }
 .stage-box.ok { border-color: rgba(34,211,162,.3); color: var(--green); background: var(--green-dim); }
 .stage-box.fail { border-color: rgba(244,63,94,.3); color: var(--red); background: var(--red-dim); }
 .stage-box.run { border-color: rgba(45,212,191,.3); color: var(--teal); background: var(--teal-dim); }
+.stage-box.clickable { cursor: pointer; }
+.stage-box.clickable:hover { border-color: rgba(250,176,5,.45); box-shadow: 0 0 0 1px rgba(250,176,5,.22) inset; }
 .stage-dur { font-size: 9px; font-family: var(--mono); color: var(--text3); }
 .stage-arrow { color: var(--text3); font-size: 14px; flex-shrink: 0; margin-top: -12px; }
+.stage-links { display:flex; gap:4px; margin-top:2px; }
+.stage-links .btn { padding: 2px 6px; font-size: 9px; line-height: 1.2; }
 
 /* ═══════════════ JOB TABLE ═══════════════ */
 .tbl-wrap { overflow-x: auto; }
@@ -839,6 +843,12 @@ const ago = d => { if (!d) return '—'; const s = Math.round((Date.now()-new Da
 const sha7 = s => s ? s.slice(0,7) : '';
 const SEV_COL = { Critical:'#f43f5e', High:'#fb923c', Medium:'#fbbf24', Low:'#22d3a2', Negligible:'#4a5a72', Unknown:'#4a5a72' };
 const SEV_ORD = ['Critical','High','Medium','Low','Negligible','Unknown'];
+const cleanAnsi = t => (t||'').replace(/\x1B\[[0-9;]*[mGKH]/g,'');
+
+async function fetchJobTrace(projectId, runId, jobId) {
+  const r = await fetch(`/api/jobs/${jobId}/trace?run_id=${encodeURIComponent(runId)}&project=${encodeURIComponent(projectId)}`);
+  return cleanAnsi(await r.text()).slice(-5000) || '(empty)';
+}
 
 /* ═══ TOAST ═══ */
 let _addToast = null;
@@ -933,7 +943,7 @@ function ConnectModal({ onConnect }) {
 }
 
 /* ═══ PIPELINE STAGE FLOW ═══ */
-function StageFlow({ jobs = [] }) {
+function StageFlow({ jobs = [], onViewLog = null, artifactsUrl = '' }) {
   const stages = [
     { key:'build', label:'Build', icon:'🔨' },
     { key:'sbom_generate', label:'Generate', icon:'📄' },
@@ -953,8 +963,18 @@ function StageFlow({ jobs = [] }) {
           <React.Fragment key={s.key}>
             {i > 0 && <div className="stage-arrow">→</div>}
             <div className="stage-node">
-              <div className={`stage-box ${cls}`}>{s.icon} {s.label}</div>
+              <div
+                className={`stage-box ${cls} ${j && onViewLog ? 'clickable' : ''}`}
+                onClick={() => j && onViewLog && onViewLog(j)}
+                title={j ? `Open ${s.label} log` : `${s.label} not started`}
+              >{s.icon} {s.label}</div>
               <div className="stage-dur">{dur(j?.duration)}</div>
+              {j && (
+                <div className="stage-links">
+                  <button className="btn btn-xs btn-outline-gold" onClick={() => onViewLog && onViewLog(j)}>Log</button>
+                  <button className="btn btn-xs btn-outline-teal" onClick={() => artifactsUrl && window.open(artifactsUrl, '_blank')}>Artifacts</button>
+                </div>
+              )}
             </div>
           </React.Fragment>
         );
@@ -968,6 +988,9 @@ function Dashboard({ config, onNav }) {
   const [pipelines, setPipelines] = useState([]);
   const [loading, setLoading] = useState(true);
   const [latestJobs, setLatestJobs] = useState([]);
+  const [latestLogJob, setLatestLogJob] = useState(null);
+  const [latestLog, setLatestLog] = useState('');
+  const [latestLogLoading, setLatestLogLoading] = useState(false);
 
   useEffect(() => {
     GL(config.token, config.projectId, '/pipelines?per_page=20')
@@ -989,6 +1012,24 @@ function Dashboard({ config, onNav }) {
     const avg = durs.length ? Math.round(durs.reduce((a,b)=>a+b.duration,0)/durs.length) : 0;
     return { ok, fail, run, total:pipelines.length, rate: pipelines.length ? Math.round(ok/pipelines.length*100) : 0, avg };
   }, [pipelines]);
+
+  async function viewLatestLog(job) {
+    if (!latest) return;
+    setLatestLogJob(job); setLatestLog(''); setLatestLogLoading(true);
+    try {
+      const t = await fetchJobTrace(config.projectId, latest.id, job.id);
+      setLatestLog(t);
+    } catch(e) { setLatestLog('Error: '+e.message); }
+    setLatestLogLoading(false);
+  }
+
+  useEffect(() => {
+    if (!latestLogJob || !latest) return;
+    const current = latestJobs.find(j => j.id === latestLogJob.id) || latestLogJob;
+    if (String(current.status || '').toLowerCase() !== 'running') return;
+    const timer = setInterval(() => { viewLatestLog(current); }, 3000);
+    return () => clearInterval(timer);
+  }, [latestLogJob, latestJobs, latest?.id]);
 
   const STATS = [
     { v: stats.total, l:'Pipelines', icon:'📊', col:'var(--gold)' },
@@ -1035,7 +1076,19 @@ function Dashboard({ config, onNav }) {
                   <span className="text-mono text-muted" style={{fontSize:11}}>{sha7(latest.sha)}</span>
                   <span className="text-mono text-muted" style={{fontSize:11,marginLeft:'auto'}}>{ago(latest.created_at)}</span>
                 </div>
-                <StageFlow jobs={latestJobs}/>
+                <StageFlow jobs={latestJobs} onViewLog={viewLatestLog} artifactsUrl={latest?.html_url || ''}/>
+                {latestLogJob && (
+                  <div style={{marginTop:12}}>
+                    <div className="flex items-center justify-between" style={{marginBottom:8,flexWrap:'wrap',gap:8}}>
+                      <div className="flex items-center gap-6">
+                        <span style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--gold)',letterSpacing:'1px'}}>LOG: {latestLogJob.name}</span>
+                        <Bdg s={latestLogJob.status}/>
+                      </div>
+                      <button className="btn btn-xs" onClick={()=>window.open(latest?.html_url,'_blank')} disabled={!latest?.html_url}>Artifacts</button>
+                    </div>
+                    <div className="terminal"><div className="terminal-body">{latestLogLoading ? <Spin/> : latestLog.split('\n').map((line,i)=><div key={i}>{line || '\u00a0'}</div>)}</div></div>
+                  </div>
+                )}
               </>
             ) : loading ? (
               <div className="empty"><Spin/></div>
@@ -1211,21 +1264,38 @@ function PipelineDetail({ config, pipeline }) {
   const [logLoading, setLogLoading] = useState(false);
   const logRef = useRef(null);
 
+  const refreshJobs = useCallback(() => {
+    return GL(config.token, config.projectId, `/pipelines/${pipeline.id}/jobs`).then(setJobs).catch(()=>{});
+  }, [config.token, config.projectId, pipeline.id]);
+
   useEffect(() => {
-    GL(config.token, config.projectId, `/pipelines/${pipeline.id}/jobs`).then(setJobs).catch(()=>{});
-  }, [pipeline.id]);
+    refreshJobs();
+  }, [refreshJobs]);
+
+  useEffect(() => {
+    const hasRunning = jobs.some(j => String(j.status || '').toLowerCase() === 'running');
+    if (!hasRunning && String(pipeline.status || '').toLowerCase() !== 'running') return;
+    const timer = setInterval(() => { refreshJobs(); }, 3000);
+    return () => clearInterval(timer);
+  }, [jobs, pipeline.status, refreshJobs]);
 
   async function viewLog(job) {
     setLogJob(job); setLog(''); setLogLoading(true);
     try {
-      const r = await fetch(`/api/jobs/${job.id}/trace?run_id=${encodeURIComponent(pipeline.id)}&project=${encodeURIComponent(config.projectId)}`);
-
-      const t = await r.text();
-      setLog(t.replace(/\x1B\[[0-9;]*[mGKH]/g,'').slice(-5000) || '(empty)');
+      const t = await fetchJobTrace(config.projectId, pipeline.id, job.id);
+      setLog(t);
     } catch(e) { setLog('Error: '+e.message); }
     setLogLoading(false);
     setTimeout(() => { if(logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, 80);
   }
+
+  useEffect(() => {
+    if (!logJob) return;
+    const current = jobs.find(j => j.id === logJob.id) || logJob;
+    if (String(current.status || '').toLowerCase() !== 'running') return;
+    const timer = setInterval(() => { viewLog(current); }, 3000);
+    return () => clearInterval(timer);
+  }, [logJob, jobs]);
 
   function renderLog(raw) {
     return raw.split('\n').map((line, i) => {
@@ -1249,7 +1319,7 @@ function PipelineDetail({ config, pipeline }) {
         <div style={{marginBottom:12,fontSize:11,fontFamily:'var(--mono)',color:'var(--text2)'}}>
           {pipeline.ref} · {sha7(pipeline.sha)} · {ago(pipeline.created_at)} · {dur(pipeline.duration)}
         </div>
-        <StageFlow jobs={jobs}/>
+        <StageFlow jobs={jobs} onViewLog={viewLog} artifactsUrl={pipeline?.html_url || ''}/>
 
         {jobs.length > 0 && (
           <div className="tbl-wrap" style={{marginTop:14}}>
@@ -1265,7 +1335,7 @@ function PipelineDetail({ config, pipeline }) {
                       <div className="flex gap-6">
                         <button className="btn btn-xs btn-outline-gold" onClick={()=>viewLog(j)}>📋 Log</button>
                         <button className="btn btn-xs btn-outline-teal"
-                          onClick={()=>window.open(`https://gitlab.com/${encodeURIComponent(config.projectId)}/-/jobs/${j.id}/artifacts/download`,'_blank')}>
+                          onClick={()=>window.open(pipeline?.html_url,'_blank')}>
                           ⬇
                         </button>
                       </div>
