@@ -103,6 +103,24 @@ pwsh -ExecutionPolicy Bypass -File ./generate-sbom.ps1 -Mode native -ContainerRu
 
 Outputs: `sbom/`, `reports/` (includes NTIA summary, Hoppr log).
 
+### SBOM Generator UI (Flask)
+
+Run the backend-driven UI that supports `generate -> sign -> scan` actions:
+
+```powershell
+cd C:\path\to\sbom-attestation
+python -m pip install -r .\sbom_ui\requirements.txt
+python .\sbom_ui\app.py
+```
+
+Then open:
+
+- `http://127.0.0.1:5000`
+
+Notes:
+- This UI targets the example C++ application in `example-app/`.
+- It uses Dockerized tools under the hood for signing/scanning endpoints.
+
 ### Container mode
 
 ```bash
