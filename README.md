@@ -5,7 +5,7 @@
 
 ## Overview
 
-This project provides an SBOM generator and attestation pipeline for custom C/C++ applications. It combines existing COTS SBOM tools (Syft, CycloneDX-CLI, Hoppr, Grype) with custom metadata and signing to produce trusted SBOMs that meet NTIA Minimum Elements.
+This project provides an SBOM generator and attestation pipeline for custom C/C++ applications. It combines existing COTS SBOM tools (Syft, Trivy, Distro2SBOM, CycloneDX-CLI, Hoppr, Grype) with custom metadata and signing to produce trusted SBOMs that meet NTIA Minimum Elements.
 
 ## Features
 
@@ -19,7 +19,9 @@ This project provides an SBOM generator and attestation pipeline for custom C/C+
 
 ## Example C++ Application
 
-The `example-app/` directory contains a minimal C++ application used to demonstrate the pipeline. **This SBOM infrastructure is for any software** — replace `example-app/` with your own project and update `app-metadata.json`. The example satisfies pipeline requirements: ≥3 custom components, ≥2 dependency levels.
+The `example-app/` directory contains a minimal C++ application used to demonstrate the pipeline. This repository intentionally uses the example app as the target implementation (not University-Management-System), while keeping the same SBOM attestation architecture and controls.
+
+**This SBOM infrastructure is for any software** — replace `example-app/` with your own project and update `app-metadata.json`. The example satisfies pipeline requirements: >=3 custom components, >=2 dependency levels.
 
 ## Project Structure
 
@@ -124,7 +126,9 @@ For production PKI with root CA chain of trust, see `pki/README.md`. Manual veri
 
 | Tool           | Purpose                          |
 |----------------|----------------------------------|
-| Syft           | SBOM generation (CycloneDX)      |
+| Syft           | Component/package SBOM generation (CycloneDX) |
+| Trivy          | Filesystem SBOM generation (CycloneDX) |
+| Distro2SBOM    | Distro/package manager SBOM generation |
 | CycloneDX-CLI  | SBOM structure validation        |
 | Hoppr          | NTIA Minimum Elements validation |
 | Grype          | SBOM vulnerability scanning     |

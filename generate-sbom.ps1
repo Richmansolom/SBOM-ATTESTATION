@@ -1,10 +1,11 @@
 <#
 .SYNOPSIS
-  Generate SBOM for native or containerized applications. Validates against NTIA Minimum Elements (check-ntia.ps1 + Hoppr).
+  Generate holistic SBOMs for native or containerized C/C++ applications.
 
 .DESCRIPTION
-  Supports both native OS (directory scan) and containerized (Docker/Podman image) applications.
-  NTIA validation via check-ntia.ps1 and Hoppr.
+  Uses COTS tools (Syft, Trivy, Distro2SBOM, CycloneDX-CLI, Hoppr) plus custom metadata enrichment
+  to produce a single SBOM containing both third-party/COTS and custom application components.
+  Supports native OS (directory scan) and containerized (Docker/Podman image) workflows.
 
 .EXAMPLE
   pwsh ./generate-sbom.ps1 -Mode native
@@ -51,14 +52,23 @@ if (-not (Test-Path $appMeta)) { throw "Missing app-metadata.json at $appMeta" }
 if (-not (Test-Path $mergeScript)) { throw "Missing merge-sbom.ps1" }
 
 # SBOM file names
-$rawSbom = Join-Path $sbomPath $(if ($Mode -eq "container") { "sbom-image.json" } else { "sbom-source.json" })
+$syftSbom = Join-Path $sbomPath $(if ($Mode -eq "container") { "sbom-image-syft.json" } else { "sbom-source-syft.json" })
+$trivySbom = Join-Path $sbomPath $(if ($Mode -eq "container") { "sbom-image-trivy.json" } else { "sbom-source-trivy.json" })
+$distroSbom = Join-Path $sbomPath "sbom-distro2sbom.json"
+$rawSbom = Join-Path $sbomPath $(if ($Mode -eq "container") { "sbom-image.cots-merged.json" } else { "sbom-source.cots-merged.json" })
 $enrichedSbom = Join-Path $sbomPath $(if ($Mode -eq "container") { "sbom-image.enriched.json" } else { "sbom-source.enriched.json" })
 $rawLeaf = Split-Path $rawSbom -Leaf
 $enrichedLeaf = Split-Path $enrichedSbom -Leaf
+$syftLeaf = Split-Path $syftSbom -Leaf
+$trivyLeaf = Split-Path $trivySbom -Leaf
+$distroLeaf = Split-Path $distroSbom -Leaf
 
 Write-Host "==> Mode: $Mode | Runtime: $containerCmd"
-Write-Host "==> Pull Syft"
+Write-Host "==> Pull COTS SBOM tool images (Syft, Trivy, CycloneDX, Hoppr)"
 & $containerCmd pull anchore/syft:latest 2>&1 | Out-Host
+& $containerCmd pull aquasec/trivy:latest 2>&1 | Out-Host
+& $containerCmd pull cyclonedx/cyclonedx-cli:latest 2>&1 | Out-Host
+& $containerCmd pull hoppr/hopctl:latest 2>&1 | Out-Host
 
 if ($Mode -eq "container") {
   $appDir = Join-Path $repoRoot $SourcePath
@@ -68,30 +78,45 @@ if ($Mode -eq "container") {
   try {
     & $containerCmd build -t $image . 2>&1 | Out-Host
   } finally { Pop-Location }
-  Write-Host "==> Generate SBOM from image"
+  Write-Host "==> Generate COTS SBOM from image (Syft)"
   $rawContent = & $containerCmd run --rm -v "/var/run/docker.sock:/var/run/docker.sock" anchore/syft:latest $image -o cyclonedx-json 2>$null
   if ($containerCmd -eq "podman") {
     $imageTar = Join-Path $sbomPath "image.tar"
     & $containerCmd save $image -o $imageTar 2>&1 | Out-Host
     $rawContent = & $containerCmd run --rm -v "${sbomPath}:/data" anchore/syft:latest "oci-archive:/data/image.tar" -o cyclonedx-json 2>$null
   }
-  [System.IO.File]::WriteAllText($rawSbom, $rawContent, (New-Object System.Text.UTF8Encoding $false))
+  [System.IO.File]::WriteAllText($syftSbom, $rawContent, (New-Object System.Text.UTF8Encoding $false))
+
+  Write-Host "==> Generate COTS SBOM from image (Trivy)"
+  & $containerCmd run --rm -v "${repoRoot}:/work" aquasec/trivy:latest image --format cyclonedx --output "/work/$SbomDir/$trivyLeaf" "$image" 2>&1 | Out-Host
 } else {
   $resolvedSource = (Resolve-Path (Join-Path $repoRoot $SourcePath)).Path
-  Write-Host "==> Generate SBOM from directory: $resolvedSource"
+  Write-Host "==> Generate COTS SBOM from directory (Syft): $resolvedSource"
   $rawContent = & $containerCmd run --rm -v "${resolvedSource}:/src" anchore/syft:latest dir:/src -o cyclonedx-json 2>$null
-  [System.IO.File]::WriteAllText($rawSbom, $rawContent, (New-Object System.Text.UTF8Encoding $false))
+  [System.IO.File]::WriteAllText($syftSbom, $rawContent, (New-Object System.Text.UTF8Encoding $false))
+
+  Write-Host "==> Generate COTS SBOM from directory (Trivy): $resolvedSource"
+  & $containerCmd run --rm -v "${resolvedSource}:/src" -v "${repoRoot}:/work" aquasec/trivy:latest filesystem --format cyclonedx --output "/work/$SbomDir/$trivyLeaf" /src 2>&1 | Out-Host
 }
+
+Write-Host "==> Generate distro package SBOM (Distro2SBOM)"
+& $containerCmd run --rm -v "${repoRoot}:/work" python:3.12-slim bash -lc "pip install --no-cache-dir distro2sbom >/dev/null && python -m distro2sbom.cli --distro auto --system --sbom cyclonedx --format json --product-type operating-system --product-name sbom-runtime --product-version 1.0 --output-file /work/$SbomDir/$distroLeaf" 2>&1 | Out-Host
+
+Write-Host "==> Merge Syft + Trivy + Distro2SBOM via CycloneDX-CLI"
+& $containerCmd run --rm -v "${repoRoot}:/data" cyclonedx/cyclonedx-cli:latest merge --input-files "/data/$SbomDir/$syftLeaf" "/data/$SbomDir/$trivyLeaf" "/data/$SbomDir/$distroLeaf" --output-file "/data/$SbomDir/$rawLeaf" --output-format json 2>&1 | Out-Host
 
 Write-Host "==> Enrich SBOM with app metadata"
 & pwsh -ExecutionPolicy Bypass -File $mergeScript -InputSbom $rawSbom -AppMetadata $appMeta -OutputSbom $enrichedSbom 2>&1 | Out-Host
+
+Write-Host "==> Validate CycloneDX schema (CycloneDX-CLI)"
+& $containerCmd run --rm -v "${repoRoot}:/data" cyclonedx/cyclonedx-cli:latest validate --input-file "/data/$SbomDir/$enrichedLeaf" 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "cyclonedx-validate.txt")
+$cyclonedxExit = $LASTEXITCODE
 
 Write-Host "==> NTIA Minimum Elements (check-ntia.ps1)"
 & pwsh -ExecutionPolicy Bypass -File $ntiaScript -SbomFile $enrichedSbom 2>&1 | Out-Host
 $ntiaExit = $LASTEXITCODE
 
 Write-Host "==> NTIA validation with Hoppr"
-& $containerCmd pull hoppr/hopctl:latest 2>&1 | Out-Host
 $hopprLog = Join-Path $reportPath "hoppr-ntia.log"
 & $containerCmd run --rm -v "${repoRoot}:/data" -w /data hoppr/hopctl validate sbom --sbom "$SbomDir/$enrichedLeaf" --profile ntia --log "/data/$ReportDir/hoppr-ntia.log" --output-file "/data/$ReportDir/hoppr-ntia-results.json" --basic-term 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "hoppr-console.txt")
 $hopprExit = $LASTEXITCODE
@@ -100,13 +125,17 @@ Write-Host ""
 Write-Host "========================="
 Write-Host "SBOM Requirements Summary"
 Write-Host "========================="
+Write-Host "CycloneDX schema:      $([int]$cyclonedxExit -eq 0 ? 'PASS' : 'FAIL')"
 Write-Host "NTIA (check-ntia.ps1): $([int]$ntiaExit -eq 0 ? 'PASS' : 'FAIL')"
 Write-Host "Hoppr NTIA:           $([int]$hopprExit -eq 0 ? 'PASS' : 'WARN')"
 Write-Host ""
 Write-Host "Outputs:"
-Write-Host "  Raw SBOM:     $rawSbom"
-Write-Host "  Enriched:     $enrichedSbom"
-Write-Host "  Hoppr log:    $hopprLog"
+Write-Host "  Syft SBOM:       $syftSbom"
+Write-Host "  Trivy SBOM:      $trivySbom"
+Write-Host "  Distro2SBOM:     $distroSbom"
+Write-Host "  Merged COTS:     $rawSbom"
+Write-Host "  Enriched SBOM:   $enrichedSbom"
+Write-Host "  Hoppr log:       $hopprLog"
 
 if ($RunSign -and (Test-Path (Join-Path $repoRoot "scripts/sign-sbom.sh"))) {
   Write-Host "==> Sign SBOM (requires bash - run in Git Bash or WSL)"

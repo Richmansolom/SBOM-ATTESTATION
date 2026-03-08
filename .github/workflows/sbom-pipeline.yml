@@ -26,10 +26,23 @@ jobs:
       - name: Build example C++ application
         run: make -C $APP_DIR 2>&1 | tee "$REPORT_DIR/$BUILD_LOG"
 
-      - name: Generate SBOMs with Syft
+      - name: Generate COTS SBOMs (Syft + Trivy + Distro2SBOM)
         run: |
-          docker run --rm -v "$GITHUB_WORKSPACE:/src" anchore/syft:latest dir:/src/$APP_DIR -o cyclonedx-json > "$SBOM_DIR/sbom-source.json"
-          docker run --rm -v "$GITHUB_WORKSPACE:/src" anchore/syft:latest dir:/src/$APP_DIR/build -o cyclonedx-json > "$SBOM_DIR/sbom-build.json"
+          docker pull anchore/syft:latest
+          docker pull aquasec/trivy:latest
+          docker pull cyclonedx/cyclonedx-cli:latest
+          docker pull python:3.12-slim
+
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" anchore/syft:latest dir:/src/$APP_DIR -o cyclonedx-json > "$SBOM_DIR/sbom-source-syft.json"
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" anchore/syft:latest dir:/src/$APP_DIR/build -o cyclonedx-json > "$SBOM_DIR/sbom-build-syft.json"
+
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" -v "$GITHUB_WORKSPACE:/work" aquasec/trivy:latest filesystem --format cyclonedx --output "/work/$SBOM_DIR/sbom-source-trivy.json" /src/$APP_DIR
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" -v "$GITHUB_WORKSPACE:/work" aquasec/trivy:latest filesystem --format cyclonedx --output "/work/$SBOM_DIR/sbom-build-trivy.json" /src/$APP_DIR/build
+
+          docker run --rm -v "$GITHUB_WORKSPACE:/work" python:3.12-slim bash -lc "pip install --no-cache-dir distro2sbom >/dev/null && python -m distro2sbom.cli --distro auto --system --sbom cyclonedx --format json --product-type operating-system --product-name sbom-runtime --product-version 1.0 --output-file /work/$SBOM_DIR/sbom-distro2sbom.json"
+
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" cyclonedx/cyclonedx-cli:latest merge --input-files "/data/$SBOM_DIR/sbom-source-syft.json" "/data/$SBOM_DIR/sbom-source-trivy.json" "/data/$SBOM_DIR/sbom-distro2sbom.json" --output-file "/data/$SBOM_DIR/sbom-source.json" --output-format json
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" cyclonedx/cyclonedx-cli:latest merge --input-files "/data/$SBOM_DIR/sbom-build-syft.json" "/data/$SBOM_DIR/sbom-build-trivy.json" "/data/$SBOM_DIR/sbom-distro2sbom.json" --output-file "/data/$SBOM_DIR/sbom-build.json" --output-format json
 
       - name: Enrich SBOMs with custom metadata
         run: |
