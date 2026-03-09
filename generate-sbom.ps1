@@ -150,7 +150,7 @@ if (-not (Test-Path $grypeCacheDir)) { New-Item -ItemType Directory -Path $grype
 & $containerCmd run --rm -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest db update 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "grype-db-update.txt")
 & $containerCmd run --rm -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest db status 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "grype-db-status.txt")
 & $containerCmd run --rm -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest db providers 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "grype-db-providers.txt")
-& $containerCmd run --rm -v "${repoRoot}:/data" -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest "sbom:/data/$SbomDir/$unsignedV16Leaf" -o json 2>&1 | Set-Content -Path (Join-Path $reportPath "grype-report.json") -Encoding UTF8
+& $containerCmd run --rm -v "${repoRoot}:/data" -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest "sbom:/data/$SbomDir/$unsignedV16Leaf" -o json 2> (Join-Path $reportPath "grype-report.stderr.log") | Set-Content -Path (Join-Path $reportPath "grype-report.json") -Encoding UTF8
 & $containerCmd run --rm -v "${repoRoot}:/data" -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest "sbom:/data/$SbomDir/$unsignedV16Leaf" -o table 2>&1 | Set-Content -Path (Join-Path $reportPath "grype-report.txt") -Encoding UTF8
 
 Write-Host "==> Secondary vulnerability scan with Trivy SBOM (NVD/GHSA/OSV sources)"

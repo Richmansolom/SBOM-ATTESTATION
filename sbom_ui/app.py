@@ -46,7 +46,18 @@ def parse_json(path):
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        raw = path.read_text(encoding="utf-8")
+        try:
+            return json.loads(raw)
+        except Exception:
+            # Some scanner CLIs may append warnings after JSON payload.
+            # Recover by decoding the first JSON document found in the text.
+            start_positions = [pos for pos in (raw.find("{"), raw.find("[")) if pos >= 0]
+            if not start_positions:
+                return None
+            start = min(start_positions)
+            obj, _ = json.JSONDecoder().raw_decode(raw[start:])
+            return obj
     except Exception:
         return None
 
@@ -442,7 +453,10 @@ def get_report():
     path = report_map.get(scanner, REPORT_DIR / "grype-report.json")
     if not path.exists():
         return jsonify({"status": "error", "message": f"No vulnerability report found for scanner '{scanner}'"}), 404
-    return send_from_directory(str(path.parent), path.name, mimetype="application/json")
+    payload = parse_json(path)
+    if payload is None:
+        return jsonify({"status": "error", "message": f"Report exists but is not valid JSON for scanner '{scanner}'"}), 500
+    return jsonify(payload)
 
 
 @app.route("/api/pipelines")
