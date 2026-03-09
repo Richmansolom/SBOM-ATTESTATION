@@ -14,7 +14,7 @@ This project provides an SBOM generator and attestation pipeline for custom C/C+
 - **NTIA Minimum Elements:** Validated via `check-ntia.ps1` and **Hoppr** (`--profile ntia`)
 - **NTIA validation:** SBOMs validated against NTIA Minimum Elements (local script + Hoppr)
 - **SBOM signing & verification:** OpenSSL RSA signatures for attestation
-- **Vulnerability scanning:** Grype for SBOM-based vulnerability detection
+- **Vulnerability scanning:** Grype + Trivy SBOM scanning with open CVE feeds (including NVD-based sources)
 - **Custom metadata:** JSON-based app metadata (easy to maintain in repo)
 
 ## Example C++ Application
@@ -52,14 +52,14 @@ The pipeline (`.gitlab-ci.yml`) performs the same steps when using GitLab:
 3. **Enrich SBOMs** with custom app metadata via `merge-sbom.ps1`
 4. **Sign and validate** SBOMs using OpenSSL RSA signatures
 5. **Validate** SBOM structure (CycloneDX-CLI) and NTIA elements (check-ntia.ps1, Hoppr)
-6. **Vulnerability scan** with Grype
+6. **Vulnerability scan** with Grype and Trivy (cross-check results against open CVE sources)
 7. **Produce** vulnerability analysis report
 
 **Artifacts** (available after each run):
 
 - `example-app/build/` — compiled binary and build output
 - `sbom/` — raw SBOMs, enriched SBOMs, signatures
-- `reports/` — build log, Grype report, vulnerability analysis, NTIA summary, signature checks
+- `reports/` — build log, Grype report, Trivy report, vulnerability analysis, NTIA summary, signature checks, vulnerability DB status evidence
 
 ## Local Usage
 
@@ -149,7 +149,7 @@ For production PKI with root CA chain of trust, see `pki/README.md`. Manual veri
 | Distro2SBOM    | Distro/package manager SBOM generation |
 | CycloneDX-CLI  | SBOM structure validation        |
 | Hoppr          | NTIA Minimum Elements validation |
-| Grype          | SBOM vulnerability scanning     |
+| Grype          | SBOM vulnerability scanning + DB/provider evidence |
 | OpenSSL        | Key generation and signing       |
 
 ## Using for Your Software

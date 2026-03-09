@@ -81,21 +81,37 @@ def add_no_cache_headers(response):
 def get_local_snapshot():
     sbom_path = get_latest_sbom_path()
     sbom = parse_json(sbom_path) if sbom_path else None
-    report = parse_json(REPORT_DIR / "grype-report.json")
+    grype_report = parse_json(REPORT_DIR / "grype-report.json")
+    trivy_report = parse_json(REPORT_DIR / "trivy-sbom-report.json")
 
-    severity = {"critical": 0, "high": 0, "medium": 0, "low": 0, "other": 0}
-    if report and isinstance(report.get("matches"), list):
-        for match in report["matches"]:
+    grype_severity = {"critical": 0, "high": 0, "medium": 0, "low": 0, "other": 0}
+    if grype_report and isinstance(grype_report.get("matches"), list):
+        for match in grype_report["matches"]:
             sev = ((match.get("vulnerability") or {}).get("severity") or "other").lower()
-            if sev in severity:
-                severity[sev] += 1
+            if sev in grype_severity:
+                grype_severity[sev] += 1
             else:
-                severity["other"] += 1
+                grype_severity["other"] += 1
+
+    trivy_severity = {"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0}
+    trivy_total = 0
+    for result in (trivy_report or {}).get("Results", []) or []:
+        vulns = result.get("Vulnerabilities") or []
+        trivy_total += len(vulns)
+        for v in vulns:
+            sev = (v.get("Severity") or "UNKNOWN").lower()
+            if sev in trivy_severity:
+                trivy_severity[sev] += 1
+            else:
+                trivy_severity["unknown"] += 1
 
     artifacts = [
         {"label": "SBOM JSON", "path": "sbom/sbom-source.enriched.json"},
         {"label": "Signed SBOM", "path": "sbom/sbom-source.enriched.json"},
-        {"label": "Vuln Report", "path": "reports/grype-report.json"},
+        {"label": "Grype Report", "path": "reports/grype-report.json"},
+        {"label": "Trivy SBOM Report", "path": "reports/trivy-sbom-report.json"},
+        {"label": "Grype DB Status", "path": "reports/grype-db-status.txt"},
+        {"label": "Grype DB Providers", "path": "reports/grype-db-providers.txt"},
         {"label": "Public Key", "path": "sbom/pki/sbom_public_key.pem"},
     ]
 
@@ -103,9 +119,12 @@ def get_local_snapshot():
         "sbom_file": str(sbom_path.relative_to(REPO_ROOT)) if sbom_path else None,
         "components": len(sbom.get("components", [])) if sbom else 0,
         "dependencies": len(sbom.get("dependencies", [])) if sbom else 0,
-        "vulnerabilities": len(report.get("matches", [])) if report else 0,
+        "vulnerabilities": len((grype_report or {}).get("matches", [])),
+        "vulnerabilities_grype": len((grype_report or {}).get("matches", [])),
+        "vulnerabilities_trivy": trivy_total,
         "timestamp": (sbom.get("metadata", {}) or {}).get("timestamp", "-") if sbom else "-",
-        "severity": severity,
+        "severity": grype_severity,
+        "severity_trivy": trivy_severity,
         "artifacts": artifacts,
         "has_docker": shutil.which("docker") is not None,
         "has_pwsh": shutil.which("pwsh") is not None,
@@ -349,8 +368,23 @@ def scan():
     if c1 != 0:
         return jsonify({"status": "error", "exit_code": c1, "log": o1})
 
+    grype_cache = REPO_ROOT / ".cache" / "grype-db"
+    grype_cache.mkdir(parents=True, exist_ok=True)
+
+    grype_db_update_cmd = ["docker", "run", "--rm", "-v", f"{grype_cache}:/root/.cache/grype/db", "anchore/grype:latest", "db", "update"]
+    _, gdb_update = run_cmd(grype_db_update_cmd)
+    (REPORT_DIR / "grype-db-update.txt").write_text(gdb_update, encoding="utf-8")
+
+    grype_db_status_cmd = ["docker", "run", "--rm", "-v", f"{grype_cache}:/root/.cache/grype/db", "anchore/grype:latest", "db", "status"]
+    _, gdb_status = run_cmd(grype_db_status_cmd)
+    (REPORT_DIR / "grype-db-status.txt").write_text(gdb_status, encoding="utf-8")
+
+    grype_db_providers_cmd = ["docker", "run", "--rm", "-v", f"{grype_cache}:/root/.cache/grype/db", "anchore/grype:latest", "db", "providers"]
+    _, gdb_providers = run_cmd(grype_db_providers_cmd)
+    (REPORT_DIR / "grype-db-providers.txt").write_text(gdb_providers, encoding="utf-8")
+
     grype_json_cmd = [
-        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "anchore/grype:latest",
+        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "-v", f"{grype_cache}:/root/.cache/grype/db", "anchore/grype:latest",
         "sbom:/data/sbom/sbom-source.enriched.v16.json", "-o", "json",
     ]
     c2, o2 = run_cmd(grype_json_cmd)
@@ -359,7 +393,7 @@ def scan():
     (REPORT_DIR / "grype-report.json").write_text(o2, encoding="utf-8")
 
     grype_table_cmd = [
-        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "anchore/grype:latest",
+        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "-v", f"{grype_cache}:/root/.cache/grype/db", "anchore/grype:latest",
         "sbom:/data/sbom/sbom-source.enriched.v16.json", "-o", "table",
     ]
     c3, o3 = run_cmd(grype_table_cmd)
@@ -367,7 +401,27 @@ def scan():
     if c3 != 0:
         return jsonify({"status": "error", "exit_code": c3, "log": o1 + "\n" + o2 + "\n" + o3})
 
-    return jsonify({"status": "ok", "exit_code": 0, "log": o1 + "\n" + o2 + "\n" + o3})
+    trivy_json_cmd = [
+        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "aquasec/trivy:latest", "sbom",
+        "--scanners", "vuln", "--vuln-severity-source", "nvd,ghsa,osv",
+        "--format", "json", "--output", "/data/reports/trivy-sbom-report.json",
+        "/data/sbom/sbom-source.enriched.v16.json",
+    ]
+    c4, o4 = run_cmd(trivy_json_cmd)
+    if c4 != 0:
+        return jsonify({"status": "error", "exit_code": c4, "log": o1 + "\n" + o2 + "\n" + o3 + "\n" + o4})
+
+    trivy_table_cmd = [
+        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "aquasec/trivy:latest", "sbom",
+        "--scanners", "vuln", "--vuln-severity-source", "nvd,ghsa,osv",
+        "--format", "table", "--output", "/data/reports/trivy-sbom-report.txt",
+        "/data/sbom/sbom-source.enriched.v16.json",
+    ]
+    c5, o5 = run_cmd(trivy_table_cmd)
+    if c5 != 0:
+        return jsonify({"status": "error", "exit_code": c5, "log": o1 + "\n" + o2 + "\n" + o3 + "\n" + o4 + "\n" + o5})
+
+    return jsonify({"status": "ok", "exit_code": 0, "log": "\n".join([o1, gdb_update, gdb_status, gdb_providers, o2, o3, o4, o5])})
 
 
 @app.route("/api/sbom")
@@ -380,9 +434,14 @@ def get_sbom():
 
 @app.route("/api/report")
 def get_report():
-    path = REPORT_DIR / "grype-report.json"
+    scanner = (request.args.get("scanner") or "grype").strip().lower()
+    report_map = {
+        "grype": REPORT_DIR / "grype-report.json",
+        "trivy": REPORT_DIR / "trivy-sbom-report.json",
+    }
+    path = report_map.get(scanner, REPORT_DIR / "grype-report.json")
     if not path.exists():
-        return jsonify({"status": "error", "message": "No vulnerability report found"}), 404
+        return jsonify({"status": "error", "message": f"No vulnerability report found for scanner '{scanner}'"}), 404
     return send_from_directory(str(path.parent), path.name, mimetype="application/json")
 
 

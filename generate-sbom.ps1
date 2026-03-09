@@ -69,6 +69,7 @@ Write-Host "==> Pull COTS SBOM tool images (Syft, Trivy, CycloneDX, Hoppr)"
 & $containerCmd pull aquasec/trivy:latest 2>&1 | Out-Host
 & $containerCmd pull cyclonedx/cyclonedx-cli:latest 2>&1 | Out-Host
 & $containerCmd pull hoppr/hopctl:latest 2>&1 | Out-Host
+& $containerCmd pull anchore/grype:latest 2>&1 | Out-Host
 
 if ($Mode -eq "container") {
   $appDir = Join-Path $repoRoot $SourcePath
@@ -136,6 +137,48 @@ Write-Host "  Distro2SBOM:     $distroSbom"
 Write-Host "  Merged COTS:     $rawSbom"
 Write-Host "  Enriched SBOM:   $enrichedSbom"
 Write-Host "  Hoppr log:       $hopprLog"
+
+$unsignedV16 = Join-Path $sbomPath "$(Split-Path $enrichedSbom -LeafBase).unsigned.v16.json"
+$unsignedV16Leaf = Split-Path $unsignedV16 -Leaf
+
+Write-Host "==> Convert enriched SBOM to CycloneDX v1.6 for scanner compatibility"
+& $containerCmd run --rm -v "${repoRoot}:/data" cyclonedx/cyclonedx-cli:latest convert --input-file "/data/$SbomDir/$enrichedLeaf" --output-file "/data/$SbomDir/$unsignedV16Leaf" --output-format json --output-version v1_6 2>&1 | Out-Host
+
+Write-Host "==> Vulnerability scan with Grype (plus DB evidence)"
+$grypeCacheDir = Join-Path $repoRoot ".cache\grype-db"
+if (-not (Test-Path $grypeCacheDir)) { New-Item -ItemType Directory -Path $grypeCacheDir -Force | Out-Null }
+& $containerCmd run --rm -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest db update 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "grype-db-update.txt")
+& $containerCmd run --rm -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest db status 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "grype-db-status.txt")
+& $containerCmd run --rm -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest db providers 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "grype-db-providers.txt")
+& $containerCmd run --rm -v "${repoRoot}:/data" -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest "sbom:/data/$SbomDir/$unsignedV16Leaf" -o json 2>&1 | Set-Content -Path (Join-Path $reportPath "grype-report.json") -Encoding UTF8
+& $containerCmd run --rm -v "${repoRoot}:/data" -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest "sbom:/data/$SbomDir/$unsignedV16Leaf" -o table 2>&1 | Set-Content -Path (Join-Path $reportPath "grype-report.txt") -Encoding UTF8
+
+Write-Host "==> Secondary vulnerability scan with Trivy SBOM (NVD/GHSA/OSV sources)"
+& $containerCmd run --rm -v "${repoRoot}:/data" aquasec/trivy:latest sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format json --output "/data/$ReportDir/trivy-sbom-report.json" "/data/$SbomDir/$unsignedV16Leaf" 2>&1 | Out-Host
+& $containerCmd run --rm -v "${repoRoot}:/data" aquasec/trivy:latest sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format table --output "/data/$ReportDir/trivy-sbom-report.txt" "/data/$SbomDir/$unsignedV16Leaf" 2>&1 | Out-Host
+
+Write-Host "==> Build combined vulnerability summary"
+$grypeJson = Join-Path $reportPath "grype-report.json"
+$trivyJson = Join-Path $reportPath "trivy-sbom-report.json"
+if ((Test-Path $grypeJson) -and (Test-Path $trivyJson)) {
+  $grype = Get-Content $grypeJson -Raw | ConvertFrom-Json
+  $trivy = Get-Content $trivyJson -Raw | ConvertFrom-Json
+  $gMatches = @($grype.matches)
+  $tVulns = @()
+  foreach ($r in @($trivy.Results)) { $tVulns += @($r.Vulnerabilities) }
+  @(
+    "Vulnerability Analysis Summary"
+    "=============================="
+    "Grype total: $($gMatches.Count)"
+    "Trivy total: $($tVulns.Count)"
+    ""
+    "Trivy severity breakdown:"
+    "Critical: $(@($tVulns | Where-Object { $_.Severity -eq 'CRITICAL' }).Count)"
+    "High: $(@($tVulns | Where-Object { $_.Severity -eq 'HIGH' }).Count)"
+    "Medium: $(@($tVulns | Where-Object { $_.Severity -eq 'MEDIUM' }).Count)"
+    "Low: $(@($tVulns | Where-Object { $_.Severity -eq 'LOW' }).Count)"
+  ) | Set-Content -Path (Join-Path $reportPath "vulnerability-analysis.txt") -Encoding UTF8
+}
 
 if ($RunSign -and (Test-Path (Join-Path $repoRoot "scripts/sign-sbom.sh"))) {
   Write-Host "==> Sign SBOM (requires bash - run in Git Bash or WSL)"

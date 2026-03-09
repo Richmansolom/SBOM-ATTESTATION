@@ -1125,7 +1125,7 @@ function Dashboard({ config, onNav }) {
       <div className="grid-3">
         {[
           { title:'Tools', icon:'🛠', rows:[['Syft','v1.42.1'],['Grype','v0.109.0'],['CycloneDX-CLI','v0.30.0'],['Trivy','v0.69.2'],['OpenSSL','3.0.13']] },
-          { title:'Artifacts', icon:'📦', rows:[['SBOM JSON','holistic-sbom.json'],['Signed XML','holistic-sbom-signed.xml'],['Vuln Report','vuln-report.json'],['Public Key','sbom-rsa-public.pem'],['C++ Binary','your_cpp_app']] },
+          { title:'Artifacts', icon:'📦', rows:[['SBOM JSON','sbom-source.enriched.json'],['Grype Report','grype-report.json'],['Trivy Report','trivy-sbom-report.json'],['Grype DB Status','grype-db-status.txt'],['Public Key','sbom_public_key.pem']] },
           { title:'Pipeline', icon:'⚡', rows:[['Stages','5 (build→report)'],['Status','All PASSED'],['CVEs','0 detected'],['Signing','RSA-4096 ✓'],['Docker','sbom-cpp-builder']] },
         ].map(g => (
           <div className="card" key={g.title}>
@@ -1503,10 +1503,12 @@ function SBOMPage() {
 /* ═══ VULNERABILITIES ═══ */
 function VulnPage() {
   const [data, setData] = useState(null);
+  const [scanner, setScanner] = useState('grype');
   const [sev, setSev] = useState('All');
   const [search, setSearch] = useState('');
   const [err, setErr] = useState('');
   const [drag, setDrag] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   function load(file) {
     if (!file) return;
@@ -1515,28 +1517,74 @@ function VulnPage() {
     r.readAsText(file);
   }
 
-  const matches = data?.matches || [];
-  const counts = useMemo(() => matches.reduce((a,m)=>{ const s=m.vulnerability?.severity||'Unknown'; a[s]=(a[s]||0)+1; return a; },{}), [matches]);
+  async function loadFromApi(nextScanner) {
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/report?scanner=${encodeURIComponent(nextScanner)}`);
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
+      setData(j);
+      setScanner(nextScanner);
+      setErr('');
+    } catch (e) {
+      setErr(`Failed to load ${nextScanner} report: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const normalized = useMemo(() => {
+    if (!data) return [];
+    if (Array.isArray(data.matches)) {
+      return data.matches.map(m => ({
+        id: m.vulnerability?.id || '-',
+        severity: m.vulnerability?.severity || 'Unknown',
+        component: m.artifact?.name || '-',
+        version: m.artifact?.version || '-',
+        fix: m.vulnerability?.fix?.versions?.[0] || '-',
+      }));
+    }
+
+    const out = [];
+    for (const r of (data.Results || [])) {
+      for (const v of (r.Vulnerabilities || [])) {
+        out.push({
+          id: v.VulnerabilityID || '-',
+          severity: v.Severity || 'UNKNOWN',
+          component: v.PkgName || '-',
+          version: v.InstalledVersion || '-',
+          fix: v.FixedVersion || '-',
+        });
+      }
+    }
+    return out;
+  }, [data]);
+
+  const counts = useMemo(() => normalized.reduce((a,m)=>{ const s=m.severity||'Unknown'; a[s]=(a[s]||0)+1; return a; },{}), [normalized]);
   const maxC = Math.max(...Object.values(counts),1);
   const filtered = useMemo(() => {
-    let a = [...matches];
-    if (sev!=='All') a=a.filter(m=>(m.vulnerability?.severity||'Unknown')===sev);
-    if (search) { const q=search.toLowerCase(); a=a.filter(m=>(m.vulnerability?.id||'').toLowerCase().includes(q)||(m.artifact?.name||'').toLowerCase().includes(q)); }
+    let a = [...normalized];
+    if (sev!=='All') a=a.filter(m=>(m.severity||'Unknown')===sev);
+    if (search) { const q=search.toLowerCase(); a=a.filter(m=>(m.id||'').toLowerCase().includes(q)||(m.component||'').toLowerCase().includes(q)); }
     return a;
-  }, [matches, sev, search]);
+  }, [normalized, sev, search]);
 
   if (!data) return (
     <div className="page fade-in">
-      <div className="page-hd"><div><div className="page-title">Vulnerability Scanner</div><div className="page-sub">Grype · CVE Intelligence</div></div></div>
+      <div className="page-hd"><div><div className="page-title">Vulnerability Scanner</div><div className="page-sub">Grype + Trivy SBOM cross-check (NVD/GHSA/OSV)</div></div></div>
       <div className="card">
         <div className="card-body">
+          <div className="flex gap-6" style={{marginBottom:12,flexWrap:'wrap'}}>
+            <button className="btn btn-outline-gold" onClick={()=>loadFromApi('grype')} disabled={loading}>{loading ? 'Loading...' : 'Load Grype Report'}</button>
+            <button className="btn btn-outline-teal" onClick={()=>loadFromApi('trivy')} disabled={loading}>{loading ? 'Loading...' : 'Load Trivy Report'}</button>
+          </div>
           <div className={`dropzone${drag?' drag':''}`}
             onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)}
             onDrop={e=>{e.preventDefault();setDrag(false);load(e.dataTransfer.files[0]);}}
             onClick={()=>document.getElementById('vf').click()}>
-            <div className="dropzone-icon">🔍</div>
-            <div className="dropzone-title">Drop vuln-report.json here</div>
-            <div className="dropzone-sub">Download from pipeline artifacts → report:publish</div>
+            <div className="dropzone-icon">📄</div>
+            <div className="dropzone-title">Drop vulnerability JSON here</div>
+            <div className="dropzone-sub">or load directly from local reports via buttons above</div>
             <input id="vf" type="file" accept=".json" style={{display:'none'}} onChange={e=>load(e.target.files[0])}/>
           </div>
           {err && <div className="modal-err" style={{marginTop:12}}>{err}</div>}
@@ -1548,20 +1596,23 @@ function VulnPage() {
   return (
     <div className="page fade-in">
       <div className="page-hd">
-        <div><div className="page-title">Vulnerability Scanner</div><div className="page-sub">Grype v{data?.descriptor?.version||'—'}</div></div>
-        <button className="btn btn-outline-red btn-sm" onClick={()=>setData(null)}>✕ Clear</button>
+        <div><div className="page-title">Vulnerability Scanner</div><div className="page-sub">{scanner==='trivy' ? 'Trivy SBOM (NVD/GHSA/OSV)' : 'Grype SBOM'} · {normalized.length} findings</div></div>
+        <div className="flex gap-6">
+          <button className="btn btn-xs" onClick={()=>loadFromApi('grype')}>Reload Grype</button>
+          <button className="btn btn-xs" onClick={()=>loadFromApi('trivy')}>Reload Trivy</button>
+          <button className="btn btn-outline-red btn-sm" onClick={()=>setData(null)}>Clear</button>
+        </div>
       </div>
 
       <div className="grid-2" style={{alignItems:'start'}}>
-        {/* Severity bars */}
         <div className="card">
           <div className="card-hd"><div className="card-title"><span className="card-icon">📊</span>Severity Distribution</div></div>
           <div className="card-body">
-            {matches.length === 0 ? (
+            {normalized.length === 0 ? (
               <div style={{textAlign:'center',padding:'24px 0'}}>
-                <div style={{fontSize:32,marginBottom:8}}>🛡️</div>
+                <div style={{fontSize:32,marginBottom:8}}>✅</div>
                 <div style={{fontFamily:'var(--mono)',color:'var(--green)',fontSize:14,fontWeight:700}}>ZERO VULNERABILITIES</div>
-                <div style={{fontSize:11,color:'var(--text2)',marginTop:4}}>This C++ application is clean.</div>
+                <div style={{fontSize:11,color:'var(--text2)',marginTop:4}}>No findings in selected report.</div>
               </div>
             ) : SEV_ORD.filter(s=>counts[s]).map(s=>(
               <div key={s} className="sev-row" onClick={()=>setSev(s===sev?'All':s)} style={{cursor:'pointer'}}>
@@ -1576,16 +1627,13 @@ function VulnPage() {
           </div>
         </div>
 
-        {/* Scan meta */}
         <div className="card">
-          <div className="card-hd"><div className="card-title"><span className="card-icon">🗃️</span>Scan Metadata</div></div>
+          <div className="card-hd"><div className="card-title"><span className="card-icon">🧾</span>Scan Metadata</div></div>
           <div className="card-body" style={{padding:'8px 16px'}}>
             {[
-              ['Total Findings', matches.length],
-              ['Scanner', data?.descriptor?.name||'Grype'],
-              ['Version', data?.descriptor?.version||'—'],
-              ['DB Schema', data?.descriptor?.db?.schemaVersion||'—'],
-              ['Scan Date', data?.descriptor?.timestamp ? new Date(data.descriptor.timestamp).toLocaleString() : '—'],
+              ['Total Findings', normalized.length],
+              ['Scanner', scanner === 'trivy' ? 'Trivy' : 'Grype'],
+              ['Source', scanner === 'trivy' ? 'NVD, GHSA, OSV' : 'Grype vulnerability DB'],
               ['Active Filter', sev],
               ['Showing', filtered.length],
             ].map(([k,v])=>(
@@ -1602,20 +1650,20 @@ function VulnPage() {
         <div className="card-body">
           <div className="search-bar" style={{marginBottom:14}}>
             <div className="search-input-wrap">
-              <span className="search-icon">🔍</span>
-              <input className="search-input" placeholder="Search CVE ID or component…" value={search} onChange={e=>setSearch(e.target.value)}/>
+              <span className="search-icon">🔎</span>
+              <input className="search-input" placeholder="Search CVE ID or component..." value={search} onChange={e=>setSearch(e.target.value)}/>
             </div>
             <select style={{padding:'8px 10px',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'var(--r)',color:'var(--text0)',fontSize:12,fontFamily:'var(--mono)'}}
               value={sev} onChange={e=>setSev(e.target.value)}>
-              <option value="All">All Severities ({matches.length})</option>
+              <option value="All">All Severities ({normalized.length})</option>
               {SEV_ORD.map(s=><option key={s} value={s}>{s} ({counts[s]||0})</option>)}
             </select>
           </div>
 
           {filtered.length === 0 ? (
             <div className="empty">
-              <div className="empty-icon">{matches.length===0?'🛡️':'🔎'}</div>
-              <div className="empty-msg">{matches.length===0?'Zero vulnerabilities detected':'No results for current filter'}</div>
+              <div className="empty-icon">🔍</div>
+              <div className="empty-msg">{normalized.length===0?'Zero vulnerabilities detected':'No results for current filter'}</div>
             </div>
           ) : (
             <div className="tbl-wrap">
@@ -1623,16 +1671,15 @@ function VulnPage() {
                 <thead><tr><th>CVE ID</th><th>Severity</th><th>Component</th><th>Version</th><th>Fix</th><th>Link</th></tr></thead>
                 <tbody>
                   {filtered.map((m,i)=>{
-                    const v=m.vulnerability||{}, a=m.artifact||{};
-                    const sc=SEV_COL[v.severity]||'var(--text2)';
+                    const sc=SEV_COL[m.severity]||'var(--text2)';
                     return (
                       <tr key={i}>
-                        <td className="mono" style={{color:'var(--gold)',fontSize:11}}>{v.id||'—'}</td>
-                        <td><span className="badge" style={{background:`${sc}18`,color:sc,border:`1px solid ${sc}30`}}>{v.severity||'—'}</span></td>
-                        <td className="mono" style={{fontSize:11}}>{a.name||'—'}</td>
-                        <td className="mono" style={{fontSize:10,color:'var(--text2)'}}>{a.version||'—'}</td>
-                        <td className="mono" style={{fontSize:10,color:'var(--green)'}}>{v.fix?.versions?.[0]||'—'}</td>
-                        <td>{(v.id||'').startsWith('CVE')&&<a href={`https://nvd.nist.gov/vuln/detail/${v.id}`} target="_blank" rel="noreferrer" style={{color:'var(--teal)',fontSize:10,fontFamily:'var(--mono)'}}>↗ NVD</a>}</td>
+                        <td className="mono" style={{color:'var(--gold)',fontSize:11}}>{m.id||'-'}</td>
+                        <td><span className="badge" style={{background:`${sc}18`,color:sc,border:`1px solid ${sc}30`}}>{m.severity||'-'}</span></td>
+                        <td className="mono" style={{fontSize:11}}>{m.component||'-'}</td>
+                        <td className="mono" style={{fontSize:10,color:'var(--text2)'}}>{m.version||'-'}</td>
+                        <td className="mono" style={{fontSize:10,color:'var(--green)'}}>{m.fix||'-'}</td>
+                        <td>{(m.id||'').startsWith('CVE')&&<a href={`https://nvd.nist.gov/vuln/detail/${m.id}`} target="_blank" rel="noreferrer" style={{color:'var(--teal)',fontSize:10,fontFamily:'var(--mono)'}}>NVD</a>}</td>
                       </tr>
                     );
                   })}
@@ -1646,7 +1693,8 @@ function VulnPage() {
   );
 }
 
-/* ═══ PKI PAGE ═══ */
+
+/* ��� PKI PAGE ��� */
 function PKIPage() {
   const cmds = [
     { label:'Generate RSA-4096', cmd:'openssl genrsa -out keys/signing/sbom-rsa-signing.key 4096' },

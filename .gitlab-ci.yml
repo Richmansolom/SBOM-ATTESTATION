@@ -101,11 +101,22 @@ build_sbom_scan:
       bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.signed.json" "$PKI_DIR"
       mv "$SBOM_DIR/sbom-build.enriched.signed.json" "$SBOM_DIR/sbom-build.enriched.json"
       echo "Signature embedded in SBOM - public key in $PKI_DIR/sbom_public_key.pem"
-    - echo "==> SBOM vulnerability scan using Grype"
+    - echo "==> SBOM vulnerability scan using Grype + Trivy (open CVE sources)"
     - docker pull anchore/grype:latest
-    - docker run --rm -v "$CI_PROJECT_DIR:/data" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o json > "$REPORT_DIR/grype-report.json"
-    - docker run --rm -v "$CI_PROJECT_DIR:/data" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o table > "$REPORT_DIR/grype-report.txt"
+    - mkdir -p /tmp/grype-db
+    - docker run --rm -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest db update > "$REPORT_DIR/grype-db-update.txt" 2>&1 || true
+    - docker run --rm -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest db status > "$REPORT_DIR/grype-db-status.txt" 2>&1 || true
+    - docker run --rm -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest db providers > "$REPORT_DIR/grype-db-providers.txt" 2>&1 || true
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o json > "$REPORT_DIR/grype-report.json"
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o table > "$REPORT_DIR/grype-report.txt"
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" aquasec/trivy:latest sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format json --output "/data/$REPORT_DIR/trivy-sbom-report.json" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json"
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" aquasec/trivy:latest sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format table --output "/data/$REPORT_DIR/trivy-sbom-report.txt" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json"
     - echo "==> Generate vulnerability analysis report"
+    - trivy_total=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$REPORT_DIR/trivy-sbom-report.json")
+    - trivy_critical=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "$REPORT_DIR/trivy-sbom-report.json")
+    - trivy_high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' "$REPORT_DIR/trivy-sbom-report.json")
+    - trivy_medium=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' "$REPORT_DIR/trivy-sbom-report.json")
+    - trivy_low=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length' "$REPORT_DIR/trivy-sbom-report.json")
     - >
       jq -r '
         def count(sev): ( [ .matches[]? | select(.vulnerability.severity == sev) ] | length );
@@ -121,6 +132,17 @@ build_sbom_scan:
         "Top Findings (up to 10):",
         ( [ .matches[]? | "\(.vulnerability.id) | \(.vulnerability.severity) | \(.artifact.name) \(.artifact.version // "")" ][0:10] | .[] )
       ' "$REPORT_DIR/grype-report.json" > "$REPORT_DIR/vulnerability-analysis.txt"
+    - |
+      {
+        echo ""
+        echo "Secondary Scan (Trivy SBOM, NVD/GHSA/OSV sources)"
+        echo "=================================================="
+        echo "Total: $trivy_total"
+        echo "Critical: $trivy_critical"
+        echo "High: $trivy_high"
+        echo "Medium: $trivy_medium"
+        echo "Low: $trivy_low"
+      } >> "$REPORT_DIR/vulnerability-analysis.txt"
   artifacts:
     when: always
     paths:
