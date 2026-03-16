@@ -836,13 +836,15 @@ const API_BASE = (() => {
 
 const apiUrl = (path) => `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
 
-const GL = (tok, proj, path, opts={}) => {
+const GL = (tok, proj, provider, path, opts={}) => {
   const url = new URL(apiUrl(`/api${path}`));
   if (proj) url.searchParams.set('project', proj);
+  if (provider) url.searchParams.set('provider', provider);
   return fetch(url.toString(), {
     ...opts,
     headers: {
       'Content-Type': 'application/json',
+      ...(tok ? { 'X-SBOM-TOKEN': tok } : {}),
       ...opts.headers
     }
   }).then(async r => {
@@ -859,8 +861,17 @@ const SEV_COL = { Critical:'#f43f5e', High:'#fb923c', Medium:'#fbbf24', Low:'#22
 const SEV_ORD = ['Critical','High','Medium','Low','Negligible','Unknown'];
 const cleanAnsi = t => (t||'').replace(/\x1B\[[0-9;]*[mGKH]/g,'');
 
-async function fetchJobTrace(projectId, runId, jobId) {
-  const r = await fetch(apiUrl(`/api/jobs/${jobId}/trace?run_id=${encodeURIComponent(runId)}&project=${encodeURIComponent(projectId)}`));
+async function fetchJobTrace(config, runId, jobId) {
+  const q = new URLSearchParams({
+    run_id: String(runId || ''),
+    project: String(config.projectId || ''),
+    provider: String(config.provider || 'github'),
+  });
+  const r = await fetch(apiUrl(`/api/jobs/${jobId}/trace?${q.toString()}`), {
+    headers: {
+      ...(config.token ? { 'X-SBOM-TOKEN': config.token } : {}),
+    }
+  });
   return cleanAnsi(await r.text()).slice(-5000) || '(empty)';
 }
 
@@ -918,16 +929,19 @@ const Spin = () => <span className="spinner"/>;
 
 /* ═══ CONNECT MODAL ═══ */
 function ConnectModal({ onConnect }) {
-  const [pid, setPid] = useState('');  const [loading, setLoading] = useState(false);
+  const [provider, setProvider] = useState('github');
+  const [pid, setPid] = useState('');
+  const [tok, setTok] = useState('');
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
 
   async function connect() {
     if (!pid) { setErr('Project path is required'); return; }
     setLoading(true); setErr('');
     try {
-      await GL('', pid, '/pipelines?per_page=1');
-      sessionStorage.setItem('sbom_cfg', JSON.stringify({ token: '', projectId: pid }));
-      onConnect({ token: '', projectId: pid });
+      await GL(tok, pid, provider, '/pipelines?per_page=1');
+      sessionStorage.setItem('sbom_cfg', JSON.stringify({ token: tok, projectId: pid, provider }));
+      onConnect({ token: tok, projectId: pid, provider });
       toast('Connected successfully', 'ok');
     } catch(e) { setErr('Connection failed: ' + e.message); }
     setLoading(false);
@@ -938,19 +952,31 @@ function ConnectModal({ onConnect }) {
       <div className="modal">
         <div className="modal-icon">🛡️</div>
         <div className="modal-title">Authenticate</div>
-        <div className="modal-sub">Enter your GitHub repository path to<br/>connect to the SBOM pipeline.</div>
+        <div className="modal-sub">Connect to GitHub Actions or GitLab CI<br/>for live pipeline control.</div>
         <div className="modal-fields">
           <div className="field">
-            <span className="field-label">GitHub Repository</span>
+            <span className="field-label">Provider</span>
+            <select value={provider} onChange={e=>setProvider(e.target.value)}>
+              <option value="github">GitHub</option>
+              <option value="gitlab">GitLab</option>
+            </select>
+          </div>
+          <div className="field">
+            <span className="field-label">{provider === 'gitlab' ? 'GitLab Project Path' : 'GitHub Repository'}</span>
             <input value={pid} onChange={e=>setPid(e.target.value)} placeholder="namespace/project-name"
               onKeyDown={e=>e.key==='Enter'&&connect()} autoFocus/>
+          </div>
+          <div className="field">
+            <span className="field-label">Access Token (optional for public read)</span>
+            <input value={tok} onChange={e=>setTok(e.target.value)} placeholder={provider === 'gitlab' ? 'glpat-... (needed for trigger)' : 'ghp_... (if needed)'}
+              onKeyDown={e=>e.key==='Enter'&&connect()}/>
           </div>
           {err && <div className="modal-err">{err}</div>}
           <button className="btn btn-gold" style={{justifyContent:'center',padding:'11px'}} onClick={connect} disabled={loading}>
             {loading ? <><Spin/> Connecting…</> : '⚡ Connect'}
           </button>
         </div>
-        <div className="modal-note">Tokenless mode enabled · using public project access</div>
+        <div className="modal-note">Tokenless mode works for public pipeline read. Trigger may require token.</div>
       </div>
     </div>
   );
@@ -1005,17 +1031,24 @@ function Dashboard({ config, onNav }) {
   const [latestLogJob, setLatestLogJob] = useState(null);
   const [latestLog, setLatestLog] = useState('');
   const [latestLogLoading, setLatestLogLoading] = useState(false);
+  const [dbFreshness, setDbFreshness] = useState(null);
 
   useEffect(() => {
-    GL(config.token, config.projectId, '/pipelines?per_page=20')
+    GL(config.token, config.projectId, config.provider, '/pipelines?per_page=20')
       .then(d => { setPipelines(d); setLoading(false); })
       .catch(e => { toast('Failed to load pipelines: '+e.message,'err'); setLoading(false); });
+  }, []);
+
+  useEffect(() => {
+    GL(config.token, config.projectId, config.provider, '/db-status')
+      .then(setDbFreshness)
+      .catch(() => {});
   }, []);
 
   const latest = pipelines[0];
   useEffect(() => {
     if (!latest) return;
-    GL(config.token, config.projectId, `/pipelines/${latest.id}/jobs`).then(setLatestJobs).catch(()=>{});
+    GL(config.token, config.projectId, config.provider, `/pipelines/${latest.id}/jobs`).then(setLatestJobs).catch(()=>{});
   }, [latest?.id]);
 
   const stats = useMemo(() => {
@@ -1031,7 +1064,7 @@ function Dashboard({ config, onNav }) {
     if (!latest) return;
     setLatestLogJob(job); setLatestLog(''); setLatestLogLoading(true);
     try {
-      const t = await fetchJobTrace(config.projectId, latest.id, job.id);
+      const t = await fetchJobTrace(config, latest.id, job.id);
       setLatestLog(t);
     } catch(e) { setLatestLog('Error: '+e.message); }
     setLatestLogLoading(false);
@@ -1053,6 +1086,11 @@ function Dashboard({ config, onNav }) {
     { v: stats.rate+'%', l:'Success Rate', icon:'📈', col: stats.rate>=80?'var(--green)':'var(--amber)' },
     { v: dur(stats.avg), l:'Avg Duration', icon:'⏱', col:'#a78bfa' },
   ];
+
+  const fmtTs = (v) => {
+    if (!v) return '-';
+    try { return new Date(v).toLocaleString(); } catch { return v; }
+  };
 
   return (
     <div className="page fade-in">
@@ -1139,8 +1177,19 @@ function Dashboard({ config, onNav }) {
       <div className="grid-3">
         {[
           { title:'Tools', icon:'🛠', rows:[['Syft','v1.42.1'],['Grype','v0.109.0'],['CycloneDX-CLI','v0.30.0'],['Trivy','v0.69.2'],['OpenSSL','3.0.13']] },
-          { title:'Artifacts', icon:'📦', rows:[['SBOM JSON','sbom-source.enriched.json'],['Grype Report','grype-report.json'],['Trivy Report','trivy-sbom-report.json'],['Grype DB Status','grype-db-status.txt'],['Public Key','sbom_public_key.pem']] },
+          { title:'Artifacts', icon:'📦', rows:[['SBOM JSON','sbom-source.enriched.json'],['Grype Report','grype-report.json'],['Trivy Report','trivy-sbom-report.json'],['Grype DB Status','grype-db-status.txt'],['Trivy DB Status','trivy-db-status.txt'],['Public Key','sbom_public_key.pem']] },
           { title:'Pipeline', icon:'⚡', rows:[['Stages','5 (build→report)'],['Status','All PASSED'],['CVEs','0 detected'],['Signing','RSA-4096 ✓'],['Docker','sbom-cpp-builder']] },
+          {
+            title:'DB Freshness',
+            icon:'🗃️',
+            rows:[
+              ['Grype Status', (dbFreshness?.grype?.status || '-').toUpperCase()],
+              ['Grype Built', fmtTs(dbFreshness?.grype?.built_at)],
+              ['Trivy Updated', fmtTs(dbFreshness?.trivy?.updated_at)],
+              ['Trivy Next Update', fmtTs(dbFreshness?.trivy?.next_update)],
+              ['Last DB Refresh', fmtTs(dbFreshness?.trivy?.downloaded_at || dbFreshness?.trivy?.update_file_mtime || dbFreshness?.grype?.update_file_mtime)],
+            ]
+          },
         ].map(g => (
           <div className="card" key={g.title}>
             <div className="card-hd"><div className="card-title"><span className="card-icon">{g.icon}</span>{g.title}</div></div>
@@ -1172,7 +1221,7 @@ function PipelinesPage({ config }) {
 
   const load = useCallback(async () => {
     try {
-      const d = await GL(config.token, config.projectId, '/pipelines?per_page=15');
+      const d = await GL(config.token, config.projectId, config.provider, '/pipelines?per_page=15');
       setPipelines(d);
       if (selected) { const u = d.find(p=>p.id===selected.id); if(u) setSelected(u); }
     } catch(e) { toast('Load failed: '+e.message,'err'); }
@@ -1189,8 +1238,8 @@ function PipelinesPage({ config }) {
   async function launch() {
     setLaunching(true);
     try {
-      const p = await GL(config.token, config.projectId, '/pipeline', {
-        method:'POST', body: JSON.stringify({ ref, variables:[{key:'APP_VERSION',value:ver,variable_type:'env_var'}] })
+      const p = await GL(config.token, config.projectId, config.provider, '/pipeline', {
+        method:'POST', body: JSON.stringify({ ref, provider: config.provider, variables:[{key:'APP_VERSION',value:ver,variable_type:'env_var'}] })
       });
       toast(`Pipeline #${p.id} launched`, 'ok');
       setPolling(true);
@@ -1279,8 +1328,8 @@ function PipelineDetail({ config, pipeline }) {
   const logRef = useRef(null);
 
   const refreshJobs = useCallback(() => {
-    return GL(config.token, config.projectId, `/pipelines/${pipeline.id}/jobs`).then(setJobs).catch(()=>{});
-  }, [config.token, config.projectId, pipeline.id]);
+    return GL(config.token, config.projectId, config.provider, `/pipelines/${pipeline.id}/jobs`).then(setJobs).catch(()=>{});
+  }, [config.token, config.projectId, config.provider, pipeline.id]);
 
   useEffect(() => {
     refreshJobs();
@@ -1296,7 +1345,7 @@ function PipelineDetail({ config, pipeline }) {
   async function viewLog(job) {
     setLogJob(job); setLog(''); setLogLoading(true);
     try {
-      const t = await fetchJobTrace(config.projectId, pipeline.id, job.id);
+      const t = await fetchJobTrace(config, pipeline.id, job.id);
       setLog(t);
     } catch(e) { setLog('Error: '+e.message); }
     setLogLoading(false);
@@ -1807,11 +1856,11 @@ const PAGES = [
 /* ═══ ROOT APP ═══ */
 function App() {
   const [config, setConfig] = useState(() => {
-    const fallback = { token:'', projectId:'Richmansolom/SBOM-ATTESTATION' }; 
+    const fallback = { token:'', projectId:'Richmansolom/SBOM-ATTESTATION', provider:'github' }; 
     try {
       const saved = JSON.parse(sessionStorage.getItem('sbom_cfg')||'null');
       if (!saved || saved === 'prompt' || !saved.projectId) return fallback;
-      return { token: saved.token || '', projectId: saved.projectId };
+      return { token: saved.token || '', projectId: saved.projectId, provider: saved.provider || 'github' };
     } catch {
       return fallback;
     }
@@ -1884,7 +1933,7 @@ function App() {
             onClick={config&&config!=='prompt' ? disconnect : ()=>setConfig('prompt')}>
             <span className={`status-dot${config&&config!=='prompt'?' pulse':''}`}/>
             {config&&config!=='prompt'
-              ? (config.projectId.split('/')[1]||'Connected').toUpperCase().slice(0,12)
+              ? `${(config.provider || 'github').toUpperCase().slice(0,2)}:${(config.projectId.split('/')[1]||'Connected').toUpperCase().slice(0,9)}`
               : 'CONNECT'}
           </button>
         </div>

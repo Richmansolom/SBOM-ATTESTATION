@@ -121,6 +121,17 @@ Notes:
 - This UI targets the example C++ application in `example-app/`.
 - It uses Dockerized tools under the hood for signing/scanning endpoints.
 
+#### Optional local vanity URL
+
+To open the UI as `http://www.sbomcontrol.com` on your own machine:
+
+1. Run as Administrator and add this line to `C:\Windows\System32\drivers\etc\hosts`:
+   - `127.0.0.1 www.sbomcontrol.com`
+2. Start the UI on port 80:
+   - `pwsh -ExecutionPolicy Bypass -File .\start-ui-local.ps1`
+3. Open:
+   - `http://www.sbomcontrol.com`
+
 ### Free Public Hosting
 
 You can host this project for free using:

@@ -1,11 +1,13 @@
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
+from urllib.request import Request, urlopen
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -61,6 +63,78 @@ def parse_json(path):
             return obj
     except Exception:
         return None
+
+
+def parse_key_value_lines(text):
+    values = {}
+    for line in (text or "").splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        values[key.strip().lower()] = value.strip()
+    return values
+
+
+def file_mtime_iso(path):
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+def parse_trivy_db_meta(text):
+    # Example debug line:
+    # DB info schema=2 updated_at=... next_update=... downloaded_at=...
+    m = re.search(
+        r"DB info\s+schema=(\S+)\s+updated_at=(\S+)\s+next_update=(\S+)\s+downloaded_at=(\S+)",
+        text or "",
+    )
+    if not m:
+        return {}
+    return {
+        "schema": m.group(1),
+        "updated_at": m.group(2),
+        "next_update": m.group(3),
+        "downloaded_at": m.group(4),
+    }
+
+
+def get_db_freshness():
+    grype_status_path = REPORT_DIR / "grype-db-status.txt"
+    grype_update_path = REPORT_DIR / "grype-db-update.txt"
+    trivy_status_path = REPORT_DIR / "trivy-db-status.txt"
+    trivy_update_path = REPORT_DIR / "trivy-db-update.txt"
+    trivy_report_path = REPORT_DIR / "trivy-sbom-report.json"
+
+    grype_text = grype_status_path.read_text(encoding="utf-8", errors="replace") if grype_status_path.exists() else ""
+    grype_values = parse_key_value_lines(grype_text)
+
+    trivy_text = trivy_status_path.read_text(encoding="utf-8", errors="replace") if trivy_status_path.exists() else ""
+    trivy_meta = parse_trivy_db_meta(trivy_text)
+    trivy_report = parse_json(trivy_report_path) or {}
+    trivy_created = trivy_report.get("CreatedAt")
+
+    return {
+        "grype": {
+            "status": grype_values.get("status") or "unknown",
+            "built_at": grype_values.get("built"),
+            "db_path": grype_values.get("path"),
+            "schema": grype_values.get("schema"),
+            "status_file_mtime": file_mtime_iso(grype_status_path) if grype_status_path.exists() else None,
+            "update_file_mtime": file_mtime_iso(grype_update_path) if grype_update_path.exists() else None,
+            "available": grype_status_path.exists(),
+        },
+        "trivy": {
+            "schema": trivy_meta.get("schema"),
+            "updated_at": trivy_meta.get("updated_at"),
+            "next_update": trivy_meta.get("next_update"),
+            "downloaded_at": trivy_meta.get("downloaded_at"),
+            "scan_created_at": trivy_created,
+            "status_file_mtime": file_mtime_iso(trivy_status_path) if trivy_status_path.exists() else None,
+            "update_file_mtime": file_mtime_iso(trivy_update_path) if trivy_update_path.exists() else None,
+            "available": trivy_status_path.exists() or trivy_report_path.exists(),
+        },
+    }
 
 
 def get_latest_sbom_path():
@@ -181,6 +255,31 @@ def get_requested_repo():
     return parse_repo_slug()
 
 
+def get_requested_provider():
+    provider = (request.args.get("provider") or "").strip().lower()
+    if provider in ("github", "gitlab"):
+        return provider
+    payload = request.get_json(silent=True) or {}
+    provider = str(payload.get("provider") or "").strip().lower()
+    if provider in ("github", "gitlab"):
+        return provider
+    return "github"
+
+
+def get_requested_token():
+    token = (request.headers.get("X-SBOM-TOKEN") or "").strip()
+    if token:
+        return token
+    token = (request.args.get("token") or "").strip()
+    if token:
+        return token
+    payload = request.get_json(silent=True) or {}
+    token = str(payload.get("token") or "").strip()
+    if token:
+        return token
+    return ""
+
+
 def get_gh_json(path):
     if shutil.which("gh") is None:
         return None
@@ -201,6 +300,40 @@ def gh_api(path, method="GET", data=None):
         for k, v in data.items():
             cmd.extend(["-f", f"{k}={v}"])
     return run_cmd(cmd)
+
+
+def map_gitlab_status(status):
+    s = (status or "").lower()
+    if s in ("success", "passed"):
+        return "success"
+    if s in ("failed", "failure"):
+        return "failed"
+    if s in ("running", "in_progress"):
+        return "running"
+    if s in ("canceled", "cancelled"):
+        return "canceled"
+    if s in ("pending", "created", "manual", "scheduled", "preparing", "waiting_for_resource"):
+        return "pending"
+    return s or "pending"
+
+
+def gitlab_api(path, method="GET", token="", data=None):
+    base = "https://gitlab.com/api/v4"
+    url = f"{base}/{path.lstrip('/')}"
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["PRIVATE-TOKEN"] = token
+    payload = None
+    if data is not None:
+        payload = json.dumps(data).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = Request(url=url, method=method.upper(), headers=headers, data=payload)
+    try:
+        with urlopen(req, timeout=30) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            return resp.status, body
+    except Exception as exc:
+        return 500, str(exc)
 
 
 def get_stage_status_from_steps(steps):
@@ -240,15 +373,28 @@ def map_job_stage(name):
     n = (name or "").lower()
     if "build" in n:
         return "build"
-    if "generate" in n and "sbom" in n:
+    if "generate" in n:
         return "sbom_generate"
-    if "sign" in n and "sbom" in n:
+    if "sign" in n:
         return "sbom_sign"
     if "scan" in n or "grype" in n:
         return "sbom_scan"
     if "report" in n or "artifact" in n:
         return "report"
     return "report"
+
+
+def normalize_stage_status(status):
+    s = (status or "").lower()
+    if s in ("success", "completed"):
+        return "success"
+    if s in ("failure", "failed"):
+        return "failed"
+    if s in ("in_progress", "running"):
+        return "running"
+    if s in ("cancelled", "canceled"):
+        return "canceled"
+    return "pending"
 
 
 def get_github_snapshot():
@@ -327,6 +473,11 @@ def status():
     return jsonify(get_local_snapshot())
 
 
+@app.route("/api/db-status")
+def db_status():
+    return jsonify(get_db_freshness())
+
+
 @app.route("/api/github")
 def github():
     return jsonify(get_github_snapshot())
@@ -391,6 +542,8 @@ def scan():
 
     grype_cache = REPO_ROOT / ".cache" / "grype-db"
     grype_cache.mkdir(parents=True, exist_ok=True)
+    trivy_cache = REPO_ROOT / ".cache" / "trivy"
+    trivy_cache.mkdir(parents=True, exist_ok=True)
 
     grype_db_update_cmd = ["docker", "run", "--rm", "-v", f"{grype_cache}:/root/.cache/grype/db", "anchore/grype:latest", "db", "update"]
     _, gdb_update = run_cmd(grype_db_update_cmd)
@@ -403,6 +556,16 @@ def scan():
     grype_db_providers_cmd = ["docker", "run", "--rm", "-v", f"{grype_cache}:/root/.cache/grype/db", "anchore/grype:latest", "db", "providers"]
     _, gdb_providers = run_cmd(grype_db_providers_cmd)
     (REPORT_DIR / "grype-db-providers.txt").write_text(gdb_providers, encoding="utf-8")
+
+    trivy_db_update_cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{trivy_cache}:/root/.cache/trivy",
+        "aquasec/trivy:latest", "image", "--download-db-only", "--no-progress", "--debug",
+    ]
+    _, tdb_update = run_cmd(trivy_db_update_cmd)
+    (REPORT_DIR / "trivy-db-update.txt").write_text(tdb_update, encoding="utf-8")
+    # Keep a dedicated status artifact so the UI can parse DB freshness quickly.
+    (REPORT_DIR / "trivy-db-status.txt").write_text(tdb_update, encoding="utf-8")
 
     grype_json_cmd = [
         "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "-v", f"{grype_cache}:/root/.cache/grype/db", "anchore/grype:latest",
@@ -423,7 +586,8 @@ def scan():
         return jsonify({"status": "error", "exit_code": c3, "log": o1 + "\n" + o2 + "\n" + o3})
 
     trivy_json_cmd = [
-        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "aquasec/trivy:latest", "sbom",
+        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "-v", f"{trivy_cache}:/root/.cache/trivy", "aquasec/trivy:latest", "sbom",
+        "--cache-dir", "/root/.cache/trivy",
         "--scanners", "vuln", "--vuln-severity-source", "nvd,ghsa,osv",
         "--format", "json", "--output", "/data/reports/trivy-sbom-report.json",
         "/data/sbom/sbom-source.enriched.v16.json",
@@ -433,7 +597,8 @@ def scan():
         return jsonify({"status": "error", "exit_code": c4, "log": o1 + "\n" + o2 + "\n" + o3 + "\n" + o4})
 
     trivy_table_cmd = [
-        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "aquasec/trivy:latest", "sbom",
+        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "-v", f"{trivy_cache}:/root/.cache/trivy", "aquasec/trivy:latest", "sbom",
+        "--cache-dir", "/root/.cache/trivy",
         "--scanners", "vuln", "--vuln-severity-source", "nvd,ghsa,osv",
         "--format", "table", "--output", "/data/reports/trivy-sbom-report.txt",
         "/data/sbom/sbom-source.enriched.v16.json",
@@ -442,7 +607,7 @@ def scan():
     if c5 != 0:
         return jsonify({"status": "error", "exit_code": c5, "log": o1 + "\n" + o2 + "\n" + o3 + "\n" + o4 + "\n" + o5})
 
-    return jsonify({"status": "ok", "exit_code": 0, "log": "\n".join([o1, gdb_update, gdb_status, gdb_providers, o2, o3, o4, o5])})
+    return jsonify({"status": "ok", "exit_code": 0, "log": "\n".join([o1, gdb_update, gdb_status, gdb_providers, tdb_update, o2, o3, o4, o5])})
 
 
 @app.route("/api/sbom")
@@ -471,8 +636,36 @@ def get_report():
 
 @app.route("/api/pipelines")
 def pipelines():
+    provider = get_requested_provider()
     repo = get_requested_repo()
     per_page = request.args.get("per_page", "15")
+    if provider == "gitlab":
+        encoded_project = quote(repo, safe="")
+        token = get_requested_token() or os.getenv("GITLAB_TOKEN", "")
+        status, out = gitlab_api(f"projects/{encoded_project}/pipelines?per_page={per_page}", token=token)
+        if status >= 300:
+            return jsonify({"message": out.strip() or "Failed to fetch GitLab pipelines"}), 500
+        try:
+            runs = json.loads(out)
+        except Exception:
+            return jsonify({"message": "Failed to parse GitLab response"}), 500
+        payload = []
+        for run in runs:
+            payload.append(
+                {
+                    "id": run.get("id"),
+                    "status": map_gitlab_status(run.get("status")),
+                    "duration": iso_duration_seconds(run.get("started_at"), run.get("updated_at") or run.get("finished_at")),
+                    "ref": run.get("ref"),
+                    "sha": (run.get("sha") or "")[:7],
+                    "created_at": run.get("created_at"),
+                    "run_number": run.get("iid"),
+                    "workflow_id": None,
+                    "html_url": run.get("web_url"),
+                }
+            )
+        return jsonify(payload)
+
     code, out = gh_api(f"repos/{repo}/actions/runs?per_page={per_page}")
     if code != 0:
         return jsonify({"message": out.strip() or "Failed to fetch workflows"}), 500
@@ -502,7 +695,31 @@ def pipelines():
 
 @app.route("/api/pipelines/<int:run_id>/jobs")
 def pipeline_jobs(run_id):
+    provider = get_requested_provider()
     repo = get_requested_repo()
+    if provider == "gitlab":
+        encoded_project = quote(repo, safe="")
+        token = get_requested_token() or os.getenv("GITLAB_TOKEN", "")
+        status, out = gitlab_api(f"projects/{encoded_project}/pipelines/{run_id}/jobs", token=token)
+        if status >= 300:
+            return jsonify({"message": out.strip() or "Failed to fetch GitLab jobs"}), 500
+        try:
+            jobs = json.loads(out)
+        except Exception:
+            return jsonify({"message": "Failed to parse GitLab jobs response"}), 500
+        mapped = []
+        for j in jobs:
+            mapped.append(
+                {
+                    "id": j.get("id"),
+                    "name": j.get("name"),
+                    "status": map_gitlab_status(j.get("status")),
+                    "stage": map_job_stage(j.get("stage") or j.get("name")),
+                    "duration": iso_duration_seconds(j.get("started_at"), j.get("finished_at")),
+                }
+            )
+        return jsonify(mapped)
+
     code, out = gh_api(f"repos/{repo}/actions/runs/{run_id}/jobs")
     if code != 0:
         return jsonify({"message": out.strip() or "Failed to fetch jobs"}), 500
@@ -510,6 +727,25 @@ def pipeline_jobs(run_id):
         jobs = json.loads(out).get("jobs", [])
     except Exception:
         return jsonify({"message": "Failed to parse jobs response"}), 500
+
+    # Some workflows use one job with multiple step stages.
+    # For the UI stage-strip, derive stage states from job steps when available.
+    if jobs and isinstance(jobs[0].get("steps"), list) and jobs[0]["steps"]:
+        stage_map = {"Build": "build", "Generate": "sbom_generate", "Sign": "sbom_sign", "Scan": "sbom_scan", "Report": "report"}
+        job_id = jobs[0].get("id")
+        step_states = get_stage_status_from_steps(jobs[0].get("steps"))
+        synthetic = []
+        for s in step_states:
+            synthetic.append(
+                {
+                    "id": job_id,
+                    "name": s.get("name"),
+                    "status": normalize_stage_status(s.get("status")),
+                    "stage": stage_map.get(s.get("name"), "report"),
+                    "duration": None,
+                }
+            )
+        return jsonify(synthetic)
 
     mapped = []
     for j in jobs:
@@ -527,10 +763,38 @@ def pipeline_jobs(run_id):
 
 @app.route("/api/pipeline", methods=["POST"])
 def trigger_pipeline():
+    provider = get_requested_provider()
     repo = get_requested_repo()
     body = request.get_json(silent=True) or {}
     ref = body.get("ref") or "main"
     workflow = body.get("workflow") or "sbom-pipeline.yml"
+    token = get_requested_token() or os.getenv("GITLAB_TOKEN", "")
+
+    if provider == "gitlab":
+        encoded_project = quote(repo, safe="")
+        trigger_token = str(body.get("trigger_token") or "").strip() or os.getenv("GITLAB_TRIGGER_TOKEN", "")
+        if trigger_token:
+            query = urlencode({"token": trigger_token, "ref": str(ref)})
+            status, out = gitlab_api(f"projects/{encoded_project}/trigger/pipeline?{query}", method="POST")
+        else:
+            if not token:
+                return jsonify({"message": "GitLab token required to trigger pipeline. Set GITLAB_TOKEN or provide token in Connect."}), 400
+            query = urlencode({"ref": str(ref)})
+            status, out = gitlab_api(f"projects/{encoded_project}/pipeline?{query}", method="POST", token=token)
+        if status >= 300:
+            return jsonify({"message": out.strip() or "Failed to trigger GitLab pipeline"}), 500
+        try:
+            created = json.loads(out)
+        except Exception:
+            created = {}
+        return jsonify(
+            {
+                "id": created.get("id"),
+                "status": map_gitlab_status(created.get("status") or "pending"),
+                "html_url": created.get("web_url"),
+                "message": "Pipeline trigger submitted",
+            }
+        )
 
     if shutil.which("gh") is None:
         return jsonify({"message": "gh CLI not found. Install GitHub CLI first."}), 500
@@ -559,8 +823,17 @@ def trigger_pipeline():
 
 @app.route("/api/jobs/<int:job_id>/trace")
 def job_trace(job_id):
+    provider = get_requested_provider()
     repo = get_requested_repo()
     run_id = request.args.get("run_id")
+    if provider == "gitlab":
+        encoded_project = quote(repo, safe="")
+        token = get_requested_token() or os.getenv("GITLAB_TOKEN", "")
+        status, out = gitlab_api(f"projects/{encoded_project}/jobs/{job_id}/trace", token=token)
+        if status >= 300:
+            return (out or "Unable to load job trace."), 500, {"Content-Type": "text/plain; charset=utf-8"}
+        return out, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
     if not run_id:
         return "Missing run_id query parameter", 400
     code, out = run_cmd(["gh", "run", "view", str(run_id), "--repo", repo, "--job", str(job_id), "--log"])
