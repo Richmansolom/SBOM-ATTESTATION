@@ -1,4 +1,5 @@
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -86,7 +87,16 @@ def add_no_cache_headers(response):
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
+    # Allow hosted frontends (e.g., GitHub Pages) to call this API.
+    response.headers["Access-Control-Allow-Origin"] = os.getenv("CORS_ALLOW_ORIGIN", "*")
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
     return response
+
+
+@app.route("/api/<path:_unused>", methods=["OPTIONS"])
+def api_preflight(_unused):
+    return ("", 204)
 
 
 def get_local_snapshot():
@@ -563,4 +573,6 @@ def job_trace(job_id):
 
 if __name__ == "__main__":
     ensure_dirs()
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "5000"))
+    app.run(host=host, port=port, debug=False)

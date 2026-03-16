@@ -121,6 +121,15 @@ Notes:
 - This UI targets the example C++ application in `example-app/`.
 - It uses Dockerized tools under the hood for signing/scanning endpoints.
 
+### Free Public Hosting
+
+You can host this project for free using:
+
+- **GitHub Pages** for the frontend (`sbom_ui/static`)
+- **Render free web service** for the Flask API (`sbom_ui/app.py`)
+
+See `FREE_HOSTING_SETUP.md` for full setup and API wiring (`?api=https://...`).
+
 ### Container mode
 
 ```bash
