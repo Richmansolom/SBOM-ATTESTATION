@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: sbom-control-api
+    env: python
+    plan: free
+    buildCommand: pip install -r sbom_ui/requirements.txt
+    startCommand: gunicorn --chdir sbom_ui app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.6
+      - key: CORS_ALLOW_ORIGIN
+        value: "*"

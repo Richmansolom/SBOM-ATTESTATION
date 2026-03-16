@@ -822,8 +822,22 @@ tr:hover td { background: var(--bg2); }
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 /* ═══ HELPERS ═══ */
+const API_BASE = (() => {
+  const q = new URLSearchParams(window.location.search).get('api');
+  if (q) {
+    const normalized = q.replace(/\/$/, '');
+    localStorage.setItem('sbom_api_base', normalized);
+    return normalized;
+  }
+  const saved = (localStorage.getItem('sbom_api_base') || '').trim();
+  if (saved) return saved.replace(/\/$/, '');
+  return window.location.origin;
+})();
+
+const apiUrl = (path) => `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
+
 const GL = (tok, proj, path, opts={}) => {
-  const url = new URL(`/api${path}`, window.location.origin);
+  const url = new URL(apiUrl(`/api${path}`));
   if (proj) url.searchParams.set('project', proj);
   return fetch(url.toString(), {
     ...opts,
@@ -846,7 +860,7 @@ const SEV_ORD = ['Critical','High','Medium','Low','Negligible','Unknown'];
 const cleanAnsi = t => (t||'').replace(/\x1B\[[0-9;]*[mGKH]/g,'');
 
 async function fetchJobTrace(projectId, runId, jobId) {
-  const r = await fetch(`/api/jobs/${jobId}/trace?run_id=${encodeURIComponent(runId)}&project=${encodeURIComponent(projectId)}`);
+  const r = await fetch(apiUrl(`/api/jobs/${jobId}/trace?run_id=${encodeURIComponent(runId)}&project=${encodeURIComponent(projectId)}`));
   return cleanAnsi(await r.text()).slice(-5000) || '(empty)';
 }
 
@@ -1520,7 +1534,7 @@ function VulnPage() {
   async function loadFromApi(nextScanner) {
     setLoading(true);
     try {
-      const r = await fetch(`/api/report?scanner=${encodeURIComponent(nextScanner)}`);
+      const r = await fetch(apiUrl(`/api/report?scanner=${encodeURIComponent(nextScanner)}`));
       const j = await r.json();
       if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
       setData(j);
