@@ -1,190 +1,250 @@
 # Software Bill of Materials (SBOM) Attestation
 
-**Company:** Lockheed Martin Corporation  
-**Context:** CISA open source SBOM initiative
+This repository is a reusable reference implementation for generating, validating, signing, and scanning SBOMs for C/C++ software using COTS tooling plus project metadata.
 
-## Overview
+## Goal
 
-This project provides an SBOM generator and attestation pipeline for custom C/C++ applications. It combines existing COTS SBOM tools (Syft, Trivy, Distro2SBOM, CycloneDX-CLI, Hoppr, Grype) with custom metadata and signing to produce trusted SBOMs that meet NTIA Minimum Elements.
+Enable another engineer or team to clone this repo, point it at their own C/C++ application, and produce the same class of outputs:
 
-## Features
+- CycloneDX SBOMs (source/build/container-aware)
+- NTIA minimum-elements evidence (local + Hoppr)
+- Signed SBOM with verifiable cryptographic signature
+- Vulnerability evidence from Grype and Trivy (with DB freshness artifacts)
+- CI/CD pipeline artifacts from both GitHub and GitLab
 
-- **Custom app + COTS components:** Captures both your application and its dependencies in a single SBOM
-- **Native and container support:** `generate-sbom.ps1 -Mode native` (directory) or `-Mode container` (Docker/Podman image)
-- **NTIA Minimum Elements:** Validated via `check-ntia.ps1` and **Hoppr** (`--profile ntia`)
-- **NTIA validation:** SBOMs validated against NTIA Minimum Elements (local script + Hoppr)
-- **SBOM signing & verification:** OpenSSL RSA signatures for attestation
-- **Vulnerability scanning:** Grype + Trivy SBOM scanning with open CVE feeds (including NVD-based sources)
-- **Custom metadata:** JSON-based app metadata (easy to maintain in repo)
+## Reference Architecture
 
-## Example C++ Application
+The implementation uses a staged model:
 
-The `example-app/` directory contains a minimal C++ application used to demonstrate the pipeline. This repository intentionally uses the example app as the target implementation (not University-Management-System), while keeping the same SBOM attestation architecture and controls.
+1. Build target application
+2. Generate raw SBOMs with COTS tools
+3. Enrich SBOM using app metadata
+4. Validate SBOM structure and NTIA completeness
+5. Sign SBOM and verify signature
+6. Run vulnerability scans and produce summary report
+7. Publish artifacts and logs for auditability
 
-**This SBOM infrastructure is for any software** — replace `example-app/` with your own project and update `app-metadata.json`. The example satisfies pipeline requirements: >=3 custom components, >=2 dependency levels.
+## Repository Structure
 
-## Project Structure
-
-```
+```text
 sbom-attestation/
-├── example-app/           # Example C++ application
-│   ├── src/
-│   ├── include/
-│   ├── Makefile
-│   ├── Dockerfile
-│   └── app-metadata.json  # Custom app dependency metadata (JSON)
-├── merge-sbom.ps1         # Enriches SBOM with app metadata
-├── check-ntia.ps1         # NTIA Minimum Elements validator
-├── .gitlab-ci.yml         # GitLab CI/CD pipeline
-└── README.md
+|-- example-app/                         # Reference C++ target app
+|   |-- src/                             # C++ sources
+|   |-- include/                         # Headers
+|   |-- Dockerfile                       # Container build path
+|   |-- Makefile                         # Native build path
+|   `-- app-metadata.json                # Custom component metadata
+|-- scripts/
+|   `-- sign-sbom.sh                     # Canonicalize + sign + embed signature
+|-- sbom/                                # Generated SBOM outputs and PKI artifacts
+|-- reports/                             # Validation, scan, and DB evidence outputs
+|-- sbom_ui/
+|   |-- app.py                           # Flask API (generate/sign/scan + pipeline APIs)
+|   |-- requirements.txt
+|   `-- static/index.html                # Mission Control UI frontend
+|-- generate-sbom.ps1                    # Local orchestrator (native/container mode)
+|-- merge-sbom.ps1                       # Inject custom app metadata into SBOM
+|-- check-ntia.ps1                       # NTIA minimum-elements check
+|-- .github/workflows/sbom-pipeline.yml  # GitHub Actions pipeline
+|-- .gitlab-ci.yml                       # GitLab CI pipeline
+|-- start-ui-local.ps1                   # Local UI starter on port 80
+`-- README.md
 ```
 
-## GitHub Actions Pipeline
+## Toolchain and Roles
 
-The workflow (`.github/workflows/sbom-pipeline.yml`) runs on push to `main`/`master` and performs the same steps as the GitLab pipeline. Artifacts are available under the workflow run (Summary → Artifacts).
+| Tool | Role in pipeline |
+|---|---|
+| Syft | Primary SBOM generation for source/filesystem/container |
+| CycloneDX CLI | Convert/merge/validate CycloneDX documents |
+| Distro2SBOM | Distribution package SBOM coverage |
+| Hoppr | NTIA profile-based SBOM validation |
+| Grype | SBOM vulnerability scan + DB status evidence |
+| Trivy | Secondary SBOM vulnerability scan + DB metadata |
+| OpenSSL | Key generation and signature verification |
 
-## GitLab CI/CD Pipeline
+## Prerequisites
 
-The pipeline (`.gitlab-ci.yml`) performs the same steps when using GitLab:
+Minimum for local reproducibility:
 
-1. **Build** the example C++ application
-2. **Generate SBOMs** (source and build outputs) with Syft (CycloneDX format)
-3. **Enrich SBOMs** with custom app metadata via `merge-sbom.ps1`
-4. **Sign and validate** SBOMs using OpenSSL RSA signatures
-5. **Validate** SBOM structure (CycloneDX-CLI) and NTIA elements (check-ntia.ps1, Hoppr)
-6. **Vulnerability scan** with Grype and Trivy (cross-check results against open CVE sources)
-7. **Produce** vulnerability analysis report
+- PowerShell 7+
+- Docker Desktop (or Podman)
+- Python 3.10+ (for UI backend)
+- GNU Make and a C++ compiler (for `example-app`)
 
-**Artifacts** (available after each run):
+Optional but recommended:
 
-- `example-app/build/` — compiled binary and build output
-- `sbom/` — raw SBOMs, enriched SBOMs, signatures
-- `reports/` — build log, Grype report, Trivy report, vulnerability analysis, NTIA summary, signature checks, vulnerability DB status evidence
+- GitHub CLI (`gh`) for GitHub pipeline integration in UI backend
 
-## Local Usage
+## Quick Start (Local)
 
-### Prerequisites
-
-- Docker or Podman
-- PowerShell 7+ (for scripts)
-- GNU Make (to build the app)
-
-### Build the app
-
-```bash
-cd example-app
-make
-./build/sbom_demo_app
-```
-
-### Generate SBOM locally (PowerShell)
-
-Requires: Docker Desktop (or Podman), PowerShell 7+
-
-**Native mode** (scan `example-app/` directory):
+### 1) Clone and install UI dependencies
 
 ```powershell
-cd C:\path\to\sbom-attestation
-pwsh -ExecutionPolicy Bypass -File ./generate-sbom.ps1 -Mode native
-```
-
-**Container mode** (build Docker image, then scan):
-
-```powershell
-cd C:\path\to\sbom-attestation
-pwsh -ExecutionPolicy Bypass -File ./generate-sbom.ps1 -Mode container
-```
-
-**With Podman instead of Docker:**
-
-```powershell
-pwsh -ExecutionPolicy Bypass -File ./generate-sbom.ps1 -Mode native -ContainerRuntime podman
-```
-
-Outputs: `sbom/`, `reports/` (includes NTIA summary, Hoppr log).
-
-### SBOM Generator UI (Flask)
-
-Run the backend-driven UI that supports `generate -> sign -> scan` actions:
-
-```powershell
-cd C:\path\to\sbom-attestation
+git clone https://github.com/Richmansolom/SBOM-ATTESTATION.git
+cd .\SBOM-ATTESTATION
 python -m pip install -r .\sbom_ui\requirements.txt
+```
+
+### 2) Build the reference C++ app
+
+```powershell
+cd .\example-app
+make
+.\build\sbom_demo_app.exe
+cd ..
+```
+
+### 3) Generate SBOM and evidence
+
+Native mode:
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode native
+```
+
+Container mode:
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode container
+```
+
+Podman mode:
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode native -ContainerRuntime podman
+```
+
+### 4) Verify expected outputs
+
+After a successful run, confirm these key files exist:
+
+- `sbom/sbom-source.enriched.json`
+- `sbom/pki/sbom_public_key.pem`
+- `reports/cyclonedx-validate.txt`
+- `reports/hoppr-ntia.log`
+- `reports/grype-report.json`
+- `reports/trivy-sbom-report.json`
+- `reports/vulnerability-analysis.txt`
+- `reports/grype-db-status.txt`
+
+## Mission Control UI
+
+Run locally:
+
+```powershell
 python .\sbom_ui\app.py
 ```
 
-Then open:
+Open:
 
 - `http://127.0.0.1:5000`
 
-Notes:
-- This UI targets the example C++ application in `example-app/`.
-- It uses Dockerized tools under the hood for signing/scanning endpoints.
+Optional local vanity URL:
 
-#### Optional local vanity URL
-
-To open the UI as `http://www.sbomcontrol.com` on your own machine:
-
-1. Run as Administrator and add this line to `C:\Windows\System32\drivers\etc\hosts`:
+1. Add to hosts file as Administrator:
    - `127.0.0.1 www.sbomcontrol.com`
-2. Start the UI on port 80:
+2. Start UI on port 80:
    - `pwsh -ExecutionPolicy Bypass -File .\start-ui-local.ps1`
 3. Open:
    - `http://www.sbomcontrol.com`
 
-### Free Public Hosting
+### UI Provider Modes (GitHub + GitLab)
 
-You can host this project for free using:
+The UI supports both providers:
 
-- **GitHub Pages** for the frontend (`sbom_ui/static`)
-- **Render free web service** for the Flask API (`sbom_ui/app.py`)
+- GitHub Actions mode
+- GitLab CI mode
 
-See `FREE_HOSTING_SETUP.md` for full setup and API wiring (`?api=https://...`).
+Connect modal fields:
 
-### Container mode
+- Provider: `github` or `gitlab`
+- Project path: `namespace/project`
+- Access token: optional for public read; often required for pipeline trigger
 
-```bash
-cd example-app
-docker build -t sbom-demo-app:1.0 .
-docker run --rm sbom-demo-app:1.0
-```
+## CI/CD Parity
 
-## Key Distribution Infrastructure (PKI)
+### GitHub
 
-Per the attestation requirement, this project implements a PKI for signed SBOMs:
+Workflow: `.github/workflows/sbom-pipeline.yml`
 
-- **RSA 3072-bit** keys (CNSA 2.0 aligned)
-- **RS384** (RSA-SHA384) signatures embedded in SBOM (CycloneDX 1.6)
-- **Script**: `scripts/sign-sbom.sh` — generates keys, signs canonical JSON, embeds signature
-- **Public key** distributed with SBOM (in `signature.publicKey`) and artifacts (`sbom/pki/sbom_public_key.pem`)
+Stages include:
 
-For production PKI with root CA chain of trust, see `pki/README.md`. Manual verification: remove `signature` from JSON, canonicalize, then `openssl dgst -sha384 -verify pubkey.pem -signature sig.bin canonical.json`.
+- Build
+- Generate
+- Sign
+- Scan
+- Report
 
-## COTS Tools Used
+### GitLab
 
-| Tool           | Purpose                          |
-|----------------|----------------------------------|
-| Syft           | Component/package SBOM generation (CycloneDX) |
-| Trivy          | Filesystem SBOM generation (CycloneDX) |
-| Distro2SBOM    | Distro/package manager SBOM generation |
-| CycloneDX-CLI  | SBOM structure validation        |
-| Hoppr          | NTIA Minimum Elements validation |
-| Grype          | SBOM vulnerability scanning + DB/provider evidence |
-| OpenSSL        | Key generation and signing       |
+Workflow: `.gitlab-ci.yml`
 
-## Using for Your Software
+Implements the same logical stages and artifacts as GitHub.
 
-This SBOM pipeline is **not tied to the example app**. To use it for your own software:
+## Attestation and Validation Model
 
-1. Point the pipeline at your app path (update `APP_DIR` in CI or pass your path to Syft/merge-sbom)
-2. Create `app-metadata.json` for your application (name, version, supplier, etc.)
-3. Ensure your C/C++ project has ≥3 custom components and ≥2 dependency levels if that requirement applies
+This implementation combines multiple validation layers:
 
-The same pipeline, scripts, and PKI work for any software.
+1. CycloneDX structural validation
+2. NTIA minimum-elements validation (`check-ntia.ps1`)
+3. Hoppr NTIA profile validation
+4. Signature generation and verification
+5. Dual vulnerability scanner cross-check (Grype + Trivy)
+6. Vulnerability DB freshness evidence capture
 
-## Custom Metadata Format
+## Required Artifact Set for Reproducibility
 
-`app-metadata.json` defines the custom application component. It uses JSON for ease of maintenance. Alternative formats (CSV, XML, lockfile) could be supported by adapting `merge-sbom.ps1`.
+If another team wants to claim "same implementation class", they should produce and retain:
+
+- Enriched SBOM (`sbom-source.enriched.json`)
+- Signed SBOM and signature/public-key evidence
+- NTIA check output (`reports/ntia-summary.txt` when available)
+- Hoppr output (`reports/hoppr-ntia.log`, `reports/hoppr-ntia-results.json`)
+- Grype report and DB status/provider files
+- Trivy report and DB status/update evidence
+- Combined vulnerability summary report
+
+## How to Adapt This for Another C/C++ Project
+
+1. Replace `example-app/` with your project path
+2. Update metadata source (`app-metadata.json`) with your:
+   - supplier
+   - component names
+   - versions
+   - dependency relationships
+3. Ensure build command in CI and local scripts matches your build system
+4. Keep SBOM output names stable to preserve downstream tooling/UI compatibility
+5. Re-run local generation and confirm artifact set
+6. Run CI on both GitHub and GitLab and compare outputs
+
+## Quality Gate Checklist
+
+Use this checklist before accepting a run:
+
+- Build succeeds
+- SBOM generated for intended target
+- Enrichment merged correctly
+- CycloneDX validation passes
+- NTIA checks pass (script + Hoppr)
+- Signature verification passes
+- Grype and Trivy reports generated
+- DB status files generated and fresh
+- Artifacts uploaded and downloadable
+
+## Free Hosting (Optional)
+
+- Frontend: GitHub Pages (`sbom_ui/static`)
+- Backend API: Render (`sbom_ui/app.py`)
+
+See `FREE_HOSTING_SETUP.md` for deployment wiring using `?api=https://...`.
+
+## Security Notes
+
+- Never commit private signing keys
+- Keep branch protections enabled for production branches
+- Use least-privilege tokens for pipeline triggers
+- Treat generated vulnerability reports as sensitive operational data
 
 ## License
 
