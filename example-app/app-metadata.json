@@ -2,14 +2,14 @@
   "name": "Software Bill of Materials (SBOM) Attestation",
   "component_type": "application",
   "version": "1.0.0",
-  "description": "SBOM attestation example - Lockheed Martin Corporation. C++ app with multi-level custom components.",
+  "description": "Example C++ application for SBOM attestation - Lockheed Martin Corporation. Replace with your software; SBOM pipeline works for any C/C++ project.",
   "language": "C++",
   "author": "Lockheed Martin Corporation",
   "license": "MIT",
   "build_system": "Makefile",
   "entry_point": "./build/sbom_demo_app",
   "source_file": "example-app/src/main.cpp",
-  "repository": "https://github.com/YOUR_ORG/sbom-attestation",
+  "repository": "https://github.com/Richmansolom/SBOM-ATTESTATION",
   "supplier": {
     "name": "Lockheed Martin Corporation",
     "url": ["https://www.lockheedmartin.com"]

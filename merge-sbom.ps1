@@ -32,10 +32,76 @@ function Get-DefaultSupplier($component) {
   return "Unknown"
 }
 
-function Ensure-LicensingField($licEntry) {
-  if (-not $licEntry.PSObject.Properties.Name -contains "licensing") {
-    $licEntry | Add-Member -MemberType NoteProperty -Name licensing -Value @{} -Force
+function Get-Slug($s) {
+  if ([string]::IsNullOrWhiteSpace($s)) { return "unknown" }
+  $slug = [string]$s -replace '[^a-zA-Z0-9]+', '_' -replace '^_|_$', ''
+  if ([string]::IsNullOrWhiteSpace($slug)) { return "unknown" }
+  return $slug.ToLowerInvariant()
+}
+
+function Get-PurlFromApp($app) {
+  $purl = $app.purl
+  if (-not [string]::IsNullOrWhiteSpace($purl)) { return $purl.Trim() }
+  $repo = [string]$app.repository
+  if ($repo -match 'github\.com[/:]([^/]+)/([^/\.]+)') {
+    $org = $Matches[1]; $proj = $Matches[2]
+    return "pkg:github/$org/$proj@$($app.version)"
   }
+  $slug = Get-Slug $app.name
+  return "pkg:generic/$slug@$($app.version)"
+}
+
+function Get-CpeFromApp($app) {
+  $cpe = $app.cpe
+  if (-not [string]::IsNullOrWhiteSpace($cpe)) { return $cpe.Trim() }
+  $vendorName = "unknown"
+  if ($app.supplier -and $app.supplier.name) { $vendorName = $app.supplier.name }
+  $vendor = Get-Slug $vendorName
+  $product = Get-Slug $app.name
+  $ver = [string]$app.version
+  if ([string]::IsNullOrWhiteSpace($ver)) { $ver = "0" }
+  return "cpe:2.3:a:$($vendor):$($product):$($ver):*:*:*:*:*:*:*"
+}
+
+# SPDX license id -> { name, url } for proper CycloneDX licensing structure
+$script:SPDX_LICENSES = @{
+  "MIT" = @{ name = "MIT License"; url = "https://spdx.org/licenses/MIT.html" }
+  "Apache-2.0" = @{ name = "Apache License 2.0"; url = "https://spdx.org/licenses/Apache-2.0.html" }
+  "Apache-1.1" = @{ name = "Apache Software License 1.1"; url = "https://spdx.org/licenses/Apache-1.1.html" }
+  "BSD-2-Clause" = @{ name = "BSD 2-Clause License"; url = "https://spdx.org/licenses/BSD-2-Clause.html" }
+  "BSD-3-Clause" = @{ name = "BSD 3-Clause License"; url = "https://spdx.org/licenses/BSD-3-Clause.html" }
+  "GPL-2.0-only" = @{ name = "GNU General Public License v2.0 only"; url = "https://spdx.org/licenses/GPL-2.0-only.html" }
+  "GPL-2.0" = @{ name = "GNU General Public License v2.0"; url = "https://spdx.org/licenses/GPL-2.0.html" }
+  "GPL-3.0" = @{ name = "GNU General Public License v3.0"; url = "https://spdx.org/licenses/GPL-3.0.html" }
+  "GPL-3.0-only" = @{ name = "GNU General Public License v3.0 only"; url = "https://spdx.org/licenses/GPL-3.0-only.html" }
+  "LGPL-2.1" = @{ name = "GNU Lesser General Public License v2.1"; url = "https://spdx.org/licenses/LGPL-2.1.html" }
+  "LGPL-3.0" = @{ name = "GNU Lesser General Public License v3.0"; url = "https://spdx.org/licenses/LGPL-3.0.html" }
+  "MPL-2.0" = @{ name = "Mozilla Public License 2.0"; url = "https://spdx.org/licenses/MPL-2.0.html" }
+  "ISC" = @{ name = "ISC License"; url = "https://spdx.org/licenses/ISC.html" }
+  "Unlicense" = @{ name = "The Unlicense"; url = "https://spdx.org/licenses/Unlicense.html" }
+}
+
+function ToCycloneDxLicenseEntry($licenseInput) {
+  # Perpetual OSS licenses: use far-future expiration (ISO 8601) per CycloneDX licensing schema
+  $perpetualExpiration = "2099-12-31T23:59:59Z"
+  $raw = [string]$licenseInput
+  if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq "unknown") {
+    return @{ license = @{ name = "unknown"; licensing = @{ expiration = $perpetualExpiration } } }
+  }
+  $id = $raw.Trim()
+  $spdx = $script:SPDX_LICENSES[$id]
+  if ($spdx) {
+    return @{
+      license = @{
+        id = $id
+        name = $spdx.name
+        url = $spdx.url
+        licensing = @{ expiration = $perpetualExpiration }
+      }
+    }
+  }
+  # Unknown but named license - use name, no URL
+  return @{ license = @{ name = $raw; licensing = @{ expiration = $perpetualExpiration } } }
 }
 
 function Normalize-ComponentLicenses($component) {
@@ -50,7 +116,7 @@ function Normalize-ComponentLicenses($component) {
     }
   }
   if (-not $component.licenses -or $component.licenses.Count -eq 0) {
-    $licensesValue = @(@{ license = @{ name = "unknown" }; licensing = @{} })
+    $licensesValue = @(ToCycloneDxLicenseEntry "unknown")
     if ($component.PSObject.Properties.Name -contains "licenses") {
       $component.licenses = $licensesValue
     } else {
@@ -62,22 +128,26 @@ function Normalize-ComponentLicenses($component) {
   foreach ($lic in @($component.licenses)) {
     if ($null -eq $lic) { continue }
     if ($lic -is [string]) {
-      $normalized += @{ license = @{ name = [string]$lic }; licensing = @{} }
+      $normalized += ToCycloneDxLicenseEntry [string]$lic
       continue
     }
     if ($lic.PSObject.Properties.Name -contains "expression") {
-      Ensure-LicensingField $lic
+      if (-not $lic.PSObject.Properties.Name -contains "licensing") {
+        $lic | Add-Member -MemberType NoteProperty -Name licensing -Value @{ expression = $lic.expression } -Force
+      }
       $normalized += $lic
       continue
     }
     $licenseObj = $lic.license
-    if ($licenseObj -is [string]) { $licenseObj = @{ name = [string]$licenseObj } }
-    elseif (-not $licenseObj) { $licenseObj = @{ name = "unknown" } }
-    if (-not ($licenseObj.PSObject.Properties.Name -contains "name") -or [string]::IsNullOrWhiteSpace([string]$licenseObj.name)) {
-      $licenseObj | Add-Member -MemberType NoteProperty -Name name -Value "unknown" -Force
+    $licId = $null
+    if ($licenseObj -is [string]) { $licId = [string]$licenseObj }
+    elseif ($licenseObj -and $licenseObj.id) { $licId = [string]$licenseObj.id }
+    elseif ($licenseObj -and $licenseObj.name) { $licId = [string]$licenseObj.name }
+    if ($licId) {
+      $normalized += ToCycloneDxLicenseEntry $licId
+    } else {
+      $normalized += ToCycloneDxLicenseEntry "unknown"
     }
-    Ensure-LicensingField $lic
-    $normalized += $lic
   }
   $component.licenses = $normalized
 }
@@ -113,7 +183,7 @@ if ($sbom.metadata.PSObject.Properties.Name -contains "supplier") {
 }
 
 $appLicense = SafeStr $app.license
-$licensesValue = @(@{ license = @{ name = $appLicense }; licensing = @{} })
+$licensesValue = @(ToCycloneDxLicenseEntry $appLicense)
 $meta = $sbom.metadata
 if (-not $meta.licenses -or $meta.licenses.Count -eq 0) {
   $meta | Add-Member -MemberType NoteProperty -Name licenses -Value $licensesValue -Force
@@ -121,7 +191,9 @@ if (-not $meta.licenses -or $meta.licenses.Count -eq 0) {
 
 $appName = SafeStr $app.name
 $appVersion = SafeStr $app.version
-$appBomRef = "pkg:generic/$($appName)@$($appVersion)"
+$appPurl = Get-PurlFromApp $app
+$appCpe = Get-CpeFromApp $app
+$appBomRef = $appPurl
 
 $customComponent = @{
   "bom-ref"   = $appBomRef
@@ -131,7 +203,9 @@ $customComponent = @{
   description = SafeStr $app.description
   publisher   = $supplierName
   supplier    = @{ name = $supplierName; url = $supplierUrls }
-  licenses    = @(@{ license = @{ name = SafeStr $app.license }; licensing = @{} })
+  purl        = $appPurl
+  cpe         = $appCpe
+  licenses    = @(ToCycloneDxLicenseEntry (SafeStr $app.license))
   externalReferences = @(@{ type = "vcs"; url = SafeStr $app.repository })
   properties = @(
     @{ name = "language"; value = SafeStr $app.language },
@@ -145,8 +219,15 @@ $customComponent = @{
 if (-not $sbom.components) { $sbom | Add-Member -MemberType NoteProperty -Name components -Value @() }
 
 $already = $false
+$rootBomRef = $appBomRef
 foreach ($c in $sbom.components) {
-  if ($c.name -eq $appName -and $c.version -eq $appVersion) { $already = $true; break }
+  if ($c.name -eq $appName -and $c.version -eq $appVersion) {
+    $already = $true
+    $rootBomRef = $c.'bom-ref'
+    if (-not $c.purl) { $c | Add-Member -MemberType NoteProperty -Name purl -Value $appPurl -Force }
+    if (-not $c.cpe) { $c | Add-Member -MemberType NoteProperty -Name cpe -Value $appCpe -Force }
+    break
+  }
 }
 if (-not $already) { $sbom.components += $customComponent }
 
@@ -164,15 +245,15 @@ foreach ($c in $sbom.components) {
 
 $depRefs = @()
 foreach ($c in $sbom.components) {
-  if ($c.'bom-ref' -ne $appBomRef) { $depRefs += $c.'bom-ref' }
+  if ($c.'bom-ref' -ne $rootBomRef) { $depRefs += $c.'bom-ref' }
 }
 
 $rootIndex = -1
 for ($i = 0; $i -lt $sbom.dependencies.Count; $i++) {
-  if ($sbom.dependencies[$i].ref -eq $appBomRef) { $rootIndex = $i; break }
+  if ($sbom.dependencies[$i].ref -eq $rootBomRef) { $rootIndex = $i; break }
 }
 
-$rootDep = @{ ref = $appBomRef; dependsOn = $depRefs }
+$rootDep = @{ ref = $rootBomRef; dependsOn = $depRefs }
 if ($rootIndex -ge 0) { $sbom.dependencies[$rootIndex] = $rootDep }
 else { $sbom.dependencies += $rootDep }
 
