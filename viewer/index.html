@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SBOM Viewer</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="container">
+    <header class="header">
+      <h1>SBOM Viewer</h1>
+      <p>CycloneDX SBOM + Grype vulnerability report</p>
+    </header>
+
+    <section class="card">
+      <h2>Load Files</h2>
+      <p class="muted">
+        Choose your files below. The selected files are shown before parsing.
+      </p>
+
+      <div class="input-grid">
+        <label class="field">
+          <span>SBOM (CycloneDX JSON)</span>
+          <input id="sbomFile" type="file" accept=".json,.cdx.json,application/json" />
+        </label>
+        <label class="field">
+          <span>Vulnerability report (Grype JSON)</span>
+          <input id="vulnFile" type="file" accept=".json,application/json" />
+        </label>
+      </div>
+
+      <div class="actions">
+        <button id="loadBtn" type="button">Load Selected Files</button>
+      </div>
+
+      <div class="upload-preview">
+        <h3>Files queued for upload</h3>
+        <ul id="fileQueue" class="file-list"></ul>
+      </div>
+    </section>
+
+    <section class="stats-grid">
+      <article class="stat">
+        <h4>Components</h4>
+        <p id="componentsCount">0</p>
+      </article>
+      <article class="stat">
+        <h4>Dependencies</h4>
+        <p id="dependenciesCount">0</p>
+      </article>
+      <article class="stat">
+        <h4>Vulnerabilities</h4>
+        <p id="vulnerabilitiesCount">0</p>
+      </article>
+      <article class="stat">
+        <h4>SBOM Timestamp</h4>
+        <p id="sbomTimestamp">-</p>
+      </article>
+    </section>
+
+    <section class="card">
+      <h2>Components</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Version</th>
+              <th>Type</th>
+              <th>PURL</th>
+              <th>Licenses</th>
+            </tr>
+          </thead>
+          <tbody id="componentsTableBody">
+            <tr>
+              <td colspan="5" class="empty">No data loaded yet.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
