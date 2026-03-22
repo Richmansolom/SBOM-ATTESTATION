@@ -1446,6 +1446,7 @@ function SBOMPage() {
   const [view, setView] = useState('table');
   const [err, setErr] = useState('');
   const [drag, setDrag] = useState(false);
+  const [loadingApi, setLoadingApi] = useState(false);
 
   function load(file) {
     if (!file) return;
@@ -1454,6 +1455,25 @@ function SBOMPage() {
     r.onerror = () => setErr('Failed to read file');
     r.readAsText(file);
   }
+
+  async function loadFromApi() {
+    setLoadingApi(true);
+    try {
+      const r = await fetch(apiUrl('/api/sbom'));
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
+      setSbom(j);
+      setErr('');
+    } catch (e) {
+      setErr(`No local SBOM yet: ${e.message}`);
+    } finally {
+      setLoadingApi(false);
+    }
+  }
+
+  useEffect(() => {
+    loadFromApi();
+  }, []);
 
   const types = useMemo(() => sbom ? ['All', ...new Set(sbom.components?.map(c=>c.type)||[])] : [], [sbom]);
   const filtered = useMemo(() => {
@@ -1470,6 +1490,11 @@ function SBOMPage() {
       <div className="page-hd"><div><div className="page-title">SBOM Viewer</div><div className="page-sub">CycloneDX 1.4 · Component Intelligence</div></div></div>
       <div className="card">
         <div className="card-body">
+          <div className="flex gap-6" style={{marginBottom:12,flexWrap:'wrap'}}>
+            <button className="btn btn-outline-gold" onClick={loadFromApi} disabled={loadingApi}>
+              {loadingApi ? 'Loading...' : 'Load Latest SBOM'}
+            </button>
+          </div>
           <div className={`dropzone${drag?' drag':''}`}
             onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)}
             onDrop={e=>{e.preventDefault();setDrag(false);load(e.dataTransfer.files[0]);}}
@@ -1595,6 +1620,10 @@ function VulnPage() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    loadFromApi('grype');
+  }, []);
 
   const normalized = useMemo(() => {
     if (!data) return [];
