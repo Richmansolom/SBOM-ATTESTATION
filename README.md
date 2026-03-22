@@ -246,6 +246,19 @@ See `FREE_HOSTING_SETUP.md` for deployment wiring using `?api=https://...`.
 - Use least-privilege tokens for pipeline triggers
 - Treat generated vulnerability reports as sensitive operational data
 
+## Data Usage and Management Plan (Current Pipeline)
+
+All SBOM outputs are treated as sensitive software supply-chain records. The following reflects the repository's current behavior and CI configuration.
+
+- **Source code authority:** GitHub (`Richmansolom/SBOM-ATTESTATION`) is the primary maintained source. GitLab is kept aligned through sync updates (direct push when allowed, or protected-branch merge request flow).
+- **SBOM artifacts:** SBOM files under `sbom/` are published as CI artifacts in both GitHub Actions and GitLab CI.
+- **Artifact retention:** Current retention is **7 days** (GitHub `retention-days: 7`, GitLab `expire_in: 1 week`), not three months.
+- **Vulnerability reports:** Grype and Trivy outputs are archived in `reports/` (JSON and table/text outputs, plus `vulnerability-analysis.txt`, and DB status/update/provider evidence). HTML vulnerability reports are not currently produced by default.
+- **Cryptographic keys:** `scripts/sign-sbom.sh` currently generates an RSA keypair in `sbom/pki/` at runtime if keys do not exist. Because CI artifacts include `sbom/`, private key material can be present in artifacts unless explicitly excluded. This is functional for demo/testing but should be hardened for production.
+- **Credentials and tokens:** The UI stores connection config in browser `sessionStorage` (`sbom_cfg`). If provided, tokens are sent only to this backend via `X-SBOM-TOKEN` for provider API calls. Tokens are optional for public read operations and are typically required for protected trigger operations.
+- **External data flows:** SBOM processing/scanning is executed locally in runner containers. The pipeline does pull vulnerability databases and container images from upstream registries (for example, Grype DB and Trivy DB sources).
+- **PII handling:** The pipeline and UI are designed for software/component metadata and do not intentionally collect or process personally identifiable information (PII).
+
 ## License
 
 MIT
