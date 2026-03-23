@@ -98,8 +98,8 @@ jobs:
           PKI_DIR="$SBOM_DIR/pki"
           cp "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/sbom-source.enriched.unsigned.json"
           cp "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.unsigned.json"
-          docker run --rm -v "$GITHUB_WORKSPACE:/data" cyclonedx/cyclonedx-cli:latest convert --input-file "/data/$SBOM_DIR/sbom-source.enriched.json" --output-file "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json" --output-format json --output-version v1_6
-          docker run --rm -v "$GITHUB_WORKSPACE:/data" cyclonedx/cyclonedx-cli:latest convert --input-file "/data/$SBOM_DIR/sbom-source.enriched.json" --output-file "/data/$SBOM_DIR/sbom-build.enriched.unsigned.v16.json" --output-format json --output-version v1_6
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" cyclonedx/cyclonedx-cli:latest convert --input-file "/data/$SBOM_DIR/sbom-source.enriched.json" --output-file "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json" --output-format json --output-version v1_5
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" cyclonedx/cyclonedx-cli:latest convert --input-file "/data/$SBOM_DIR/sbom-source.enriched.json" --output-file "/data/$SBOM_DIR/sbom-build.enriched.unsigned.v16.json" --output-format json --output-version v1_5
           bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/sbom-source.enriched.signed.json" "$PKI_DIR"
           mv "$SBOM_DIR/sbom-source.enriched.signed.json" "$SBOM_DIR/sbom-source.enriched.json"
           bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.signed.json" "$PKI_DIR"
