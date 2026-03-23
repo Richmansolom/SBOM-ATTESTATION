@@ -117,8 +117,8 @@ jobs:
           docker run --rm -v "$GITHUB_WORKSPACE:/data" -v "$RUNNER_TEMP/grype-db:/root/.cache/grype/db" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o json > "$REPORT_DIR/grype-report.json"
           docker run --rm -v "$GITHUB_WORKSPACE:/data" -v "$RUNNER_TEMP/grype-db:/root/.cache/grype/db" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o table > "$REPORT_DIR/grype-report.txt"
 
-          docker run --rm -v "$GITHUB_WORKSPACE:/data" aquasec/trivy:0.50.0 sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format json --output "/data/$REPORT_DIR/trivy-sbom-report.json" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json"
-          docker run --rm -v "$GITHUB_WORKSPACE:/data" aquasec/trivy:0.50.0 sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format table --output "/data/$REPORT_DIR/trivy-sbom-report.txt" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json"
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" aquasec/trivy:0.50.0 sbom --scanners vuln --format json --output "/data/$REPORT_DIR/trivy-sbom-report.json" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json"
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" aquasec/trivy:0.50.0 sbom --scanners vuln --format table --output "/data/$REPORT_DIR/trivy-sbom-report.txt" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json"
 
       - name: Generate vulnerability analysis report
         run: |
