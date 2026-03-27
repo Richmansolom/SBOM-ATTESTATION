@@ -15,3 +15,9 @@ sbom-signing/
 
 # Reports (CI generates; optional to ignore if you want local reports)
 # reports/
+
+# Local UI / tooling
+.cache/
+.ui_uploads/
+sbom_ui/__pycache__/
+*.pyc
