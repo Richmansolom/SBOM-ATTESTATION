@@ -1,1 +1,1 @@
-web: gunicorn --chdir sbom_ui app:app
+web: gunicorn --chdir sbom_ui app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120

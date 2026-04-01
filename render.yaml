@@ -4,7 +4,8 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r sbom_ui/requirements.txt
-    startCommand: gunicorn --chdir sbom_ui app:app
+    startCommand: gunicorn --chdir sbom_ui app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.6
