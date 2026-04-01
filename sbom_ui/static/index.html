@@ -822,7 +822,8 @@ tr:hover td { background: var(--bg2); }
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 /* ═══ HELPERS ═══ */
-const API_BASE = (() => {
+let API_BASE = (() => {
+  const DEFAULT_PUBLIC_API = 'https://sbom-control-api.onrender.com';
   const params = new URLSearchParams(window.location.search);
   if (params.get('reset_api') === '1') {
     localStorage.removeItem('sbom_api_base');
@@ -834,18 +835,28 @@ const API_BASE = (() => {
     return normalized;
   }
   const host = (window.location.hostname || '').toLowerCase();
+  const port = String(window.location.port || '');
   const proto = window.location.protocol || '';
   // When Flask serves the UI locally, always use THIS page's origin — not localStorage — so refresh never
   // points at an old port/host (was the main cause of "can't connect" after reload).
+  const isLoopbackHost = host === 'localhost' || host === '127.0.0.1';
+  const isSbomAlias = host === 'www.sbomcontrol.com' || host === 'sbomcontrol.com';
+  // Local hosts-file alias runs with an explicit dev port (e.g. :5000, :8765). Public domains typically do not.
+  const isLikelyLocalAlias = isSbomAlias && !!port && port !== '80' && port !== '443';
   const isLocalMissionControl =
     proto.startsWith('http') &&
     !host.endsWith('.github.io') &&
-    (host === 'localhost' || host === '127.0.0.1' || host === 'www.sbomcontrol.com' || host === 'sbomcontrol.com');
+    (isLoopbackHost || isLikelyLocalAlias);
   if (isLocalMissionControl) {
     return window.location.origin.replace(/\/$/, '');
   }
   const saved = (localStorage.getItem('sbom_api_base') || '').trim();
   if (saved) return saved.replace(/\/$/, '');
+  // GitHub Pages serves only static files, so defaulting to same-origin breaks /api calls.
+  // Fall back to the public Render API unless the user overrides with ?api=...
+  if (host.endsWith('.github.io') || isSbomAlias) {
+    return DEFAULT_PUBLIC_API;
+  }
   const origin = window.location.origin;
   if (!origin || origin === 'null' || origin.startsWith('file')) {
     return 'http://127.0.0.1:5000';
@@ -854,6 +865,7 @@ const API_BASE = (() => {
 })();
 
 const apiUrl = (path) => `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
+const normalizeApiBase = (value) => String(value || '').trim().replace(/\/$/, '');
 
 const GL = (tok, proj, provider, path, opts={}) => {
   const url = new URL(apiUrl(`/api${path}`));
@@ -951,6 +963,7 @@ function ConnectModal({ onConnect }) {
   const [provider, setProvider] = useState('github');
   const [pid, setPid] = useState('');
   const [tok, setTok] = useState('');
+  const [apiBase, setApiBase] = useState(() => normalizeApiBase(localStorage.getItem('sbom_api_base') || API_BASE));
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
 
@@ -958,6 +971,11 @@ function ConnectModal({ onConnect }) {
     if (!pid) { setErr('Project path is required'); return; }
     setLoading(true); setErr('');
     try {
+      const nextBase = normalizeApiBase(apiBase);
+      if (nextBase) {
+        localStorage.setItem('sbom_api_base', nextBase);
+        API_BASE = nextBase;
+      }
       await GL(tok, pid, provider, '/pipelines?per_page=1');
       sessionStorage.setItem('sbom_cfg', JSON.stringify({ token: tok, projectId: pid, provider }));
       onConnect({ token: tok, projectId: pid, provider });
@@ -984,6 +1002,15 @@ function ConnectModal({ onConnect }) {
             <span className="field-label">{provider === 'gitlab' ? 'GitLab Project Path' : 'GitHub Repository'}</span>
             <input value={pid} onChange={e=>setPid(e.target.value)} placeholder="namespace/project-name"
               onKeyDown={e=>e.key==='Enter'&&connect()} autoFocus/>
+          </div>
+          <div className="field">
+            <span className="field-label">API Base URL</span>
+            <input
+              value={apiBase}
+              onChange={e=>setApiBase(e.target.value)}
+              placeholder="https://your-api.onrender.com"
+              onKeyDown={e=>e.key==='Enter'&&connect()}
+            />
           </div>
           <div className="field">
             <span className="field-label">Access Token {provider === 'github' ? '(recommended if gh CLI not installed)' : '(optional for public read)'}</span>
