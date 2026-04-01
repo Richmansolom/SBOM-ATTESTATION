@@ -149,6 +149,41 @@ Optional local vanity URL:
 3. Open:
    - `http://www.sbomcontrol.com`
 
+Important:
+
+- The hosts-file mapping (`127.0.0.1 www.sbomcontrol.com`) is local-only and points the domain to your own machine.
+- If you want public access, remove that hosts-file entry or use your GitHub Pages URL/custom domain DNS setup.
+- Leaving that entry in place can cause `ERR_CONNECTION_REFUSED` when no local server is running.
+
+### Public Access Quick Start (No Dependence on Your PC)
+
+To make the UI reachable by anyone, deploy frontend and backend separately:
+
+1. Deploy API backend (`sbom_ui/app.py`) to Render:
+   - Use this repo's `render.yaml`
+   - Service URL will look like: `https://sbom-control-api.onrender.com`
+2. Deploy frontend (`sbom_ui/static`) to GitHub Pages:
+   - This repo includes `.github/workflows/pages-ui.yml`
+   - Enable Pages with GitHub Actions in repo settings
+3. Open/share your Pages URL:
+   - `https://<user>.github.io/<repo>/`
+   - Example for this repo: `https://richmansolom.github.io/SBOM-ATTESTATION/`
+
+Current UI behavior:
+
+- On GitHub Pages, the frontend now auto-targets `https://sbom-control-api.onrender.com` by default.
+- If you use a different backend URL, override once using:
+  - `https://<user>.github.io/<repo>/?api=https://your-api-host`
+- The override is saved in browser localStorage (`sbom_api_base`) for future loads.
+- You can also set/update the API base URL directly in the UI Connect modal (`API Base URL` field).
+
+Detailed steps: see `FREE_HOSTING_SETUP.md`.
+
+Note:
+
+- Custom domains (for example `www.sbomcontrol.com`) require owning that domain and configuring DNS records at the domain registrar/DNS host.
+- Flask/local scripts cannot create a public DNS domain by themselves.
+
 ### UI Provider Modes (GitHub + GitLab)
 
 The UI supports both providers:
