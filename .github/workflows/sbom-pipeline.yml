@@ -119,9 +119,14 @@ jobs:
         run: |
           docker pull anchore/grype:latest
           mkdir -p "$RUNNER_TEMP/grype-db"
-          docker run --rm -v "$RUNNER_TEMP/grype-db:/root/.cache/grype/db" anchore/grype:latest db update > "$REPORT_DIR/grype-db-update.txt" 2>&1 || true
-          docker run --rm -v "$RUNNER_TEMP/grype-db:/root/.cache/grype/db" anchore/grype:latest db status > "$REPORT_DIR/grype-db-status.txt" 2>&1 || true
-          docker run --rm -v "$RUNNER_TEMP/grype-db:/root/.cache/grype/db" anchore/grype:latest db providers > "$REPORT_DIR/grype-db-providers.txt" 2>&1 || true
+          docker run --rm -v "$RUNNER_TEMP/grype-db:/root/.cache/grype/db" anchore/grype:latest db update > "$REPORT_DIR/grype-db-update.txt" 2>&1
+          docker run --rm -v "$RUNNER_TEMP/grype-db:/root/.cache/grype/db" anchore/grype:latest db status > "$REPORT_DIR/grype-db-status.txt" 2>&1
+          docker run --rm -v "$RUNNER_TEMP/grype-db:/root/.cache/grype/db" anchore/grype:latest db providers > "$REPORT_DIR/grype-db-providers.txt" 2>&1
+          if grep -qi "current database is invalid" "$REPORT_DIR/grype-db-status.txt"; then
+            echo "Grype DB freshness check failed:"
+            cat "$REPORT_DIR/grype-db-status.txt"
+            exit 1
+          fi
 
           docker run --rm -v "$GITHUB_WORKSPACE:/data" -v "$RUNNER_TEMP/grype-db:/root/.cache/grype/db" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o json > "$REPORT_DIR/grype-report.json"
            docker run --rm -v "$GITHUB_WORKSPACE:/data" -v "$RUNNER_TEMP/grype-db:/root/.cache/grype/db" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o table > "$REPORT_DIR/grype-report.txt"
