@@ -656,6 +656,50 @@ def normalize_stage_status(status):
     return "pending"
 
 
+def derive_gitlab_stage_progress_from_trace(trace_text, job_status):
+    """Infer Build/Generate/Sign/Scan/Report progress from a single GitLab job trace."""
+    markers = [
+        ("Build", "build", "==> Build example C++ application"),
+        ("Generate", "sbom_generate", "==> Generate COTS SBOMs"),
+        ("Sign", "sbom_sign", "==> Sign SBOMs with embedded CycloneDX signature"),
+        ("Scan", "sbom_scan", "==> SBOM vulnerability scan using Grype + Trivy"),
+        ("Report", "report", "==> Generate vulnerability analysis report"),
+    ]
+    stage_states = [{"name": m[0], "stage": m[1], "status": "pending"} for m in markers]
+    text = (trace_text or "")
+    found = [m[2] in text for m in markers]
+    job_state = normalize_stage_status(job_status)
+
+    if job_state == "success":
+        for s in stage_states:
+            s["status"] = "success"
+        return stage_states
+
+    last_found_idx = -1
+    for idx, is_found in enumerate(found):
+        if is_found:
+            last_found_idx = idx
+
+    if last_found_idx < 0:
+        # No known marker yet; reflect current job lifecycle on Build only.
+        stage_states[0]["status"] = "running" if job_state == "running" else ("failed" if job_state == "failed" else "pending")
+        return stage_states
+
+    for idx in range(last_found_idx):
+        stage_states[idx]["status"] = "success"
+
+    if job_state == "running":
+        stage_states[last_found_idx]["status"] = "running"
+    elif job_state == "failed":
+        stage_states[last_found_idx]["status"] = "failed"
+    elif job_state == "canceled":
+        stage_states[last_found_idx]["status"] = "canceled"
+    else:
+        stage_states[last_found_idx]["status"] = "pending"
+
+    return stage_states
+
+
 def get_github_snapshot():
     repo = get_requested_repo() if has_request_context() else parse_repo_slug()
     runs_json = fetch_github_json(f"repos/{repo}/actions/runs?per_page=12")
@@ -1128,6 +1172,26 @@ def pipeline_jobs(run_id):
                     "duration": iso_duration_seconds(j.get("started_at"), j.get("finished_at")),
                 }
             )
+
+        # GitLab pipeline may be implemented as one consolidated job; infer logical stages from trace.
+        if len(mapped) == 1:
+            only = mapped[0]
+            trace_status, trace_out = gitlab_api(f"projects/{encoded_project}/jobs/{only.get('id')}/trace", token=token)
+            if trace_status < 300 and trace_out:
+                inferred = derive_gitlab_stage_progress_from_trace(trace_out, only.get("status"))
+                if inferred:
+                    synthetic = []
+                    for s in inferred:
+                        synthetic.append(
+                            {
+                                "id": only.get("id"),
+                                "name": s.get("name"),
+                                "status": s.get("status"),
+                                "stage": s.get("stage"),
+                                "duration": None,
+                            }
+                        )
+                    return jsonify(synthetic)
         return jsonify(mapped)
 
     data = fetch_github_json(f"repos/{repo}/actions/runs/{run_id}/jobs")
