@@ -195,7 +195,21 @@ Connect modal fields:
 
 - Provider: `github` or `gitlab`
 - Project path: `namespace/project`
-- Access token: optional for public read; often required for pipeline trigger
+- API Base URL: backend endpoint (for example `https://sbom-control-api.onrender.com`)
+- Access token: optional for public read; required for trigger unless backend env tokens are configured
+
+Mission Control behavior implemented:
+
+- GitHub and GitLab pipeline trigger from the same UI (`Pipelines -> Launch`)
+- GitHub job log view with backend token fallback
+- GitLab single-job pipelines mapped to logical stage strip (`Build -> Generate -> Sign -> Scan -> Report`) by parsing trace markers
+- Saved API base override via `?api=...` and Connect modal `API Base URL`
+
+Recommended backend env vars (Render/API host):
+
+- `GITHUB_TOKEN` for GitHub trigger/read/log flows
+- `GITLAB_TOKEN` for GitLab trigger/read flows
+- Optional: `GITLAB_TRIGGER_TOKEN` for GitLab trigger-token mode
 
 ## CI/CD Parity
 
