@@ -1330,13 +1330,29 @@ def job_trace(job_id):
 
     if not run_id:
         return "Missing run_id query parameter", 400
-    ght = _github_token_for_request()
+    ght = (get_requested_token() or os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN") or "").strip()
     if ght:
         code, log_body = github_rest_request(f"repos/{repo}/actions/jobs/{job_id}/logs", "GET", ght)
         if code == 200 and log_body:
             return log_body, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+        # Fallback: some GitHub environments may reject job-log endpoint while allowing run-log archives.
+        if run_id:
+            run_code, run_logs = github_rest_request(f"repos/{repo}/actions/runs/{run_id}/logs", "GET", ght)
+            if run_code == 200 and run_logs:
+                return run_logs, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+        # Token exists but API call failed; return actionable reason instead of misleading gh-cli guidance.
+        api_msg = log_body or "Unable to load workflow logs from GitHub API."
+        try:
+            parsed = json.loads(log_body or "{}")
+            api_msg = parsed.get("message") or api_msg
+        except Exception:
+            pass
+        return f"GitHub API log access failed ({code}): {api_msg}", 500, {"Content-Type": "text/plain; charset=utf-8"}
+
     if shutil.which("gh") is None:
-        return "Job logs require a GitHub token in Connect or the gh CLI.", 500, {"Content-Type": "text/plain; charset=utf-8"}
+        return "Job logs require a GitHub token (Connect or backend GITHUB_TOKEN) or the gh CLI.", 500, {"Content-Type": "text/plain; charset=utf-8"}
     code, out = run_cmd(["gh", "run", "view", str(run_id), "--repo", repo, "--job", str(job_id), "--log"])
     if code != 0:
         if "still in progress" in (out or "").lower():
