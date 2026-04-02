@@ -24,13 +24,13 @@ build_sbom_scan:
     - make -C $APP_DIR 2>&1 | tee "$REPORT_DIR/$BUILD_LOG"
     - echo "==> Generate COTS SBOMs (Syft + Trivy + Distro2SBOM)"
     - docker pull anchore/syft:latest
-    - docker pull aquasec/trivy:0.50.0
+    - docker pull aquasec/trivy:0.69.3
     - docker pull cyclonedx/cyclonedx-cli:latest
     - docker pull python:3.12-slim
     - docker run --rm -v "$CI_PROJECT_DIR:/src" anchore/syft:latest dir:/src/$APP_DIR -o cyclonedx-json > "$SBOM_DIR/sbom-source-syft.json"
     - docker run --rm -v "$CI_PROJECT_DIR:/src" anchore/syft:latest dir:/src/$APP_DIR/build -o cyclonedx-json > "$SBOM_DIR/sbom-build-syft.json"
-    - docker run --rm -v "$CI_PROJECT_DIR:/src" -v "$CI_PROJECT_DIR:/work" aquasec/trivy:0.50.0 filesystem --format cyclonedx --output "/work/$SBOM_DIR/sbom-source-trivy.json" /src/$APP_DIR
-    - docker run --rm -v "$CI_PROJECT_DIR:/src" -v "$CI_PROJECT_DIR:/work" aquasec/trivy:0.50.0 filesystem --format cyclonedx --output "/work/$SBOM_DIR/sbom-build-trivy.json" /src/$APP_DIR/build
+    - docker run --rm -v "$CI_PROJECT_DIR:/src" -v "$CI_PROJECT_DIR:/work" aquasec/trivy:0.69.3 filesystem --format cyclonedx --output "/work/$SBOM_DIR/sbom-source-trivy.json" /src/$APP_DIR
+    - docker run --rm -v "$CI_PROJECT_DIR:/src" -v "$CI_PROJECT_DIR:/work" aquasec/trivy:0.69.3 filesystem --format cyclonedx --output "/work/$SBOM_DIR/sbom-build-trivy.json" /src/$APP_DIR/build
     - docker run --rm -v "$CI_PROJECT_DIR:/work" python:3.12-slim bash -lc "pip install --no-cache-dir distro2sbom >/dev/null && python -m distro2sbom.cli --distro auto --system --sbom cyclonedx --format json --product-type operating-system --product-name sbom-runtime --product-version 1.0 --output-file /work/$SBOM_DIR/sbom-distro2sbom.json"
     - docker run --rm -v "$CI_PROJECT_DIR:/data" cyclonedx/cyclonedx-cli:latest merge --input-files "/data/$SBOM_DIR/sbom-source-syft.json" "/data/$SBOM_DIR/sbom-source-trivy.json" "/data/$SBOM_DIR/sbom-distro2sbom.json" --output-file "/data/$SBOM_DIR/sbom-source.json" --output-format json
     - docker run --rm -v "$CI_PROJECT_DIR:/data" cyclonedx/cyclonedx-cli:latest merge --input-files "/data/$SBOM_DIR/sbom-build-syft.json" "/data/$SBOM_DIR/sbom-build-trivy.json" "/data/$SBOM_DIR/sbom-distro2sbom.json" --output-file "/data/$SBOM_DIR/sbom-build.json" --output-format json
@@ -109,8 +109,8 @@ build_sbom_scan:
     - docker run --rm -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest db providers > "$REPORT_DIR/grype-db-providers.txt" 2>&1 || true
     - docker run --rm -v "$CI_PROJECT_DIR:/data" -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o json > "$REPORT_DIR/grype-report.json"
     - docker run --rm -v "$CI_PROJECT_DIR:/data" -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o table > "$REPORT_DIR/grype-report.txt"
-    - docker run --rm -v "$CI_PROJECT_DIR:/data" aquasec/trivy:latest sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format json --output "/data/$REPORT_DIR/trivy-sbom-report.json" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json"
-    - docker run --rm -v "$CI_PROJECT_DIR:/data" aquasec/trivy:latest sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format table --output "/data/$REPORT_DIR/trivy-sbom-report.txt" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json"
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" aquasec/trivy:0.69.3 sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format json --output "/data/$REPORT_DIR/trivy-sbom-report.json" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json"
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" aquasec/trivy:0.69.3 sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format table --output "/data/$REPORT_DIR/trivy-sbom-report.txt" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json"
     - echo "==> Generate vulnerability analysis report"
     - trivy_total=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$REPORT_DIR/trivy-sbom-report.json")
     - trivy_critical=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "$REPORT_DIR/trivy-sbom-report.json")
