@@ -46,6 +46,38 @@ def run_cmd(cmd):
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
+def run_cmd_stream(cmd, on_output=None):
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(REPO_ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        shell=False,
+        bufsize=1,
+    )
+    chunks = []
+    try:
+        if proc.stdout is not None:
+            for line in proc.stdout:
+                chunks.append(line)
+                if on_output:
+                    try:
+                        on_output(line)
+                    except Exception:
+                        pass
+        proc.wait()
+    finally:
+        if proc.stdout is not None:
+            try:
+                proc.stdout.close()
+            except Exception:
+                pass
+    return proc.returncode, "".join(chunks)
+
+
 def iso_duration_seconds(started_at, completed_at):
     try:
         if not started_at or not completed_at:
@@ -209,7 +241,7 @@ def build_temp_metadata(app_name, source_path):
     return path
 
 
-def run_generate_pipeline(body):
+def run_generate_pipeline(body, log_callback=None):
     ensure_dirs()
     body = body or {}
     mode = body.get("mode", "native")
@@ -241,7 +273,10 @@ def run_generate_pipeline(body):
     if image_tag:
         cmd.extend(["-ImageTag", image_tag])
 
-    code, output = run_cmd(cmd)
+    if log_callback:
+        code, output = run_cmd_stream(cmd, on_output=log_callback)
+    else:
+        code, output = run_cmd(cmd)
     if temp_meta_path and temp_meta_path.exists():
         try:
             temp_meta_path.unlink()
@@ -263,7 +298,18 @@ def _local_run_worker(run_id, body):
         run["status"] = "running"
         run["started_at"] = started.isoformat()
         LOCAL_RUNS[run_id] = run
-    result = run_generate_pipeline(body)
+    def _append_live_log(chunk):
+        if not chunk:
+            return
+        with LOCAL_RUNS_LOCK:
+            run = LOCAL_RUNS.get(run_id, {})
+            current = run.get("log", "")
+            # Prevent unbounded growth in long-running jobs.
+            next_log = (current + chunk)[-400000:]
+            run["log"] = next_log
+            LOCAL_RUNS[run_id] = run
+
+    result = run_generate_pipeline(body, log_callback=_append_live_log)
     finished = datetime.now(timezone.utc)
     duration = max(int((finished - started).total_seconds()), 0)
     with LOCAL_RUNS_LOCK:
