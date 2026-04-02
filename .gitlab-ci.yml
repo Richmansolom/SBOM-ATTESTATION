@@ -111,9 +111,14 @@ build_sbom_scan:
     - echo "==> SBOM vulnerability scan using Grype + Trivy (open CVE sources)"
     - docker pull anchore/grype:latest
     - mkdir -p /tmp/grype-db
-    - docker run --rm -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest db update > "$REPORT_DIR/grype-db-update.txt" 2>&1 || true
-    - docker run --rm -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest db status > "$REPORT_DIR/grype-db-status.txt" 2>&1 || true
-    - docker run --rm -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest db providers > "$REPORT_DIR/grype-db-providers.txt" 2>&1 || true
+    - docker run --rm -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest db update > "$REPORT_DIR/grype-db-update.txt" 2>&1
+    - docker run --rm -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest db status > "$REPORT_DIR/grype-db-status.txt" 2>&1
+    - docker run --rm -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest db providers > "$REPORT_DIR/grype-db-providers.txt" 2>&1
+    - |
+      if grep -qi "current database is invalid" "$REPORT_DIR/grype-db-status.txt"; then
+        echo "Grype DB freshness check failed: $(cat "$REPORT_DIR/grype-db-status.txt")"
+        exit 1
+      fi
     - docker run --rm -v "$CI_PROJECT_DIR:/data" -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o json > "$REPORT_DIR/grype-report.json"
     - docker run --rm -v "$CI_PROJECT_DIR:/data" -v /tmp/grype-db:/root/.cache/grype/db anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o table > "$REPORT_DIR/grype-report.txt"
     - docker run --rm -v "$CI_PROJECT_DIR:/data" aquasec/trivy:0.69.3 sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format json --output "/data/$REPORT_DIR/trivy-sbom-report.json" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json"
