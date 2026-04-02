@@ -277,6 +277,7 @@ See `FREE_HOSTING_SETUP.md` for deployment wiring using `?api=https://...`.
 ## Security Notes
 
 - Never commit private signing keys
+- In CI, prefer injecting `SBOM_PRIVATE_KEY_PEM` as a protected secret variable instead of generating a new private key in artifacts
 - Keep branch protections enabled for production branches
 - Use least-privilege tokens for pipeline triggers
 - Treat generated vulnerability reports as sensitive operational data
