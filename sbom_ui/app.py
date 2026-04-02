@@ -516,16 +516,28 @@ def github_rest_request(path, method="GET", token="", json_body=None):
 
 
 def fetch_github_json(path):
-    """Prefer HTTPS + PAT from Connect or GITHUB_TOKEN; fall back to gh CLI."""
+    """
+    Prefer GitHub REST API first.
+    - For public repos, unauthenticated GET should work.
+    - If a token exists, use it.
+    - Fall back to gh CLI only if REST fails.
+    """
     token = _github_token_for_request()
-    if token:
-        code, body = github_rest_request(path, "GET", token)
-        if code == 200 and body:
-            try:
-                return json.loads(body)
-            except Exception:
-                pass
-    return get_gh_json(path)
+
+    # Try GitHub REST first, even without token, for public-read support.
+    code, body = github_rest_request(path, "GET", token)
+    if code == 200 and body:
+        try:
+            return json.loads(body)
+        except Exception:
+            pass
+
+    # If rate-limited or unauthorized/private, gh may still help in local dev.
+    gh_data = get_gh_json(path)
+    if gh_data is not None:
+        return gh_data
+
+    return None
 
 
 def gh_api(path, method="GET", data=None):
@@ -640,7 +652,7 @@ def get_github_snapshot():
         return {
             "repo": repo,
             "available": False,
-            "message": "GitHub data unavailable (add a PAT in Connect with repo + actions:read, or run `gh auth login`).",
+           "message": "GitHub data unavailable. For public repos, verify the repo name. For private repos, add a PAT in Connect with repo + actions:read.",
             "totals": {"pipelines": 0, "passed": 0, "failed": 0, "running": 0, "success_rate": 0},
             "latest": None,
             "recent": [],
