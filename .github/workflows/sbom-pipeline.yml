@@ -15,6 +15,8 @@ jobs:
       REPORT_DIR: reports
       BUILD_LOG: build-output.log
       APP_DIR: example-app
+      TRIVY_IMAGE: aquasec/trivy:0.69.3
+      SBOM_PRIVATE_KEY_PEM: ${{ secrets.SBOM_PRIVATE_KEY_PEM }}
 
     steps:
       - name: Checkout
@@ -29,15 +31,15 @@ jobs:
       - name: Generate COTS SBOMs (Syft + Trivy + Distro2SBOM)
         run: |
           docker pull anchore/syft:latest
-          docker pull aquasec/trivy:0.50.0
+          docker pull "$TRIVY_IMAGE"
           docker pull cyclonedx/cyclonedx-cli:latest
           docker pull python:3.12-slim
 
           docker run --rm -v "$GITHUB_WORKSPACE:/src" anchore/syft:latest dir:/src/$APP_DIR -o cyclonedx-json > "$SBOM_DIR/sbom-source-syft.json"
           docker run --rm -v "$GITHUB_WORKSPACE:/src" anchore/syft:latest dir:/src/$APP_DIR/build -o cyclonedx-json > "$SBOM_DIR/sbom-build-syft.json"
 
-          docker run --rm -v "$GITHUB_WORKSPACE:/src" -v "$GITHUB_WORKSPACE:/work" aquasec/trivy:0.50.0 filesystem --format cyclonedx --output "/work/$SBOM_DIR/sbom-source-trivy.json" /src/$APP_DIR
-          docker run --rm -v "$GITHUB_WORKSPACE:/src" -v "$GITHUB_WORKSPACE:/work" aquasec/trivy:0.50.0 filesystem --format cyclonedx --output "/work/$SBOM_DIR/sbom-build-trivy.json" /src/$APP_DIR/build
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" -v "$GITHUB_WORKSPACE:/work" "$TRIVY_IMAGE" filesystem --format cyclonedx --output "/work/$SBOM_DIR/sbom-source-trivy.json" /src/$APP_DIR
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" -v "$GITHUB_WORKSPACE:/work" "$TRIVY_IMAGE" filesystem --format cyclonedx --output "/work/$SBOM_DIR/sbom-build-trivy.json" /src/$APP_DIR/build
 
           docker run --rm -v "$GITHUB_WORKSPACE:/work" python:3.12-slim bash -lc "pip install --no-cache-dir distro2sbom >/dev/null && python -m distro2sbom.cli --distro auto --system --sbom cyclonedx --format json --product-type operating-system --product-name sbom-runtime --product-version 1.0 --output-file /work/$SBOM_DIR/sbom-distro2sbom.json"
 
@@ -96,10 +98,17 @@ jobs:
           set -e
           chmod +x scripts/sign-sbom.sh
           PKI_DIR="$SBOM_DIR/pki"
+          mkdir -p "$PKI_DIR"
+          if [ -n "${SBOM_PRIVATE_KEY_PEM:-}" ]; then
+            printf '%s\n' "$SBOM_PRIVATE_KEY_PEM" > "$PKI_DIR/sbom_private_key.pem"
+            chmod 600 "$PKI_DIR/sbom_private_key.pem"
+            openssl rsa -in "$PKI_DIR/sbom_private_key.pem" -pubout -out "$PKI_DIR/sbom_public_key.pem"
+            echo "Using CI-provided signing key from SBOM_PRIVATE_KEY_PEM"
+          fi
           cp "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/sbom-source.enriched.unsigned.json"
           cp "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.unsigned.json"
-          docker run --rm -v "$GITHUB_WORKSPACE:/data" cyclonedx/cyclonedx-cli:latest convert --input-file "/data/$SBOM_DIR/sbom-source.enriched.json" --output-file "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json" --output-format json --output-version v1_5
-          docker run --rm -v "$GITHUB_WORKSPACE:/data" cyclonedx/cyclonedx-cli:latest convert --input-file "/data/$SBOM_DIR/sbom-source.enriched.json" --output-file "/data/$SBOM_DIR/sbom-build.enriched.unsigned.v16.json" --output-format json --output-version v1_5
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" cyclonedx/cyclonedx-cli:latest convert --input-file "/data/$SBOM_DIR/sbom-source.enriched.json" --output-file "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json" --output-format json --output-version v1_6
+          docker run --rm -v "$GITHUB_WORKSPACE:/data" cyclonedx/cyclonedx-cli:latest convert --input-file "/data/$SBOM_DIR/sbom-build.enriched.json" --output-file "/data/$SBOM_DIR/sbom-build.enriched.unsigned.v16.json" --output-format json --output-version v1_6
           bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/sbom-source.enriched.signed.json" "$PKI_DIR"
           mv "$SBOM_DIR/sbom-source.enriched.signed.json" "$SBOM_DIR/sbom-source.enriched.json"
           bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.signed.json" "$PKI_DIR"
@@ -117,8 +126,8 @@ jobs:
           docker run --rm -v "$GITHUB_WORKSPACE:/data" -v "$RUNNER_TEMP/grype-db:/root/.cache/grype/db" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o json > "$REPORT_DIR/grype-report.json"
            docker run --rm -v "$GITHUB_WORKSPACE:/data" -v "$RUNNER_TEMP/grype-db:/root/.cache/grype/db" anchore/grype:latest sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o table > "$REPORT_DIR/grype-report.txt"
         
-           docker run --rm -v "$GITHUB_WORKSPACE:/data" aquasec/trivy:0.50.0 sbom --scanners vuln --format json --output "/data/$REPORT_DIR/trivy-sbom-report.json" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.json" || echo '{}' > "$REPORT_DIR/trivy-sbom-report.json"
-           docker run --rm -v "$GITHUB_WORKSPACE:/data" aquasec/trivy:0.50.0 sbom --scanners vuln --format table --output "/data/$REPORT_DIR/trivy-sbom-report.txt" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.json" || echo 'Trivy scan skipped due to SBOM compatibility issue' > "$REPORT_DIR/trivy-sbom-report.txt"
+           docker run --rm -v "$GITHUB_WORKSPACE:/data" "$TRIVY_IMAGE" sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format json --output "/data/$REPORT_DIR/trivy-sbom-report.json" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json" || echo '{}' > "$REPORT_DIR/trivy-sbom-report.json"
+           docker run --rm -v "$GITHUB_WORKSPACE:/data" "$TRIVY_IMAGE" sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format table --output "/data/$REPORT_DIR/trivy-sbom-report.txt" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json" || echo 'Trivy scan skipped due to SBOM compatibility issue' > "$REPORT_DIR/trivy-sbom-report.txt"
           
 
       - name: Generate vulnerability analysis report
@@ -163,4 +172,5 @@ jobs:
             example-app/build/
             sbom/
             reports/
+            !sbom/pki/sbom_private_key.pem
           retention-days: 7
