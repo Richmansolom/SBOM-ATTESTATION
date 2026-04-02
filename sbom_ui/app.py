@@ -475,9 +475,20 @@ def get_gh_json(path):
 
 
 def _github_token_for_request():
-    if has_request_context():
-        return (get_requested_token() or os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN") or "").strip()
-    return (os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN") or "").strip()
+    """
+    Get GitHub token from:
+    1. Request (UI input)
+    2. Environment variable (Render)
+    """
+    body = request.get_json(silent=True) or {}
+    token = (body.get("token") or "").strip()
+
+    if token:
+        return token
+
+    # fallback to Render env
+    env_token = os.getenv("GITHUB_TOKEN", "").strip()
+    return env_token
 
 
 def github_rest_request(path, method="GET", token="", json_body=None):
