@@ -217,6 +217,32 @@ Workflow: `.gitlab-ci.yml`
 
 Implements the same logical stages and artifacts as GitHub.
 
+## Current Implementation Status
+
+The following is implemented and validated in this repository:
+
+- **SBOM generation:** Syft + Trivy + Distro2SBOM are merged via CycloneDX for source/build targets.
+- **Metadata enrichment:** Custom C/C++ application component metadata is merged into generated SBOMs.
+- **Validation:** CycloneDX schema checks, local NTIA checks, and Hoppr NTIA validation are in place.
+- **Attestation:** Embedded SBOM signature generation + verification is implemented via OpenSSL-based flow.
+- **Vulnerability analysis:** Grype and Trivy scans produce JSON/table outputs and combined summary evidence.
+- **Mission Control UI:** Hosted frontend + backend APIs support GitHub and GitLab pipeline trigger/monitor flow.
+- **Security hardening applied:** CI supports `SBOM_PRIVATE_KEY_PEM` secret injection and excludes private key material from CI artifact upload.
+
+## Real-World Threat Relevance
+
+Recent Trivy supply-chain incident reporting highlights an important point: security tooling is itself part of the software supply chain and can be targeted.
+
+- Aqua incident advisory and remediation updates: [Aqua Security Trivy update](https://www.aquasec.com/blog/trivy-supply-chain-attack-what-you-need-to-know/)
+- Example downstream impact reporting: [BleepingComputer coverage](https://www.bleepingcomputer.com/news/security/cisco-source-code-stolen-in-trivy-linked-dev-environment-breach/)
+
+Controls reflected in this repository after those lessons:
+
+- Avoid mutable scanner references in CI where possible; prefer pinned versions.
+- Treat CI credentials/tokens as high-risk secrets and use least privilege.
+- Keep signing key material out of artifacts; inject secrets via CI protected variables.
+- Preserve auditable evidence (validation logs, scan outputs, DB status) for incident response and attestation.
+
 ## Attestation and Validation Model
 
 This implementation combines multiple validation layers:
@@ -290,7 +316,7 @@ All SBOM outputs are treated as sensitive software supply-chain records. The fol
 - **SBOM artifacts:** SBOM files under `sbom/` are published as CI artifacts in both GitHub Actions and GitLab CI.
 - **Artifact retention:** Current retention is **7 days** (GitHub `retention-days: 7`, GitLab `expire_in: 1 week`), not three months.
 - **Vulnerability reports:** Grype and Trivy outputs are archived in `reports/` (JSON and table/text outputs, plus `vulnerability-analysis.txt`, and DB status/update/provider evidence). HTML vulnerability reports are not currently produced by default.
-- **Cryptographic keys:** `scripts/sign-sbom.sh` currently generates an RSA keypair in `sbom/pki/` at runtime if keys do not exist. Because CI artifacts include `sbom/`, private key material can be present in artifacts unless explicitly excluded. This is functional for demo/testing but should be hardened for production.
+- **Cryptographic keys:** `scripts/sign-sbom.sh` can generate an RSA keypair in `sbom/pki/` at runtime when no key is provided. CI pipelines support secret-based key injection via `SBOM_PRIVATE_KEY_PEM`, and private key artifact upload is explicitly excluded.
 - **Credentials and tokens:** The UI stores connection config in browser `sessionStorage` (`sbom_cfg`). If provided, tokens are sent only to this backend via `X-SBOM-TOKEN` for provider API calls. Tokens are optional for public read operations and are typically required for protected trigger operations.
 - **External data flows:** SBOM processing/scanning is executed locally in runner containers. The pipeline does pull vulnerability databases and container images from upstream registries (for example, Grype DB and Trivy DB sources).
 - **PII handling:** The pipeline and UI are designed for software/component metadata and do not intentionally collect or process personally identifiable information (PII).
