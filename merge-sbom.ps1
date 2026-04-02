@@ -82,26 +82,21 @@ $script:SPDX_LICENSES = @{
 }
 
 function ToCycloneDxLicenseEntry($licenseInput) {
-  # Perpetual OSS licenses: use far-future expiration (ISO 8601) per CycloneDX licensing schema
-  $perpetualExpiration = "2099-12-31T23:59:59Z"
+  # CycloneDX JSON schema (1.6/1.7): each license choice is oneOf SPDX id, named license, or expression.
+  # Do not combine id + name + url + licensing on the same object — CycloneDX-CLI validation will fail.
   $raw = [string]$licenseInput
   if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq "unknown") {
-    return @{ license = @{ name = "unknown"; licensing = @{ expiration = $perpetualExpiration } } }
+    return @{ license = @{ name = "unknown" } }
   }
   $id = $raw.Trim()
-  $spdx = $script:SPDX_LICENSES[$id]
-  if ($spdx) {
-    return @{
-      license = @{
-        id = $id
-        name = $spdx.name
-        url = $spdx.url
-        licensing = @{ expiration = $perpetualExpiration }
-      }
-    }
+  if ($script:SPDX_LICENSES.ContainsKey($id)) {
+    return @{ license = @{ id = $id } }
   }
-  # Unknown but named license - use name, no URL
-  return @{ license = @{ name = $raw; licensing = @{ expiration = $perpetualExpiration } } }
+  # Heuristic: SPDX IDs are typically identifier-like (no spaces; may include -, +, .)
+  if ($id -notmatch '\s' -and $id -match '^[A-Za-z0-9.+_\-]+$') {
+    return @{ license = @{ id = $id } }
+  }
+  return @{ license = @{ name = $id } }
 }
 
 function Normalize-ComponentLicenses($component) {
@@ -132,10 +127,7 @@ function Normalize-ComponentLicenses($component) {
       continue
     }
     if ($lic.PSObject.Properties.Name -contains "expression") {
-      if (-not $lic.PSObject.Properties.Name -contains "licensing") {
-        $lic | Add-Member -MemberType NoteProperty -Name licensing -Value @{ expression = $lic.expression } -Force
-      }
-      $normalized += $lic
+      $normalized += @{ expression = [string]$lic.expression }
       continue
     }
     $licenseObj = $lic.license
@@ -185,8 +177,11 @@ if ($sbom.metadata.PSObject.Properties.Name -contains "supplier") {
 $appLicense = SafeStr $app.license
 $licensesValue = @(ToCycloneDxLicenseEntry $appLicense)
 $meta = $sbom.metadata
-if (-not $meta.licenses -or $meta.licenses.Count -eq 0) {
-  $meta | Add-Member -MemberType NoteProperty -Name licenses -Value $licensesValue -Force
+# Always set root metadata licenses from app — merged COTS SBOMs may carry invalid license shapes for CycloneDX 1.7.
+if ($meta.PSObject.Properties.Name -contains "licenses") {
+  $meta.licenses = $licensesValue
+} else {
+  $meta | Add-Member -MemberType NoteProperty -Name licenses -Value $licensesValue
 }
 
 $appName = SafeStr $app.name
@@ -234,6 +229,10 @@ if (-not $already) { $sbom.components += $customComponent }
 $sbom.metadata.component = $customComponent
 
 foreach ($c in $sbom.components) { Normalize-ComponentLicenses $c }
+# When an existing root component matched, $customComponent may not appear in components[]; normalize metadata root anyway.
+if ($sbom.metadata -and $sbom.metadata.component) {
+  Normalize-ComponentLicenses $sbom.metadata.component
+}
 
 if (-not $sbom.dependencies) { $sbom | Add-Member -MemberType NoteProperty -Name dependencies -Value @() }
 

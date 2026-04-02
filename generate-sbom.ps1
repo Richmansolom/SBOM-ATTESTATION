@@ -12,7 +12,7 @@
   pwsh ./generate-sbom.ps1 -Mode container
 #>
 param(
-  [ValidateSet("container", "native")]
+  # Accepts native/container; strips accidental concatenation (e.g. -Mode nativehttp://... from a bad paste).
   [string]$Mode = "native",
   [ValidateSet("auto", "docker", "podman")]
   [string]$ContainerRuntime = "auto",
@@ -28,6 +28,19 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Get-Location
 
+$rawMode = [string]$Mode
+$trimMode = $rawMode.Trim()
+if ($trimMode.StartsWith("container", [System.StringComparison]::OrdinalIgnoreCase)) {
+  $runMode = "container"
+} elseif ($trimMode.StartsWith("native", [System.StringComparison]::OrdinalIgnoreCase)) {
+  $runMode = "native"
+} else {
+  $runMode = "native"
+}
+if ($trimMode -notin @("native", "container")) {
+  Write-Warning "Mode was normalized from '$rawMode' to '$runMode'. Use a space after the mode (e.g. -Mode native) and do not paste a URL on the same token."
+}
+
 function Resolve-ContainerRuntime([string]$requested) {
   if ($requested -eq "docker" -or $requested -eq "podman") {
     if (-not (Get-Command $requested -ErrorAction SilentlyContinue)) { throw "Missing: $requested" }
@@ -39,6 +52,15 @@ function Resolve-ContainerRuntime([string]$requested) {
 }
 
 $containerCmd = Resolve-ContainerRuntime $ContainerRuntime
+
+# After clearing images, Docker must pull again. Using a pinned tag avoids occasional
+# docker.io resolution failures on :latest. Override: $env:TRIVY_IMAGE = "aquasec/trivy:0.69.3"
+# Alternate registry: ghcr.io/aquasecurity/trivy:0.69.3
+$trivyImage = if ($env:TRIVY_IMAGE) { $env:TRIVY_IMAGE } else { "aquasec/trivy:0.69.3" }
+# CycloneDX SBOM steps are inventory-only; Grype/Trivy vuln scans run later on the enriched SBOM.
+# Use --quiet (Trivy 0.69+ has no global --log-level; --quiet suppresses progress + most logs).
+$trivyQuiet = @("--quiet")
+
 $sbomPath = Join-Path $repoRoot $SbomDir
 $reportPath = Join-Path $repoRoot $ReportDir
 $appMeta = Join-Path $repoRoot $AppMetadataPath
@@ -52,26 +74,27 @@ if (-not (Test-Path $appMeta)) { throw "Missing app-metadata.json at $appMeta" }
 if (-not (Test-Path $mergeScript)) { throw "Missing merge-sbom.ps1" }
 
 # SBOM file names
-$syftSbom = Join-Path $sbomPath $(if ($Mode -eq "container") { "sbom-image-syft.json" } else { "sbom-source-syft.json" })
-$trivySbom = Join-Path $sbomPath $(if ($Mode -eq "container") { "sbom-image-trivy.json" } else { "sbom-source-trivy.json" })
+$syftSbom = Join-Path $sbomPath $(if ($runMode -eq "container") { "sbom-image-syft.json" } else { "sbom-source-syft.json" })
+$trivySbom = Join-Path $sbomPath $(if ($runMode -eq "container") { "sbom-image-trivy.json" } else { "sbom-source-trivy.json" })
 $distroSbom = Join-Path $sbomPath "sbom-distro2sbom.json"
-$rawSbom = Join-Path $sbomPath $(if ($Mode -eq "container") { "sbom-image.cots-merged.json" } else { "sbom-source.cots-merged.json" })
-$enrichedSbom = Join-Path $sbomPath $(if ($Mode -eq "container") { "sbom-image.enriched.json" } else { "sbom-source.enriched.json" })
+$rawSbom = Join-Path $sbomPath $(if ($runMode -eq "container") { "sbom-image.cots-merged.json" } else { "sbom-source.cots-merged.json" })
+$enrichedSbom = Join-Path $sbomPath $(if ($runMode -eq "container") { "sbom-image.enriched.json" } else { "sbom-source.enriched.json" })
 $rawLeaf = Split-Path $rawSbom -Leaf
 $enrichedLeaf = Split-Path $enrichedSbom -Leaf
 $syftLeaf = Split-Path $syftSbom -Leaf
 $trivyLeaf = Split-Path $trivySbom -Leaf
 $distroLeaf = Split-Path $distroSbom -Leaf
 
-Write-Host "==> Mode: $Mode | Runtime: $containerCmd"
+Write-Host "==> Mode: $runMode | Runtime: $containerCmd"
+Write-Host "==> Trivy image: $trivyImage"
 Write-Host "==> Pull COTS SBOM tool images (Syft, Trivy, CycloneDX, Hoppr)"
 & $containerCmd pull anchore/syft:latest 2>&1 | Out-Host
-& $containerCmd pull aquasec/trivy:latest 2>&1 | Out-Host
+& $containerCmd pull $trivyImage 2>&1 | Out-Host
 & $containerCmd pull cyclonedx/cyclonedx-cli:latest 2>&1 | Out-Host
 & $containerCmd pull hoppr/hopctl:latest 2>&1 | Out-Host
 & $containerCmd pull anchore/grype:latest 2>&1 | Out-Host
 
-if ($Mode -eq "container") {
+if ($runMode -eq "container") {
   $appDir = Join-Path $repoRoot $SourcePath
   $image = "${ImageName}:${ImageTag}"
   Write-Host "==> Build image: $image (from $SourcePath)"
@@ -89,7 +112,7 @@ if ($Mode -eq "container") {
   [System.IO.File]::WriteAllText($syftSbom, $rawContent, (New-Object System.Text.UTF8Encoding $false))
 
   Write-Host "==> Generate COTS SBOM from image (Trivy)"
-  & $containerCmd run --rm -v "${repoRoot}:/work" aquasec/trivy:latest image --format cyclonedx --output "/work/$SbomDir/$trivyLeaf" "$image" 2>&1 | Out-Host
+  & $containerCmd run --rm -v "${repoRoot}:/work" $trivyImage @trivyQuiet image --format cyclonedx --output "/work/$SbomDir/$trivyLeaf" "$image" 2>&1 | Out-Host
 } else {
   $resolvedSource = (Resolve-Path (Join-Path $repoRoot $SourcePath)).Path
   Write-Host "==> Generate COTS SBOM from directory (Syft): $resolvedSource"
@@ -97,11 +120,11 @@ if ($Mode -eq "container") {
   [System.IO.File]::WriteAllText($syftSbom, $rawContent, (New-Object System.Text.UTF8Encoding $false))
 
   Write-Host "==> Generate COTS SBOM from directory (Trivy): $resolvedSource"
-  & $containerCmd run --rm -v "${resolvedSource}:/src" -v "${repoRoot}:/work" aquasec/trivy:latest filesystem --format cyclonedx --output "/work/$SbomDir/$trivyLeaf" /src 2>&1 | Out-Host
+  & $containerCmd run --rm -v "${resolvedSource}:/src" -v "${repoRoot}:/work" $trivyImage @trivyQuiet filesystem --format cyclonedx --output "/work/$SbomDir/$trivyLeaf" /src 2>&1 | Out-Host
 }
 
 Write-Host "==> Generate distro package SBOM (Distro2SBOM)"
-& $containerCmd run --rm -v "${repoRoot}:/work" python:3.12-slim bash -lc "pip install --no-cache-dir distro2sbom >/dev/null && python -m distro2sbom.cli --distro auto --system --sbom cyclonedx --format json --product-type operating-system --product-name sbom-runtime --product-version 1.0 --output-file /work/$SbomDir/$distroLeaf" 2>&1 | Out-Host
+& $containerCmd run --rm -v "${repoRoot}:/work" python:3.12-slim bash -lc "export PIP_ROOT_USER_ACTION=ignore PIP_DISABLE_PIP_VERSION_CHECK=1; pip install --no-cache-dir distro2sbom >/dev/null && python -m distro2sbom.cli --distro auto --system --sbom cyclonedx --format json --product-type operating-system --product-name sbom-runtime --product-version 1.0 --output-file /work/$SbomDir/$distroLeaf" 2>&1 | Out-Host
 
 Write-Host "==> Merge Syft + Trivy + Distro2SBOM via CycloneDX-CLI"
 & $containerCmd run --rm -v "${repoRoot}:/data" cyclonedx/cyclonedx-cli:latest merge --input-files "/data/$SbomDir/$syftLeaf" "/data/$SbomDir/$trivyLeaf" "/data/$SbomDir/$distroLeaf" --output-file "/data/$SbomDir/$rawLeaf" --output-format json 2>&1 | Out-Host
@@ -145,17 +168,20 @@ Write-Host "==> Convert enriched SBOM to CycloneDX v1.6 for scanner compatibilit
 & $containerCmd run --rm -v "${repoRoot}:/data" cyclonedx/cyclonedx-cli:latest convert --input-file "/data/$SbomDir/$enrichedLeaf" --output-file "/data/$SbomDir/$unsignedV16Leaf" --output-format json --output-version v1_6 2>&1 | Out-Host
 
 Write-Host "==> Vulnerability scan with Grype (plus DB evidence)"
+$grypeImage = if ($env:GRYPE_IMAGE) { $env:GRYPE_IMAGE } else { "anchore/grype:latest" }
+# Mount a single explicit DB dir so Grype does not write under /.cache when HOME is unset (fixes "database does not exist" on the mounted volume).
 $grypeCacheDir = Join-Path $repoRoot ".cache\grype-db"
 if (-not (Test-Path $grypeCacheDir)) { New-Item -ItemType Directory -Path $grypeCacheDir -Force | Out-Null }
-& $containerCmd run --rm -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest db update 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "grype-db-update.txt")
-& $containerCmd run --rm -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest db status 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "grype-db-status.txt")
-& $containerCmd run --rm -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest db providers 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "grype-db-providers.txt")
-& $containerCmd run --rm -v "${repoRoot}:/data" -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest "sbom:/data/$SbomDir/$unsignedV16Leaf" -o json 2> (Join-Path $reportPath "grype-report.stderr.log") | Set-Content -Path (Join-Path $reportPath "grype-report.json") -Encoding UTF8
-& $containerCmd run --rm -v "${repoRoot}:/data" -v "${grypeCacheDir}:/root/.cache/grype/db" anchore/grype:latest "sbom:/data/$SbomDir/$unsignedV16Leaf" -o table 2>&1 | Set-Content -Path (Join-Path $reportPath "grype-report.txt") -Encoding UTF8
+$grypeDbVol = @("-e", "GRYPE_DB_CACHE_DIR=/grype-db", "-v", "${grypeCacheDir}:/grype-db")
+& $containerCmd run --rm @grypeDbVol $grypeImage db update 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "grype-db-update.txt")
+& $containerCmd run --rm @grypeDbVol $grypeImage db status 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "grype-db-status.txt")
+& $containerCmd run --rm @grypeDbVol $grypeImage db providers 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "grype-db-providers.txt")
+& $containerCmd run --rm -v "${repoRoot}:/data" @grypeDbVol $grypeImage "sbom:/data/$SbomDir/$unsignedV16Leaf" -o json 2> (Join-Path $reportPath "grype-report.stderr.log") | Set-Content -Path (Join-Path $reportPath "grype-report.json") -Encoding UTF8
+& $containerCmd run --rm -v "${repoRoot}:/data" @grypeDbVol $grypeImage "sbom:/data/$SbomDir/$unsignedV16Leaf" -o table 2>&1 | Set-Content -Path (Join-Path $reportPath "grype-report.txt") -Encoding UTF8
 
-Write-Host "==> Secondary vulnerability scan with Trivy SBOM (NVD/GHSA/OSV sources)"
-& $containerCmd run --rm -v "${repoRoot}:/data" aquasec/trivy:latest sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format json --output "/data/$ReportDir/trivy-sbom-report.json" "/data/$SbomDir/$unsignedV16Leaf" 2>&1 | Out-Host
-& $containerCmd run --rm -v "${repoRoot}:/data" aquasec/trivy:latest sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format table --output "/data/$ReportDir/trivy-sbom-report.txt" "/data/$SbomDir/$unsignedV16Leaf" 2>&1 | Out-Host
+Write-Host "==> Secondary vulnerability scan with Trivy SBOM (NVD/GHSA/OSV sources) — image: $trivyImage"
+& $containerCmd run --rm -v "${repoRoot}:/data" $trivyImage sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format json --output "/data/$ReportDir/trivy-sbom-report.json" "/data/$SbomDir/$unsignedV16Leaf" 2>&1 | Out-Host
+& $containerCmd run --rm -v "${repoRoot}:/data" $trivyImage sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format table --output "/data/$ReportDir/trivy-sbom-report.txt" "/data/$SbomDir/$unsignedV16Leaf" 2>&1 | Out-Host
 
 Write-Host "==> Build combined vulnerability summary"
 $grypeJson = Join-Path $reportPath "grype-report.json"
