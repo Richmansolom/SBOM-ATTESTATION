@@ -823,15 +823,34 @@ const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 /* ═══ HELPERS ═══ */
 const API_BASE = (() => {
-  const q = new URLSearchParams(window.location.search).get('api');
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('reset_api') === '1') {
+    localStorage.removeItem('sbom_api_base');
+  }
+  const q = params.get('api');
   if (q) {
     const normalized = q.replace(/\/$/, '');
     localStorage.setItem('sbom_api_base', normalized);
     return normalized;
   }
+  const host = (window.location.hostname || '').toLowerCase();
+  const proto = window.location.protocol || '';
+  // When Flask serves the UI locally, always use THIS page's origin — not localStorage — so refresh never
+  // points at an old port/host (was the main cause of "can't connect" after reload).
+  const isLocalMissionControl =
+    proto.startsWith('http') &&
+    !host.endsWith('.github.io') &&
+    (host === 'localhost' || host === '127.0.0.1' || host === 'www.sbomcontrol.com' || host === 'sbomcontrol.com');
+  if (isLocalMissionControl) {
+    return window.location.origin.replace(/\/$/, '');
+  }
   const saved = (localStorage.getItem('sbom_api_base') || '').trim();
   if (saved) return saved.replace(/\/$/, '');
-  return window.location.origin;
+  const origin = window.location.origin;
+  if (!origin || origin === 'null' || origin.startsWith('file')) {
+    return 'http://127.0.0.1:5000';
+  }
+  return origin;
 })();
 
 const apiUrl = (path) => `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
@@ -967,8 +986,8 @@ function ConnectModal({ onConnect }) {
               onKeyDown={e=>e.key==='Enter'&&connect()} autoFocus/>
           </div>
           <div className="field">
-            <span className="field-label">Access Token (optional for public read)</span>
-            <input value={tok} onChange={e=>setTok(e.target.value)} placeholder={provider === 'gitlab' ? 'glpat-... (needed for trigger)' : 'ghp_... (if needed)'}
+            <span className="field-label">Access Token {provider === 'github' ? '(recommended if gh CLI not installed)' : '(optional for public read)'}</span>
+            <input value={tok} onChange={e=>setTok(e.target.value)} placeholder={provider === 'gitlab' ? 'glpat-... (needed for trigger)' : 'ghp_... · repo + Actions (read; write to trigger)'}
               onKeyDown={e=>e.key==='Enter'&&connect()}/>
           </div>
           {err && <div className="modal-err">{err}</div>}
@@ -976,7 +995,7 @@ function ConnectModal({ onConnect }) {
             {loading ? <><Spin/> Connecting…</> : '⚡ Connect'}
           </button>
         </div>
-        <div className="modal-note">Tokenless mode works for public pipeline read. Trigger may require token.</div>
+        <div className="modal-note">GitHub: the Mission Control server calls the GitHub API with this token (or the <span className="text-mono">gh</span> CLI if installed). Fine‑grained PAT: Actions read + Contents read; add Actions write to trigger workflows.</div>
       </div>
     </div>
   );
@@ -1234,7 +1253,6 @@ function PipelinesPage({ config }) {
     else clearInterval(pollRef.current);
     return () => clearInterval(pollRef.current);
   }, [polling, load]);
-
   async function launch() {
     setLaunching(true);
     try {
@@ -1247,6 +1265,7 @@ function PipelinesPage({ config }) {
     } catch(e) { toast('Launch failed: '+e.message,'err'); }
     setLaunching(false);
   }
+
 
   return (
     <div className="page fade-in">
@@ -1447,11 +1466,44 @@ function SBOMPage() {
   const [err, setErr] = useState('');
   const [drag, setDrag] = useState(false);
   const [loadingApi, setLoadingApi] = useState(false);
+  const [lastLoadedAt, setLastLoadedAt] = useState('');
+  const [history, setHistory] = useState([]);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('sbom_view_history');
+      const arr = JSON.parse(raw || '[]');
+      if (Array.isArray(arr)) setHistory(arr);
+    } catch {}
+  }, []);
+
+  function pushHistory(entry) {
+    const next = [entry, ...history].slice(0, 8);
+    setHistory(next);
+    try { sessionStorage.setItem('sbom_view_history', JSON.stringify(next)); } catch {}
+  }
 
   function load(file) {
     if (!file) return;
     const r = new FileReader();
-    r.onload = e => { try { setSbom(JSON.parse(e.target.result)); setErr(''); } catch { setErr('Invalid JSON file'); } };
+    r.onload = e => {
+      try {
+        const parsed = JSON.parse(e.target.result);
+        setSbom(parsed);
+        setErr('');
+        const now = new Date().toISOString();
+        setLastLoadedAt(now);
+        pushHistory({
+          at: now,
+          source: 'upload',
+          name: parsed?.metadata?.component?.name || 'Uploaded SBOM',
+          timestamp: parsed?.metadata?.timestamp || '-',
+          components: parsed?.components?.length || 0,
+        });
+      } catch {
+        setErr('Invalid JSON file');
+      }
+    };
     r.onerror = () => setErr('Failed to read file');
     r.readAsText(file);
   }
@@ -1464,11 +1516,29 @@ function SBOMPage() {
       if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
       setSbom(j);
       setErr('');
+      const now = new Date().toISOString();
+      setLastLoadedAt(now);
+      pushHistory({
+        at: now,
+        source: 'api',
+        name: j?.metadata?.component?.name || 'Latest SBOM',
+        timestamp: j?.metadata?.timestamp || '-',
+        components: j?.components?.length || 0,
+      });
     } catch (e) {
       setErr(`No local SBOM yet: ${e.message}`);
     } finally {
       setLoadingApi(false);
     }
+  }
+
+  function resetViewer() {
+    setSbom(null);
+    setErr('');
+    setSearch('');
+    setTypeF('All');
+    setView('table');
+    setLastLoadedAt('');
   }
 
   useEffect(() => {
@@ -1487,7 +1557,13 @@ function SBOMPage() {
 
   if (!sbom) return (
     <div className="page fade-in">
-      <div className="page-hd"><div><div className="page-title">SBOM Viewer</div><div className="page-sub">CycloneDX 1.4 · Component Intelligence</div></div></div>
+      <div className="page-hd">
+        <div><div className="page-title">SBOM Viewer</div><div className="page-sub">CycloneDX 1.4 · Component Intelligence</div></div>
+        <div className="flex gap-6">
+          <button className="btn btn-xs" onClick={loadFromApi} disabled={loadingApi}>{loadingApi ? 'Refreshing...' : '↻ Refresh Latest'}</button>
+          <button className="btn btn-outline-red btn-xs" onClick={resetViewer}>Reset View</button>
+        </div>
+      </div>
       <div className="card">
         <div className="card-body">
           <div className="flex gap-6" style={{marginBottom:12,flexWrap:'wrap'}}>
@@ -1516,7 +1592,11 @@ function SBOMPage() {
     <div className="page fade-in">
       <div className="page-hd">
         <div><div className="page-title">SBOM Viewer</div><div className="page-sub">{sbom.metadata?.component?.name || 'Holistic SBOM'}</div></div>
-        <button className="btn btn-outline-red btn-sm" onClick={()=>setSbom(null)}>✕ Clear</button>
+        <div className="flex gap-6">
+          <button className="btn btn-xs" onClick={loadFromApi} disabled={loadingApi}>{loadingApi ? 'Refreshing...' : '↻ Refresh Latest'}</button>
+          <button className="btn btn-outline-red btn-xs" onClick={resetViewer}>Reset View</button>
+          <button className="btn btn-outline-red btn-sm" onClick={()=>setSbom(null)}>✕ Clear</button>
+        </div>
       </div>
 
       <div className="stat-grid stagger">
@@ -1525,6 +1605,7 @@ function SBOMPage() {
           {v:Object.keys(licCounts).length,l:'Licenses',col:'var(--teal)'},
           {v:sbom.specVersion,l:'CycloneDX',col:'#a78bfa'},
           {v:sbom.metadata?.component?.name||'—',l:'Root Component',col:'var(--amber)'},
+          {v:lastLoadedAt ? new Date(lastLoadedAt).toLocaleTimeString() : '—',l:'Last Refreshed',col:'var(--green)'},
         ].map(s=>(
           <div className="stat-card" key={s.l} style={{'--stat-color':s.col}}>
             <div className="stat-val" style={{fontSize:typeof s.v==='string'&&s.v.length>5?16:28}}>{s.v}</div>
@@ -1532,6 +1613,20 @@ function SBOMPage() {
           </div>
         ))}
       </div>
+
+      {history.length > 0 && (
+        <div className="card" style={{marginBottom:12}}>
+          <div className="card-hd"><div className="card-title"><span className="card-icon">🕘</span>Recent SBOM Timeline</div></div>
+          <div className="card-body" style={{padding:'8px 16px'}}>
+            {history.map((h, i) => (
+              <div className="info-row" key={`${h.at}-${i}`}>
+                <span className="info-key">{new Date(h.at).toLocaleString()} · {h.source.toUpperCase()}</span>
+                <span className="info-val text-mono" style={{fontSize:11,color:'var(--gold)'}}>{h.name} · {h.components} comps · SBOM ts {h.timestamp}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <div className="card-hd">

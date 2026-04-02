@@ -4,21 +4,33 @@ import platform
 import re
 import shutil
 import subprocess
+import threading
+import uuid
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, has_request_context, jsonify, request, send_from_directory
+from werkzeug.exceptions import RequestEntityTooLarge
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+# Match generate-sbom.ps1 (env TRIVY_IMAGE); pinned tag avoids flaky :latest resolution after fresh Docker installs.
+TRIVY_IMAGE = os.environ.get("TRIVY_IMAGE", "aquasec/trivy:0.69.3")
+GRYPE_IMAGE = os.environ.get("GRYPE_IMAGE", "anchore/grype:latest")
 SBOM_DIR = REPO_ROOT / "sbom"
 REPORT_DIR = REPO_ROOT / "reports"
 STATIC_DIR = REPO_ROOT / "sbom_ui" / "static"
+UPLOAD_DIR = REPO_ROOT / ".ui_uploads"
 STAGE_NAMES = ["Build", "Generate", "Sign", "Scan", "Report"]
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
+app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512 MB
+LOCAL_RUNS = {}
+LOCAL_RUNS_LOCK = threading.Lock()
 
 
 def run_cmd(cmd):
@@ -153,6 +165,170 @@ def get_latest_sbom_path():
 def ensure_dirs():
     SBOM_DIR.mkdir(parents=True, exist_ok=True)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def normalize_path_for_script(path_value):
+    if not path_value:
+        return None
+    try:
+        p = Path(str(path_value)).expanduser()
+        if not p.is_absolute():
+            p = (REPO_ROOT / p).resolve()
+        else:
+            p = p.resolve()
+        return os.path.relpath(str(p), str(REPO_ROOT))
+    except Exception:
+        return str(path_value)
+
+
+def build_temp_metadata(app_name, source_path):
+    app = (app_name or "custom-cpp-app").strip() or "custom-cpp-app"
+    src = (source_path or "").strip()
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", app).strip("-").lower() or "custom-cpp-app"
+    payload = {
+        "name": app,
+        "version": "1.0.0",
+        "description": f"{app} (UI ad-hoc pipeline target)",
+        "language": "C++",
+        "author": "SBOM Mission Control UI",
+        "repository": "",
+        "build_system": "unknown",
+        "entry_point": "main",
+        "source_file": src or "src/main.cpp",
+        "license": "MIT",
+        "supplier": {
+            "name": "Unknown",
+            "url": [],
+        },
+        "purl": f"pkg:generic/{slug}@1.0.0",
+    }
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    path = REPORT_DIR / f"tmp-app-metadata-{ts}.json"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def run_generate_pipeline(body):
+    ensure_dirs()
+    body = body or {}
+    mode = body.get("mode", "native")
+    if mode not in ("native", "container"):
+        mode = "native"
+    if shutil.which("pwsh") is None:
+        return {"status": "error", "log": "PowerShell (pwsh) not found in PATH", "exit_code": 1}
+    cmd = ["pwsh", "-ExecutionPolicy", "Bypass", "-File", str(REPO_ROOT / "generate-sbom.ps1"), "-Mode", mode]
+
+    source_path = normalize_path_for_script(body.get("source_path"))
+    if source_path:
+        cmd.extend(["-SourcePath", source_path])
+
+    app_meta = normalize_path_for_script(body.get("app_metadata_path"))
+    temp_meta_path = None
+    if app_meta:
+        cmd.extend(["-AppMetadataPath", app_meta])
+    elif body.get("app_name"):
+        temp_meta_path = build_temp_metadata(body.get("app_name"), source_path)
+        cmd.extend(["-AppMetadataPath", normalize_path_for_script(str(temp_meta_path))])
+
+    runtime = (body.get("container_runtime") or "").strip().lower()
+    if runtime in ("auto", "docker", "podman"):
+        cmd.extend(["-ContainerRuntime", runtime])
+    image_name = (body.get("image_name") or "").strip()
+    if image_name:
+        cmd.extend(["-ImageName", image_name])
+    image_tag = (body.get("image_tag") or "").strip()
+    if image_tag:
+        cmd.extend(["-ImageTag", image_tag])
+
+    code, output = run_cmd(cmd)
+    if temp_meta_path and temp_meta_path.exists():
+        try:
+            temp_meta_path.unlink()
+        except Exception:
+            pass
+    return {
+        "status": "ok" if code == 0 else "error",
+        "exit_code": code,
+        "log": output,
+        "source_path": source_path or "example-app",
+        "app_metadata_path": app_meta or ("generated from app_name" if body.get("app_name") else "example-app/app-metadata.json"),
+    }
+
+
+def _local_run_worker(run_id, body):
+    started = datetime.now(timezone.utc)
+    with LOCAL_RUNS_LOCK:
+        run = LOCAL_RUNS.get(run_id, {})
+        run["status"] = "running"
+        run["started_at"] = started.isoformat()
+        LOCAL_RUNS[run_id] = run
+    result = run_generate_pipeline(body)
+    finished = datetime.now(timezone.utc)
+    duration = max(int((finished - started).total_seconds()), 0)
+    with LOCAL_RUNS_LOCK:
+        run = LOCAL_RUNS.get(run_id, {})
+        run.update(
+            {
+                "status": "success" if result.get("status") == "ok" else "failed",
+                "finished_at": finished.isoformat(),
+                "duration": duration,
+                "exit_code": result.get("exit_code"),
+                "log": result.get("log", ""),
+                "source_path": result.get("source_path"),
+                "app_metadata_path": result.get("app_metadata_path"),
+            }
+        )
+        LOCAL_RUNS[run_id] = run
+
+
+def safe_extract_zip(zip_path, target_dir):
+    target_resolved = target_dir.resolve()
+    extracted_files = 0
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for info in zf.infolist():
+            name = (info.filename or "").replace("\\", "/")
+            if not name or name.endswith("/"):
+                continue
+            if name.startswith("/") or ".." in Path(name).parts:
+                continue
+            dest = (target_dir / name).resolve()
+            if not str(dest).startswith(str(target_resolved)):
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(info, "r") as src, open(dest, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            extracted_files += 1
+    return extracted_files
+
+
+def save_uploaded_project_files(files, target_dir):
+    target_resolved = target_dir.resolve()
+    saved = 0
+    for f in files:
+        name = (f.filename or "").replace("\\", "/")
+        if not name:
+            continue
+        if name.startswith("/") or ".." in Path(name).parts:
+            continue
+        dest = (target_dir / name).resolve()
+        if not str(dest).startswith(str(target_resolved)):
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        f.save(str(dest))
+        saved += 1
+    return saved
+
+
+def pick_source_root(extract_root):
+    children = [p for p in extract_root.iterdir() if p.is_dir()]
+    if len(children) == 1:
+        return children[0]
+    return extract_root
+
+
+def rel_to_repo(path_obj):
+    return os.path.relpath(str(path_obj.resolve()), str(REPO_ROOT))
 
 
 @app.after_request
@@ -164,8 +340,14 @@ def add_no_cache_headers(response):
     # Allow hosted frontends (e.g., GitHub Pages) to call this API.
     response.headers["Access-Control-Allow-Origin"] = os.getenv("CORS_ALLOW_ORIGIN", "*")
     response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+    # Include X-SBOM-TOKEN — browsers will not send custom headers on cross-origin fetches without this on preflight.
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,X-SBOM-TOKEN"
     return response
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_large_upload(_err):
+    return jsonify({"status": "error", "message": "Upload is too large. Remove build/cache folders and retry."}), 413
 
 
 @app.route("/api/<path:_unused>", methods=["OPTIONS"])
@@ -292,6 +474,55 @@ def get_gh_json(path):
         return None
 
 
+def _github_token_for_request():
+    if has_request_context():
+        return (get_requested_token() or os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN") or "").strip()
+    return (os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN") or "").strip()
+
+
+def github_rest_request(path, method="GET", token="", json_body=None):
+    """Call GitHub REST API v3. path is e.g. repos/o/r/actions/runs?per_page=5 (no leading slash)."""
+    if not token:
+        return 401, ""
+    url = f"https://api.github.com/{path.lstrip('/')}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "sbom-mission-control",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    data = None
+    if json_body is not None:
+        data = json.dumps(json_body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = Request(url=url, method=method, headers=headers, data=data)
+    try:
+        with urlopen(req, timeout=120) as resp:
+            raw = resp.read()
+            text = raw.decode("utf-8", errors="replace") if raw else ""
+            return resp.status, text
+    except HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+        return e.code, err_body
+    except URLError as e:
+        return 599, str(e.reason or e)
+    except Exception as exc:
+        return 500, str(exc)
+
+
+def fetch_github_json(path):
+    """Prefer HTTPS + PAT from Connect or GITHUB_TOKEN; fall back to gh CLI."""
+    token = _github_token_for_request()
+    if token:
+        code, body = github_rest_request(path, "GET", token)
+        if code == 200 and body:
+            try:
+                return json.loads(body)
+            except Exception:
+                pass
+    return get_gh_json(path)
+
+
 def gh_api(path, method="GET", data=None):
     if shutil.which("gh") is None:
         return 1, "gh CLI not found. Install GitHub CLI and run: gh auth login"
@@ -398,13 +629,13 @@ def normalize_stage_status(status):
 
 
 def get_github_snapshot():
-    repo = parse_repo_slug()
-    runs_json = get_gh_json(f"repos/{repo}/actions/runs?per_page=12")
+    repo = get_requested_repo() if has_request_context() else parse_repo_slug()
+    runs_json = fetch_github_json(f"repos/{repo}/actions/runs?per_page=12")
     if not runs_json:
         return {
             "repo": repo,
             "available": False,
-            "message": "GitHub data unavailable (gh auth or network).",
+            "message": "GitHub data unavailable (add a PAT in Connect with repo + actions:read, or run `gh auth login`).",
             "totals": {"pipelines": 0, "passed": 0, "failed": 0, "running": 0, "success_rate": 0},
             "latest": None,
             "recent": [],
@@ -420,7 +651,7 @@ def get_github_snapshot():
     latest = runs[0] if runs else None
     latest_payload = None
     if latest:
-        jobs_json = get_gh_json(f"repos/{repo}/actions/runs/{latest.get('id')}/jobs")
+        jobs_json = fetch_github_json(f"repos/{repo}/actions/runs/{latest.get('id')}/jobs")
         jobs = jobs_json.get("jobs", []) if jobs_json else []
         steps = jobs[0].get("steps", []) if jobs else []
         latest_payload = {
@@ -490,15 +721,162 @@ def dashboard():
 
 @app.route("/api/generate", methods=["POST"])
 def generate():
+    result = run_generate_pipeline(request.get_json(silent=True) or {})
+    return jsonify(result)
+
+
+@app.route("/api/local-run/start", methods=["POST"])
+def start_local_run():
+    body = request.get_json(silent=True) or {}
+    run_id = f"local-{uuid.uuid4().hex[:10]}"
+    now = datetime.now(timezone.utc).isoformat()
+    with LOCAL_RUNS_LOCK:
+        LOCAL_RUNS[run_id] = {
+            "id": run_id,
+            "status": "pending",
+            "created_at": now,
+            "started_at": None,
+            "finished_at": None,
+            "duration": None,
+            "exit_code": None,
+            "log": "",
+            "source_path": body.get("source_path") or "",
+            "app_name": body.get("app_name") or "",
+        }
+    t = threading.Thread(target=_local_run_worker, args=(run_id, body), daemon=True)
+    t.start()
+    return jsonify({"status": "ok", "id": run_id})
+
+
+@app.route("/api/local-runs")
+def list_local_runs():
+    with LOCAL_RUNS_LOCK:
+        runs = list(LOCAL_RUNS.values())
+    runs.sort(key=lambda r: (r.get("created_at") or ""), reverse=True)
+    return jsonify(runs[:30])
+
+
+@app.route("/api/upload-source", methods=["POST"])
+def upload_source():
     ensure_dirs()
-    mode = (request.json or {}).get("mode", "native")
-    if mode not in ("native", "container"):
-        mode = "native"
-    if shutil.which("pwsh") is None:
-        return jsonify({"status": "error", "log": "PowerShell (pwsh) not found in PATH"}), 500
-    cmd = ["pwsh", "-ExecutionPolicy", "Bypass", "-File", str(REPO_ROOT / "generate-sbom.ps1"), "-Mode", mode]
-    code, output = run_cmd(cmd)
-    return jsonify({"status": "ok" if code == 0 else "error", "exit_code": code, "log": output})
+    f = request.files.get("project_zip")
+    uploaded_files = request.files.getlist("project_files")
+    if (not f or not f.filename) and not uploaded_files:
+        return jsonify({"status": "error", "message": "Upload a project folder or a .zip file"}), 400
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    upload_root = UPLOAD_DIR / f"src-{ts}"
+    extract_root = upload_root / "src"
+    upload_root.mkdir(parents=True, exist_ok=True)
+    extract_root.mkdir(parents=True, exist_ok=True)
+
+    count = 0
+    if f and f.filename:
+        if not str(f.filename).lower().endswith(".zip"):
+            return jsonify({"status": "error", "message": "Project zip upload must be a .zip file"}), 400
+        zip_path = upload_root / "project.zip"
+        f.save(str(zip_path))
+        try:
+            count = safe_extract_zip(zip_path, extract_root)
+        except Exception as exc:
+            return jsonify({"status": "error", "message": f"Failed to extract zip: {exc}"}), 400
+    else:
+        count = save_uploaded_project_files(uploaded_files, extract_root)
+
+    if count == 0:
+        return jsonify({"status": "error", "message": "No valid project files were uploaded"}), 400
+
+    source_root = pick_source_root(extract_root)
+    app_meta = source_root / "app-metadata.json"
+    detected_name = source_root.name
+    return jsonify(
+        {
+            "status": "ok",
+            "source_path": rel_to_repo(source_root),
+            "app_metadata_path": rel_to_repo(app_meta) if app_meta.exists() else "",
+            "detected_app_name": detected_name,
+            "message": "Project uploaded successfully",
+        }
+    )
+
+
+@app.route("/api/upload-metadata", methods=["POST"])
+def upload_metadata():
+    ensure_dirs()
+    f = request.files.get("metadata_file")
+    if not f or not f.filename:
+        return jsonify({"status": "error", "message": "Missing metadata_file upload"}), 400
+    if not str(f.filename).lower().endswith(".json"):
+        return jsonify({"status": "error", "message": "Metadata upload must be a .json file"}), 400
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    target = UPLOAD_DIR / f"app-metadata-{ts}.json"
+    f.save(str(target))
+    # Basic validation for UX feedback.
+    try:
+        json.loads(target.read_text(encoding="utf-8"))
+    except Exception:
+        return jsonify({"status": "error", "message": "Uploaded metadata JSON is invalid"}), 400
+    return jsonify({"status": "ok", "app_metadata_path": rel_to_repo(target), "message": "Metadata uploaded successfully"})
+
+
+@app.route("/api/pick-folder", methods=["POST"])
+def pick_folder():
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception as exc:
+        return jsonify({"status": "error", "message": f"Folder picker unavailable: {exc}"}), 500
+
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        selected = filedialog.askdirectory(title="Select C/C++ project folder")
+        root.destroy()
+    except Exception as exc:
+        return jsonify({"status": "error", "message": f"Failed to open folder picker: {exc}"}), 500
+
+    if not selected:
+        return jsonify({"status": "error", "message": "Folder selection cancelled"}), 400
+
+    source_dir = Path(selected)
+    meta = source_dir / "app-metadata.json"
+    # Detect if there are likely C/C++ files for user feedback.
+    has_cpp = any(source_dir.rglob(ext) for ext in ("*.cpp", "*.cxx", "*.cc", "*.c", "*.hpp", "*.hxx", "*.hh", "*.h"))
+    return jsonify(
+        {
+            "status": "ok",
+            "source_path": str(source_dir),
+            "app_metadata_path": str(meta) if meta.exists() else "",
+            "detected_app_name": source_dir.name,
+            "has_cpp": bool(has_cpp),
+        }
+    )
+
+
+@app.route("/api/pick-metadata", methods=["POST"])
+def pick_metadata():
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception as exc:
+        return jsonify({"status": "error", "message": f"Metadata picker unavailable: {exc}"}), 500
+
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        selected = filedialog.askopenfilename(
+            title="Select app-metadata.json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        root.destroy()
+    except Exception as exc:
+        return jsonify({"status": "error", "message": f"Failed to open metadata picker: {exc}"}), 500
+
+    if not selected:
+        return jsonify({"status": "error", "message": "Metadata selection cancelled"}), 400
+    return jsonify({"status": "ok", "app_metadata_path": str(Path(selected))})
 
 
 @app.route("/api/sign", methods=["POST"])
@@ -545,22 +923,23 @@ def scan():
     trivy_cache = REPO_ROOT / ".cache" / "trivy"
     trivy_cache.mkdir(parents=True, exist_ok=True)
 
-    grype_db_update_cmd = ["docker", "run", "--rm", "-v", f"{grype_cache}:/root/.cache/grype/db", "anchore/grype:latest", "db", "update"]
+    grype_db_vol = ["-e", "GRYPE_DB_CACHE_DIR=/grype-db", "-v", f"{grype_cache}:/grype-db"]
+    grype_db_update_cmd = ["docker", "run", "--rm", *grype_db_vol, GRYPE_IMAGE, "db", "update"]
     _, gdb_update = run_cmd(grype_db_update_cmd)
     (REPORT_DIR / "grype-db-update.txt").write_text(gdb_update, encoding="utf-8")
 
-    grype_db_status_cmd = ["docker", "run", "--rm", "-v", f"{grype_cache}:/root/.cache/grype/db", "anchore/grype:latest", "db", "status"]
+    grype_db_status_cmd = ["docker", "run", "--rm", *grype_db_vol, GRYPE_IMAGE, "db", "status"]
     _, gdb_status = run_cmd(grype_db_status_cmd)
     (REPORT_DIR / "grype-db-status.txt").write_text(gdb_status, encoding="utf-8")
 
-    grype_db_providers_cmd = ["docker", "run", "--rm", "-v", f"{grype_cache}:/root/.cache/grype/db", "anchore/grype:latest", "db", "providers"]
+    grype_db_providers_cmd = ["docker", "run", "--rm", *grype_db_vol, GRYPE_IMAGE, "db", "providers"]
     _, gdb_providers = run_cmd(grype_db_providers_cmd)
     (REPORT_DIR / "grype-db-providers.txt").write_text(gdb_providers, encoding="utf-8")
 
     trivy_db_update_cmd = [
         "docker", "run", "--rm",
         "-v", f"{trivy_cache}:/root/.cache/trivy",
-        "aquasec/trivy:latest", "image", "--download-db-only", "--no-progress", "--debug",
+        TRIVY_IMAGE, "image", "--download-db-only", "--no-progress", "--debug",
     ]
     _, tdb_update = run_cmd(trivy_db_update_cmd)
     (REPORT_DIR / "trivy-db-update.txt").write_text(tdb_update, encoding="utf-8")
@@ -568,7 +947,7 @@ def scan():
     (REPORT_DIR / "trivy-db-status.txt").write_text(tdb_update, encoding="utf-8")
 
     grype_json_cmd = [
-        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "-v", f"{grype_cache}:/root/.cache/grype/db", "anchore/grype:latest",
+        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", *grype_db_vol, GRYPE_IMAGE,
         "sbom:/data/sbom/sbom-source.enriched.v16.json", "-o", "json",
     ]
     c2, o2 = run_cmd(grype_json_cmd)
@@ -577,7 +956,7 @@ def scan():
     (REPORT_DIR / "grype-report.json").write_text(o2, encoding="utf-8")
 
     grype_table_cmd = [
-        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "-v", f"{grype_cache}:/root/.cache/grype/db", "anchore/grype:latest",
+        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", *grype_db_vol, GRYPE_IMAGE,
         "sbom:/data/sbom/sbom-source.enriched.v16.json", "-o", "table",
     ]
     c3, o3 = run_cmd(grype_table_cmd)
@@ -586,7 +965,7 @@ def scan():
         return jsonify({"status": "error", "exit_code": c3, "log": o1 + "\n" + o2 + "\n" + o3})
 
     trivy_json_cmd = [
-        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "-v", f"{trivy_cache}:/root/.cache/trivy", "aquasec/trivy:latest", "sbom",
+        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "-v", f"{trivy_cache}:/root/.cache/trivy", TRIVY_IMAGE, "sbom",
         "--cache-dir", "/root/.cache/trivy",
         "--scanners", "vuln", "--vuln-severity-source", "nvd,ghsa,osv",
         "--format", "json", "--output", "/data/reports/trivy-sbom-report.json",
@@ -597,7 +976,7 @@ def scan():
         return jsonify({"status": "error", "exit_code": c4, "log": o1 + "\n" + o2 + "\n" + o3 + "\n" + o4})
 
     trivy_table_cmd = [
-        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "-v", f"{trivy_cache}:/root/.cache/trivy", "aquasec/trivy:latest", "sbom",
+        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "-v", f"{trivy_cache}:/root/.cache/trivy", TRIVY_IMAGE, "sbom",
         "--cache-dir", "/root/.cache/trivy",
         "--scanners", "vuln", "--vuln-severity-source", "nvd,ghsa,osv",
         "--format", "table", "--output", "/data/reports/trivy-sbom-report.txt",
@@ -666,13 +1045,16 @@ def pipelines():
             )
         return jsonify(payload)
 
-    code, out = gh_api(f"repos/{repo}/actions/runs?per_page={per_page}")
-    if code != 0:
-        return jsonify({"message": out.strip() or "Failed to fetch workflows"}), 500
-    try:
-        runs = json.loads(out).get("workflow_runs", [])
-    except Exception:
-        return jsonify({"message": "Failed to parse GitHub response"}), 500
+    data = fetch_github_json(f"repos/{repo}/actions/runs?per_page={per_page}")
+    if not data:
+        code, out = gh_api(f"repos/{repo}/actions/runs?per_page={per_page}")
+        if code != 0:
+            return jsonify({"message": out.strip() or "Failed to fetch workflows — use Connect token or gh auth login"}), 500
+        try:
+            data = json.loads(out)
+        except Exception:
+            return jsonify({"message": "Failed to parse GitHub response"}), 500
+    runs = data.get("workflow_runs", [])
 
     payload = []
     for run in runs:
@@ -720,13 +1102,16 @@ def pipeline_jobs(run_id):
             )
         return jsonify(mapped)
 
-    code, out = gh_api(f"repos/{repo}/actions/runs/{run_id}/jobs")
-    if code != 0:
-        return jsonify({"message": out.strip() or "Failed to fetch jobs"}), 500
-    try:
-        jobs = json.loads(out).get("jobs", [])
-    except Exception:
-        return jsonify({"message": "Failed to parse jobs response"}), 500
+    data = fetch_github_json(f"repos/{repo}/actions/runs/{run_id}/jobs")
+    if not data:
+        code, out = gh_api(f"repos/{repo}/actions/runs/{run_id}/jobs")
+        if code != 0:
+            return jsonify({"message": out.strip() or "Failed to fetch jobs"}), 500
+        try:
+            data = json.loads(out)
+        except Exception:
+            return jsonify({"message": "Failed to parse jobs response"}), 500
+    jobs = data.get("jobs", [])
 
     # Some workflows use one job with multiple step stages.
     # For the UI stage-strip, derive stage states from job steps when available.
@@ -796,26 +1181,43 @@ def trigger_pipeline():
             }
         )
 
-    if shutil.which("gh") is None:
-        return jsonify({"message": "gh CLI not found. Install GitHub CLI first."}), 500
+    token = _github_token_for_request()
+    ref_full = str(ref) if str(ref).startswith("refs/") else f"refs/heads/{ref}"
+    wf_enc = quote(workflow, safe="")
 
-    code, out = run_cmd(["gh", "workflow", "run", workflow, "--repo", repo, "--ref", str(ref)])
-    if code != 0:
-        return jsonify({"message": out.strip() or "Failed to trigger workflow"}), 500
+    if token:
+        dispatch_path = f"repos/{repo}/actions/workflows/{wf_enc}/dispatches"
+        code, body = github_rest_request(dispatch_path, "POST", token, json_body={"ref": ref_full})
+        if code not in (200, 201, 204):
+            msg = body
+            try:
+                msg = json.loads(body).get("message", body) if body else str(code)
+            except Exception:
+                pass
+            return jsonify({"message": f"GitHub API: {msg}"}), 500
+    elif shutil.which("gh"):
+        code, out = run_cmd(["gh", "workflow", "run", workflow, "--repo", repo, "--ref", str(ref)])
+        if code != 0:
+            return jsonify({"message": out.strip() or "Failed to trigger workflow"}), 500
+    else:
+        return jsonify(
+            {
+                "message": "GitHub: add a Personal Access Token in Connect (repo + actions:write) or install `gh` CLI and run `gh auth login`.",
+            }
+        ), 400
 
     # Return newest run as immediate feedback for the UI.
-    c2, o2 = gh_api(f"repos/{repo}/actions/runs?per_page=1")
-    if c2 != 0:
-        return jsonify({"id": None, "status": "queued", "message": out.strip() or "Workflow triggered"})
-    try:
-        latest = (json.loads(o2).get("workflow_runs") or [None])[0]
-    except Exception:
-        latest = None
+    latest_data = fetch_github_json(f"repos/{repo}/actions/runs?per_page=1")
+    latest = None
+    if latest_data:
+        latest = (latest_data.get("workflow_runs") or [None])[0]
+    if not latest:
+        return jsonify({"id": None, "status": "queued", "html_url": None, "message": "Workflow trigger submitted"})
     return jsonify(
         {
-            "id": latest.get("id") if latest else None,
-            "status": map_run_status(latest) if latest else "queued",
-            "html_url": latest.get("html_url") if latest else None,
+            "id": latest.get("id"),
+            "status": map_run_status(latest),
+            "html_url": latest.get("html_url"),
             "message": "Workflow trigger submitted",
         }
     )
@@ -836,6 +1238,13 @@ def job_trace(job_id):
 
     if not run_id:
         return "Missing run_id query parameter", 400
+    ght = _github_token_for_request()
+    if ght:
+        code, log_body = github_rest_request(f"repos/{repo}/actions/jobs/{job_id}/logs", "GET", ght)
+        if code == 200 and log_body:
+            return log_body, 200, {"Content-Type": "text/plain; charset=utf-8"}
+    if shutil.which("gh") is None:
+        return "Job logs require a GitHub token in Connect or the gh CLI.", 500, {"Content-Type": "text/plain; charset=utf-8"}
     code, out = run_cmd(["gh", "run", "view", str(run_id), "--repo", repo, "--job", str(job_id), "--log"])
     if code != 0:
         if "still in progress" in (out or "").lower():
