@@ -481,21 +481,26 @@ def _github_token_for_request():
 
 
 def github_rest_request(path, method="GET", token="", json_body=None):
-    """Call GitHub REST API v3. path is e.g. repos/o/r/actions/runs?per_page=5 (no leading slash)."""
-    if not token:
-        return 401, ""
+    """Call GitHub REST API v3. Supports unauthenticated GET for public repos."""
     url = f"https://api.github.com/{path.lstrip('/')}"
     headers = {
         "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
         "User-Agent": "sbom-mission-control",
         "X-GitHub-Api-Version": "2022-11-28",
     }
+
+    # Only attach Authorization when a token is actually present.
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    method = (method or "GET").upper()
     data = None
     if json_body is not None:
         data = json.dumps(json_body).encode("utf-8")
         headers["Content-Type"] = "application/json"
+
     req = Request(url=url, method=method, headers=headers, data=data)
+
     try:
         with urlopen(req, timeout=120) as resp:
             raw = resp.read()
