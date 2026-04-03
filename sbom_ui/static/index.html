@@ -10,7 +10,6 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
-/* ═══════════════ DESIGN TOKENS ═══════════════ */
 :root {
   --bg0: #0a0e14;
   --bg1: #0f1520;
@@ -36,16 +35,16 @@
   --border2: rgba(255,255,255,.04);
   --mono: 'IBM Plex Mono', monospace;
   --sans: 'Manrope', sans-serif;
-  --r: 6px; --r2: 10px; --r3: 14px;
+  --r: 6px;
+  --r2: 10px;
+  --r3: 14px;
   --shadow: 0 4px 24px rgba(0,0,0,.4);
   --shadow2: 0 2px 8px rgba(0,0,0,.3);
-  /* layout */
   --sidebar-w: 220px;
   --header-h: 56px;
   --tabbar-h: 60px;
 }
 
-/* ═══════════════ RESET & BASE ═══════════════ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { height: 100%; }
 body {
@@ -65,7 +64,6 @@ a { color: inherit; text-decoration: none; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--text3); border-radius: 2px; }
 
-/* ═══════════════ LAYOUT SHELL ═══════════════ */
 .shell {
   display: flex;
   flex: 1;
@@ -73,7 +71,6 @@ a { color: inherit; text-decoration: none; }
   position: relative;
 }
 
-/* ═══════════════ HEADER ═══════════════ */
 .hdr {
   height: var(--header-h);
   background: var(--bg1);
@@ -165,7 +162,6 @@ a { color: inherit; text-decoration: none; }
 }
 @media (max-width: 768px) { .menu-btn { display: flex; } }
 
-/* ═══════════════ SIDEBAR ═══════════════ */
 .sidebar {
   width: var(--sidebar-w);
   flex-shrink: 0;
@@ -205,17 +201,6 @@ a { color: inherit; text-decoration: none; }
   border-left-color: var(--gold);
 }
 .nav-icon { font-size: 16px; width: 20px; text-align: center; flex-shrink: 0; }
-.nav-badge {
-  margin-left: auto;
-  font-size: 9px;
-  font-family: var(--mono);
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 1px 6px;
-  color: var(--text2);
-}
-.nav-badge.ok { background: var(--green-dim); color: var(--green); border-color: rgba(34,211,162,.2); }
 .sidebar-footer {
   margin-top: auto;
   padding: 12px 16px;
@@ -227,7 +212,6 @@ a { color: inherit; text-decoration: none; }
   color: var(--text3);
   line-height: 1.8;
 }
-/* sidebar overlay on mobile */
 @media (max-width: 768px) {
   .sidebar {
     position: fixed;
@@ -253,7 +237,6 @@ a { color: inherit; text-decoration: none; }
   .sidebar-overlay { display: none !important; }
 }
 
-/* ═══════════════ MOBILE TAB BAR ═══════════════ */
 .tabbar {
   display: none;
   height: var(--tabbar-h);
@@ -283,7 +266,6 @@ a { color: inherit; text-decoration: none; }
 .tab-btn.active { color: var(--gold); border-top-color: var(--gold); }
 .tab-icon { font-size: 18px; line-height: 1; }
 
-/* ═══════════════ MAIN CONTENT ═══════════════ */
 .main {
   flex: 1;
   overflow-y: auto;
@@ -300,7 +282,6 @@ a { color: inherit; text-decoration: none; }
   max-width: 1600px;
 }
 
-/* ═══════════════ PAGE HEADER ═══════════════ */
 .page-hd {
   display: flex;
   align-items: flex-start;
@@ -319,7 +300,6 @@ a { color: inherit; text-decoration: none; }
 }
 .page-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
-/* ═══════════════ CARDS ═══════════════ */
 .card {
   background: var(--bg1);
   border: 1px solid var(--border);
@@ -349,7 +329,6 @@ a { color: inherit; text-decoration: none; }
 .card-body { padding: 16px; }
 .card-icon { font-size: 14px; }
 
-/* ═══════════════ STAT GRID ═══════════════ */
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
@@ -396,7 +375,6 @@ a { color: inherit; text-decoration: none; }
   opacity: .12;
 }
 
-/* ═══════════════ GRID HELPERS ═══════════════ */
 .grid-2 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
@@ -408,7 +386,6 @@ a { color: inherit; text-decoration: none; }
   gap: clamp(10px, 2vw, 14px);
 }
 
-/* ═══════════════ BUTTONS ═══════════════ */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -452,9 +429,7 @@ a { color: inherit; text-decoration: none; }
 }
 .btn-sm { padding: 5px 10px; font-size: 11px; }
 .btn-xs { padding: 3px 8px; font-size: 10px; }
-.btn-icon { padding: 6px; aspect-ratio: 1; }
 
-/* ═══════════════ BADGES ═══════════════ */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -474,9 +449,15 @@ a { color: inherit; text-decoration: none; }
 .badge-skip { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
 .badge-dot { width: 4px; height: 4px; border-radius: 50%; background: currentColor; animation: dot-pulse 1.5s ease-in-out infinite; }
 
-/* ═══════════════ FORM FIELDS ═══════════════ */
 .field { display: flex; flex-direction: column; gap: 6px; }
-.field-label { font-size: 10px; font-weight: 700; color: var(--text2); letter-spacing: 1.5px; text-transform: uppercase; font-family: var(--mono); }
+.field-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text2);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  font-family: var(--mono);
+}
 .field input, .field select {
   width: 100%;
   padding: 9px 12px;
@@ -494,7 +475,6 @@ a { color: inherit; text-decoration: none; }
 .field select option { background: var(--bg2); }
 .field input::placeholder { color: var(--text3); }
 
-/* ═══════════════ PIPELINE ITEMS ═══════════════ */
 .pipe-item {
   display: flex;
   align-items: center;
@@ -509,13 +489,11 @@ a { color: inherit; text-decoration: none; }
 }
 .pipe-item:hover { border-color: var(--border); background: var(--bg3); transform: translateX(2px); }
 .pipe-item.selected { border-color: rgba(240,165,0,.35); background: var(--gold-faint); }
-.pipe-id { font-family: var(--mono); font-size: clamp(14px, 2vw, 18px); color: var(--gold); font-weight: 600; flex-shrink: 0; }
 .pipe-meta { flex: 1; min-width: 0; }
 .pipe-ref { font-size: 12px; font-weight: 600; color: var(--text0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pipe-date { font-size: 10px; font-family: var(--mono); color: var(--text2); margin-top: 2px; }
 .pipe-dur { font-size: 11px; font-family: var(--mono); color: var(--text2); flex-shrink: 0; }
 
-/* ═══════════════ PIPELINE STAGE FLOW ═══════════════ */
 .stage-flow {
   display: flex;
   align-items: center;
@@ -558,7 +536,6 @@ a { color: inherit; text-decoration: none; }
 .stage-links { display:flex; gap:4px; margin-top:2px; }
 .stage-links .btn { padding: 2px 6px; font-size: 9px; line-height: 1.2; }
 
-/* ═══════════════ JOB TABLE ═══════════════ */
 .tbl-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; min-width: 400px; }
 th {
@@ -575,7 +552,6 @@ tr:last-child td { border-bottom: none; }
 tr:hover td { background: var(--bg2); }
 .mono { font-family: var(--mono); }
 
-/* ═══════════════ TERMINAL ═══════════════ */
 .terminal {
   background: #050810;
   border: 1px solid var(--border);
@@ -614,7 +590,6 @@ tr:hover td { background: var(--bg2); }
 }
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
 
-/* ═══════════════ SPINNER ═══════════════ */
 .spinner {
   display: inline-block;
   width: 14px; height: 14px;
@@ -625,7 +600,6 @@ tr:hover td { background: var(--bg2); }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ═══════════════ TOAST ═══════════════ */
 .toast-stack {
   position: fixed;
   top: calc(var(--header-h) + 12px);
@@ -653,7 +627,6 @@ tr:hover td { background: var(--bg2); }
 .toast.err { border-left: 3px solid var(--red); }
 .toast.info { border-left: 3px solid var(--gold); }
 
-/* ═══════════════ CONNECT OVERLAY ═══════════════ */
 .overlay {
   position: fixed; inset: 0; z-index: 100;
   background: rgba(5,8,16,.92);
@@ -680,12 +653,33 @@ tr:hover td { background: var(--bg2); }
   color: var(--gold);
   margin-bottom: 6px;
 }
-.modal-sub { font-size: 12px; color: var(--text2); text-align: center; margin-bottom: 24px; font-family: var(--mono); line-height: 1.6; }
+.modal-sub {
+  font-size: 12px;
+  color: var(--text2);
+  text-align: center;
+  margin-bottom: 24px;
+  font-family: var(--mono);
+  line-height: 1.6;
+}
 .modal-fields { display: flex; flex-direction: column; gap: 14px; }
-.modal-err { font-size: 11px; color: var(--red); background: var(--red-dim); border: 1px solid rgba(244,63,94,.2); border-radius: var(--r); padding: 8px 11px; font-family: var(--mono); }
-.modal-note { font-size: 10px; color: var(--text3); text-align: center; margin-top: 12px; font-family: var(--mono); letter-spacing: .5px; }
+.modal-err {
+  font-size: 11px;
+  color: var(--red);
+  background: var(--red-dim);
+  border: 1px solid rgba(244,63,94,.2);
+  border-radius: var(--r);
+  padding: 8px 11px;
+  font-family: var(--mono);
+}
+.modal-note {
+  font-size: 10px;
+  color: var(--text3);
+  text-align: center;
+  margin-top: 12px;
+  font-family: var(--mono);
+  letter-spacing: .5px;
+}
 
-/* ═══════════════ DROP ZONE ═══════════════ */
 .dropzone {
   border: 2px dashed var(--border);
   border-radius: var(--r2);
@@ -699,7 +693,6 @@ tr:hover td { background: var(--bg2); }
 .dropzone-title { font-size: clamp(13px, 2.5vw, 16px); font-weight: 700; color: var(--text0); margin-bottom: 6px; }
 .dropzone-sub { font-size: 12px; color: var(--text2); font-family: var(--mono); }
 
-/* ═══════════════ SEARCH BAR ═══════════════ */
 .search-bar {
   display: flex;
   gap: 8px;
@@ -707,7 +700,13 @@ tr:hover td { background: var(--bg2); }
   align-items: center;
 }
 .search-input-wrap { position: relative; flex: 1; min-width: min(200px, 100%); }
-.search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 14px; color: var(--text2); pointer-events: none; }
+.search-icon {
+  position: absolute; left: 10px; top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  color: var(--text2);
+  pointer-events: none;
+}
 .search-input {
   width: 100%;
   padding: 8px 12px 8px 34px;
@@ -722,7 +721,6 @@ tr:hover td { background: var(--bg2); }
 .search-input:focus { border-color: rgba(240,165,0,.4); }
 .search-input::placeholder { color: var(--text3); }
 
-/* ═══════════════ PKI CHAIN ═══════════════ */
 .pki-node {
   display: flex; align-items: center; gap: 12px;
   padding: 12px 14px;
@@ -742,14 +740,25 @@ tr:hover td { background: var(--bg2); }
 .pki-name { font-size: 12px; font-weight: 700; color: var(--text0); }
 .pki-detail { font-size: 10px; font-family: var(--mono); color: var(--text2); margin-top: 2px; }
 
-/* ═══════════════ SEV BARS ═══════════════ */
 .sev-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.sev-lbl { font-size: 10px; font-family: var(--mono); font-weight: 600; width: 80px; flex-shrink: 0; text-transform: uppercase; letter-spacing: .5px; }
-.sev-track { flex: 1; height: 20px; background: var(--bg3); border-radius: 4px; overflow: hidden; position: relative; cursor: pointer; }
-.sev-fill { height: 100%; border-radius: 4px; display: flex; align-items: center; padding-left: 8px; transition: width 1s cubic-bezier(.4,0,.2,1); }
-.sev-num { font-size: 10px; font-weight: 700; color: #000; font-family: var(--mono); }
+.sev-lbl {
+  font-size: 10px; font-family: var(--mono);
+  font-weight: 600; width: 80px; flex-shrink: 0;
+  text-transform: uppercase; letter-spacing: .5px;
+}
+.sev-track {
+  flex: 1; height: 20px; background: var(--bg3);
+  border-radius: 4px; overflow: hidden; position: relative; cursor: pointer;
+}
+.sev-fill {
+  height: 100%; border-radius: 4px;
+  display: flex; align-items: center; padding-left: 8px;
+  transition: width 1s cubic-bezier(.4,0,.2,1);
+}
+.sev-num {
+  font-size: 10px; font-weight: 700; color: #000; font-family: var(--mono);
+}
 
-/* ═══════════════ COPY BTN ═══════════════ */
 .copy-btn {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 3px 8px;
@@ -761,7 +770,6 @@ tr:hover td { background: var(--bg2); }
 .copy-btn:hover { border-color: var(--gold); color: var(--gold); }
 .copy-btn.copied { border-color: rgba(34,211,162,.3); color: var(--green); background: var(--green-dim); }
 
-/* ═══════════════ INFO SECTION ═══════════════ */
 .info-row {
   display: flex;
   justify-content: space-between;
@@ -775,7 +783,6 @@ tr:hover td { background: var(--bg2); }
 .info-key { font-size: 11px; font-weight: 600; color: var(--text2); flex-shrink: 0; }
 .info-val { font-size: 11px; font-family: var(--mono); color: var(--text0); text-align: right; word-break: break-all; }
 
-/* ═══════════════ EMPTY STATE ═══════════════ */
 .empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: clamp(32px, 8vw, 60px) 20px;
@@ -786,7 +793,6 @@ tr:hover td { background: var(--bg2); }
 .empty-icon { font-size: clamp(32px, 6vw, 48px); opacity: .3; }
 .empty-msg { font-size: 13px; }
 
-/* ═══════════════ ANIMATION HELPERS ═══════════════ */
 .fade-in { animation: fi .25s ease-out; }
 @keyframes fi { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .stagger > * { animation: fi .3s ease-out both; }
@@ -797,10 +803,8 @@ tr:hover td { background: var(--bg2); }
 .stagger > *:nth-child(5) { animation-delay: .25s; }
 .stagger > *:nth-child(6) { animation-delay: .3s; }
 
-/* ═══════════════ UTILS ═══════════════ */
 .gap-6 { gap: 6px; }
 .flex { display: flex; }
-.flex-col { display: flex; flex-direction: column; }
 .items-center { align-items: center; }
 .justify-between { justify-content: space-between; }
 .text-gold { color: var(--gold); }
@@ -808,11 +812,8 @@ tr:hover td { background: var(--bg2); }
 .text-red { color: var(--red); }
 .text-teal { color: var(--teal); }
 .text-muted { color: var(--text2); }
-.text-xs { font-size: 11px; }
 .text-mono { font-family: var(--mono); }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.w-full { width: 100%; }
-.mt-auto { margin-top: auto; }
 </style>
 </head>
 <body>
@@ -821,56 +822,61 @@ tr:hover td { background: var(--bg2); }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
-/* ═══ HELPERS ═══ */
 let API_BASE = (() => {
   const DEFAULT_PUBLIC_API = 'https://sbom-control-api.onrender.com';
   const params = new URLSearchParams(window.location.search);
+
   if (params.get('reset_api') === '1') {
     localStorage.removeItem('sbom_api_base');
   }
+
   const q = params.get('api');
   if (q) {
     const normalized = q.replace(/\/$/, '');
     localStorage.setItem('sbom_api_base', normalized);
     return normalized;
   }
+
   const host = (window.location.hostname || '').toLowerCase();
   const port = String(window.location.port || '');
   const proto = window.location.protocol || '';
-  // When Flask serves the UI locally, always use THIS page's origin — not localStorage — so refresh never
-  // points at an old port/host (was the main cause of "can't connect" after reload).
+
   const isLoopbackHost = host === 'localhost' || host === '127.0.0.1';
   const isSbomAlias = host === 'www.sbomcontrol.com' || host === 'sbomcontrol.com';
-  // Local hosts-file alias runs with an explicit dev port (e.g. :5000, :8765). Public domains typically do not.
   const isLikelyLocalAlias = isSbomAlias && !!port && port !== '80' && port !== '443';
+
   const isLocalMissionControl =
     proto.startsWith('http') &&
     !host.endsWith('.github.io') &&
     (isLoopbackHost || isLikelyLocalAlias);
+
   if (isLocalMissionControl) {
     return window.location.origin.replace(/\/$/, '');
   }
+
   const saved = (localStorage.getItem('sbom_api_base') || '').trim();
   if (saved) return saved.replace(/\/$/, '');
-  // GitHub Pages serves only static files, so defaulting to same-origin breaks /api calls.
-  // Fall back to the public Render API unless the user overrides with ?api=...
+
   if (host.endsWith('.github.io') || isSbomAlias) {
     return DEFAULT_PUBLIC_API;
   }
+
   const origin = window.location.origin;
   if (!origin || origin === 'null' || origin.startsWith('file')) {
     return 'http://127.0.0.1:5000';
   }
+
   return origin;
 })();
 
 const apiUrl = (path) => `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
 const normalizeApiBase = (value) => String(value || '').trim().replace(/\/$/, '');
 
-const GL = (tok, proj, provider, path, opts={}) => {
+const GL = (tok, proj, provider, path, opts = {}) => {
   const url = new URL(apiUrl(`/api${path}`));
   if (proj) url.searchParams.set('project', proj);
   if (provider) url.searchParams.set('provider', provider);
+
   return fetch(url.toString(), {
     ...opts,
     headers: {
@@ -885,12 +891,25 @@ const GL = (tok, proj, provider, path, opts={}) => {
   });
 };
 
-const dur = s => { if (!s) return '—'; const m = Math.floor(s/60); return m ? `${m}m${Math.round(s%60)}s` : `${Math.round(s)}s`; };
-const ago = d => { if (!d) return '—'; const s = Math.round((Date.now()-new Date(d))/1000); if (s<60) return `${s}s ago`; if (s<3600) return `${Math.floor(s/60)}m ago`; if (s<86400) return `${Math.floor(s/3600)}h ago`; return `${Math.floor(s/86400)}d ago`; };
-const sha7 = s => s ? s.slice(0,7) : '';
+const dur = s => {
+  if (!s) return '—';
+  const m = Math.floor(s / 60);
+  return m ? `${m}m${Math.round(s % 60)}s` : `${Math.round(s)}s`;
+};
+
+const ago = d => {
+  if (!d) return '—';
+  const s = Math.round((Date.now() - new Date(d)) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+};
+
+const sha7 = s => s ? s.slice(0, 7) : '';
 const SEV_COL = { Critical:'#f43f5e', High:'#fb923c', Medium:'#fbbf24', Low:'#22d3a2', Negligible:'#4a5a72', Unknown:'#4a5a72' };
 const SEV_ORD = ['Critical','High','Medium','Low','Negligible','Unknown'];
-const cleanAnsi = t => (t||'').replace(/\x1B\[[0-9;]*[mGKH]/g,'');
+const cleanAnsi = t => (t || '').replace(/\x1B\[[0-9;]*[mGKH]/g, '');
 
 async function fetchJobTrace(config, runId, jobId) {
   const q = new URLSearchParams({
@@ -898,67 +917,86 @@ async function fetchJobTrace(config, runId, jobId) {
     project: String(config.projectId || ''),
     provider: String(config.provider || 'github'),
   });
+
   const r = await fetch(apiUrl(`/api/jobs/${jobId}/trace?${q.toString()}`), {
     headers: {
       ...(config.token ? { 'X-SBOM-TOKEN': config.token } : {}),
     }
   });
+
   return cleanAnsi(await r.text()).slice(-5000) || '(empty)';
 }
 
-/* ═══ TOAST ═══ */
 let _addToast = null;
+
 function Toasts() {
   const [list, setList] = useState([]);
+
   _addToast = useCallback((msg, type='info') => {
     const id = Date.now();
     setList(l => [...l, { id, msg, type }]);
     setTimeout(() => setList(l => l.filter(t => t.id !== id)), 4000);
   }, []);
+
   return (
     <div className="toast-stack">
       {list.map(t => (
         <div key={t.id} className={`toast ${t.type}`}>
-          <span>{t.type==='ok'?'✓':t.type==='err'?'⚠':'ℹ'}</span>
+          <span>{t.type === 'ok' ? '✓' : t.type === 'err' ? '⚠' : 'ℹ'}</span>
           <span style={{flex:1, color:'var(--text0)'}}>{t.msg}</span>
         </div>
       ))}
     </div>
   );
 }
-const toast = (m,t) => _addToast?.(m,t);
 
-/* ═══ STATUS BADGE ═══ */
+const toast = (m, t) => _addToast?.(m, t);
+
 function Bdg({ s }) {
-  const map = { success:['badge-ok','PASSED'], failed:['badge-fail','FAILED'], running:['badge-run','RUNNING'], pending:['badge-pend','PENDING'], canceled:['badge-skip','CANCELED'], created:['badge-pend','CREATED'] };
-  const [cls, label] = map[s] || ['badge-skip', (s||'—').toUpperCase()];
+  const map = {
+    success:['badge-ok','PASSED'],
+    failed:['badge-fail','FAILED'],
+    running:['badge-run','RUNNING'],
+    pending:['badge-pend','PENDING'],
+    canceled:['badge-skip','CANCELED'],
+    created:['badge-pend','CREATED']
+  };
+  const [cls, label] = map[s] || ['badge-skip', (s || '—').toUpperCase()];
   const running = s === 'running';
   return <span className={`badge ${cls}`}>{running && <span className="badge-dot"/>}{label}</span>;
 }
 
-/* ═══ CLOCK ═══ */
 function Clock() {
   const [t, setT] = useState(new Date());
-  useEffect(() => { const id = setInterval(() => setT(new Date()), 1000); return () => clearInterval(id); }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => setT(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   return <span className="hdr-clock">{t.toUTCString().slice(17,25)} UTC</span>;
 }
 
-/* ═══ COPY BUTTON ═══ */
 function CopyBtn({ text, label='COPY' }) {
   const [copied, setCopied] = useState(false);
+
   return (
-    <button className={`copy-btn${copied?' copied':''}`} onClick={() => {
-      navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
-    }}>
+    <button
+      className={`copy-btn${copied ? ' copied' : ''}`}
+      onClick={() => {
+        navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        });
+      }}
+    >
       {copied ? '✓ COPIED' : `⎘ ${label}`}
     </button>
   );
 }
 
-/* ═══ SPINNER ═══ */
 const Spin = () => <span className="spinner"/>;
 
-/* ═══ CONNECT MODAL ═══ */
 function ConnectModal({ onConnect }) {
   const [provider, setProvider] = useState('github');
   const [pid, setPid] = useState('');
@@ -968,19 +1006,29 @@ function ConnectModal({ onConnect }) {
   const [err, setErr] = useState('');
 
   async function connect() {
-    if (!pid) { setErr('Project path is required'); return; }
-    setLoading(true); setErr('');
+    if (!pid) {
+      setErr('Project path is required');
+      return;
+    }
+
+    setLoading(true);
+    setErr('');
+
     try {
       const nextBase = normalizeApiBase(apiBase);
       if (nextBase) {
         localStorage.setItem('sbom_api_base', nextBase);
         API_BASE = nextBase;
       }
+
       await GL(tok, pid, provider, '/pipelines?per_page=1');
       sessionStorage.setItem('sbom_cfg', JSON.stringify({ token: tok, projectId: pid, provider }));
       onConnect({ token: tok, projectId: pid, provider });
       toast('Connected successfully', 'ok');
-    } catch(e) { setErr('Connection failed: ' + e.message); }
+    } catch (e) {
+      setErr('Connection failed: ' + e.message);
+    }
+
     setLoading(false);
   }
 
@@ -990,45 +1038,62 @@ function ConnectModal({ onConnect }) {
         <div className="modal-icon">🛡️</div>
         <div className="modal-title">Authenticate</div>
         <div className="modal-sub">Connect to GitHub Actions or GitLab CI<br/>for live pipeline control.</div>
+
         <div className="modal-fields">
           <div className="field">
             <span className="field-label">Provider</span>
-            <select value={provider} onChange={e=>setProvider(e.target.value)}>
+            <select value={provider} onChange={e => setProvider(e.target.value)}>
               <option value="github">GitHub</option>
               <option value="gitlab">GitLab</option>
             </select>
           </div>
+
           <div className="field">
             <span className="field-label">{provider === 'gitlab' ? 'GitLab Project Path' : 'GitHub Repository'}</span>
-            <input value={pid} onChange={e=>setPid(e.target.value)} placeholder="namespace/project-name"
-              onKeyDown={e=>e.key==='Enter'&&connect()} autoFocus/>
+            <input
+              value={pid}
+              onChange={e => setPid(e.target.value)}
+              placeholder="namespace/project-name"
+              onKeyDown={e => e.key === 'Enter' && connect()}
+              autoFocus
+            />
           </div>
+
           <div className="field">
             <span className="field-label">API Base URL</span>
             <input
               value={apiBase}
-              onChange={e=>setApiBase(e.target.value)}
+              onChange={e => setApiBase(e.target.value)}
               placeholder="https://your-api.onrender.com"
-              onKeyDown={e=>e.key==='Enter'&&connect()}
+              onKeyDown={e => e.key === 'Enter' && connect()}
             />
           </div>
+
           <div className="field">
             <span className="field-label">Access Token {provider === 'github' ? '(recommended if gh CLI not installed)' : '(optional for public read)'}</span>
-            <input value={tok} onChange={e=>setTok(e.target.value)} placeholder={provider === 'gitlab' ? 'glpat-... (needed for trigger)' : 'ghp_... · repo + Actions (read; write to trigger)'}
-              onKeyDown={e=>e.key==='Enter'&&connect()}/>
+            <input
+              value={tok}
+              onChange={e => setTok(e.target.value)}
+              placeholder={provider === 'gitlab' ? 'glpat-... (needed for trigger)' : 'ghp_... · repo + Actions'}
+              onKeyDown={e => e.key === 'Enter' && connect()}
+            />
           </div>
+
           {err && <div className="modal-err">{err}</div>}
+
           <button className="btn btn-gold" style={{justifyContent:'center',padding:'11px'}} onClick={connect} disabled={loading}>
             {loading ? <><Spin/> Connecting…</> : '⚡ Connect'}
           </button>
         </div>
-        <div className="modal-note">GitHub: the Mission Control server calls the GitHub API with this token (or the <span className="text-mono">gh</span> CLI if installed). Fine‑grained PAT: Actions read + Contents read; add Actions write to trigger workflows.</div>
+
+        <div className="modal-note">
+          GitHub: the Mission Control server calls the GitHub API with this token or the <span className="text-mono">gh</span> CLI if installed.
+        </div>
       </div>
     </div>
   );
 }
 
-/* ═══ PIPELINE STAGE FLOW ═══ */
 function StageFlow({ jobs = [], onViewLog = null, artifactsUrl = '' }) {
   const stages = [
     { key:'build', label:'Build', icon:'🔨' },
@@ -1037,14 +1102,16 @@ function StageFlow({ jobs = [], onViewLog = null, artifactsUrl = '' }) {
     { key:'sbom_scan', label:'Scan', icon:'🔍' },
     { key:'report', label:'Report', icon:'📦' },
   ];
+
   const getJob = key => jobs.find(j => j.stage === key);
-  const stCls = s => s==='success'?'ok':s==='failed'?'fail':s==='running'?'run':'';
+  const stCls = s => s === 'success' ? 'ok' : s === 'failed' ? 'fail' : s === 'running' ? 'run' : '';
 
   return (
     <div className="stage-flow">
       {stages.map((s, i) => {
         const j = getJob(s.key);
         const cls = stCls(j?.status);
+
         return (
           <React.Fragment key={s.key}>
             {i > 0 && <div className="stage-arrow">→</div>}
@@ -1053,7 +1120,9 @@ function StageFlow({ jobs = [], onViewLog = null, artifactsUrl = '' }) {
                 className={`stage-box ${cls} ${j && onViewLog ? 'clickable' : ''}`}
                 onClick={() => j && onViewLog && onViewLog(j)}
                 title={j ? `Open ${s.label} log` : `${s.label} not started`}
-              >{s.icon} {s.label}</div>
+              >
+                {s.icon} {s.label}
+              </div>
               <div className="stage-dur">{dur(j?.duration)}</div>
               {j && (
                 <div className="stage-links">
@@ -1069,7 +1138,6 @@ function StageFlow({ jobs = [], onViewLog = null, artifactsUrl = '' }) {
   );
 }
 
-/* ═══ DASHBOARD ═══ */
 function Dashboard({ config, onNav }) {
   const [pipelines, setPipelines] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1082,7 +1150,7 @@ function Dashboard({ config, onNav }) {
   useEffect(() => {
     GL(config.token, config.projectId, config.provider, '/pipelines?per_page=20')
       .then(d => { setPipelines(d); setLoading(false); })
-      .catch(e => { toast('Failed to load pipelines: '+e.message,'err'); setLoading(false); });
+      .catch(e => { toast('Failed to load pipelines: ' + e.message, 'err'); setLoading(false); });
   }, []);
 
   useEffect(() => {
@@ -1092,27 +1160,34 @@ function Dashboard({ config, onNav }) {
   }, []);
 
   const latest = pipelines[0];
+
   useEffect(() => {
     if (!latest) return;
-    GL(config.token, config.projectId, config.provider, `/pipelines/${latest.id}/jobs`).then(setLatestJobs).catch(()=>{});
+    GL(config.token, config.projectId, config.provider, `/pipelines/${latest.id}/jobs`).then(setLatestJobs).catch(() => {});
   }, [latest?.id]);
 
   const stats = useMemo(() => {
-    const ok = pipelines.filter(p=>p.status==='success').length;
-    const fail = pipelines.filter(p=>p.status==='failed').length;
-    const run = pipelines.filter(p=>p.status==='running').length;
-    const durs = pipelines.filter(p=>p.duration);
-    const avg = durs.length ? Math.round(durs.reduce((a,b)=>a+b.duration,0)/durs.length) : 0;
-    return { ok, fail, run, total:pipelines.length, rate: pipelines.length ? Math.round(ok/pipelines.length*100) : 0, avg };
+    const ok = pipelines.filter(p => p.status === 'success').length;
+    const fail = pipelines.filter(p => p.status === 'failed').length;
+    const run = pipelines.filter(p => p.status === 'running').length;
+    const durs = pipelines.filter(p => p.duration);
+    const avg = durs.length ? Math.round(durs.reduce((a,b) => a + b.duration, 0) / durs.length) : 0;
+    return { ok, fail, run, total:pipelines.length, rate: pipelines.length ? Math.round(ok / pipelines.length * 100) : 0, avg };
   }, [pipelines]);
 
   async function viewLatestLog(job) {
     if (!latest) return;
-    setLatestLogJob(job); setLatestLog(''); setLatestLogLoading(true);
+    setLatestLogJob(job);
+    setLatestLog('');
+    setLatestLogLoading(true);
+
     try {
       const t = await fetchJobTrace(config, latest.id, job.id);
       setLatestLog(t);
-    } catch(e) { setLatestLog('Error: '+e.message); }
+    } catch (e) {
+      setLatestLog('Error: ' + e.message);
+    }
+
     setLatestLogLoading(false);
   }
 
@@ -1129,7 +1204,7 @@ function Dashboard({ config, onNav }) {
     { v: stats.ok, l:'Passed', icon:'✅', col:'var(--green)' },
     { v: stats.fail, l:'Failed', icon:'❌', col:'var(--red)' },
     { v: stats.run, l:'Running', icon:'⚡', col:'var(--teal)' },
-    { v: stats.rate+'%', l:'Success Rate', icon:'📈', col: stats.rate>=80?'var(--green)':'var(--amber)' },
+    { v: stats.rate + '%', l:'Success Rate', icon:'📈', col: stats.rate >= 80 ? 'var(--green)' : 'var(--amber)' },
     { v: dur(stats.avg), l:'Avg Duration', icon:'⏱', col:'#a78bfa' },
   ];
 
@@ -1141,25 +1216,26 @@ function Dashboard({ config, onNav }) {
   return (
     <div className="page fade-in">
       <div className="page-hd">
-        <div><div className="page-title">Mission Overview</div><div className="page-sub">SBOM Attestation · Any C/C++ Application</div></div>
+        <div>
+          <div className="page-title">Mission Overview</div>
+          <div className="page-sub">SBOM Attestation · Any C/C++ Application</div>
+        </div>
         <div className="page-actions">
-          <button className="btn btn-outline-gold" onClick={()=>onNav('pipelines')}>⚡ New Pipeline</button>
+          <button className="btn btn-outline-gold" onClick={() => onNav('pipelines')}>⚡ New Pipeline</button>
         </div>
       </div>
 
-      {/* Stats */}
       <div className="stat-grid stagger">
         {STATS.map(s => (
           <div className="stat-card" key={s.l} style={{'--stat-color':s.col}}>
             <div className="stat-icon">{s.icon}</div>
-            <div className="stat-val">{loading?'…':s.v}</div>
+            <div className="stat-val">{loading ? '…' : s.v}</div>
             <div className="stat-lbl">{s.l}</div>
           </div>
         ))}
       </div>
 
       <div className="grid-2">
-        {/* Latest pipeline */}
         <div className="card">
           <div className="card-hd">
             <div className="card-title"><span className="card-icon">⚙️</span>Latest Pipeline</div>
@@ -1182,9 +1258,13 @@ function Dashboard({ config, onNav }) {
                         <span style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--gold)',letterSpacing:'1px'}}>LOG: {latestLogJob.name}</span>
                         <Bdg s={latestLogJob.status}/>
                       </div>
-                      <button className="btn btn-xs" onClick={()=>window.open(latest?.html_url,'_blank')} disabled={!latest?.html_url}>Artifacts</button>
+                      <button className="btn btn-xs" onClick={() => window.open(latest?.html_url, '_blank')} disabled={!latest?.html_url}>Artifacts</button>
                     </div>
-                    <div className="terminal"><div className="terminal-body">{latestLogLoading ? <Spin/> : latestLog.split('\n').map((line,i)=><div key={i}>{line || '\u00a0'}</div>)}</div></div>
+                    <div className="terminal">
+                      <div className="terminal-body">
+                        {latestLogLoading ? <Spin/> : latestLog.split('\n').map((line, i) => <div key={i}>{line || '\u00a0'}</div>)}
+                      </div>
+                    </div>
                   </div>
                 )}
               </>
@@ -1196,16 +1276,15 @@ function Dashboard({ config, onNav }) {
           </div>
         </div>
 
-        {/* Recent pipelines */}
         <div className="card">
           <div className="card-hd">
             <div className="card-title"><span className="card-icon">📋</span>Recent</div>
-            <button className="btn btn-sm" onClick={()=>onNav('pipelines')}>View All →</button>
+            <button className="btn btn-sm" onClick={() => onNav('pipelines')}>View All →</button>
           </div>
           <div className="card-body" style={{padding:'10px 14px'}}>
             {loading ? <div className="empty"><Spin/></div> :
               pipelines.slice(0,6).map(p => (
-                <div key={p.id} className="pipe-item" onClick={()=>onNav('pipelines')}>
+                <div key={p.id} className="pipe-item" onClick={() => onNav('pipelines')}>
                   <Bdg s={p.status}/>
                   <div className="pipe-meta">
                     <div className="pipe-ref">#{p.id} · {p.ref} · <span className="text-mono" style={{fontSize:10,color:'var(--text2)'}}>{sha7(p.sha)}</span></div>
@@ -1219,7 +1298,6 @@ function Dashboard({ config, onNav }) {
         </div>
       </div>
 
-      {/* Project info */}
       <div className="grid-3">
         {[
           { title:'Tools', icon:'🛠', rows:[['Syft','v1.42.1'],['Grype','v0.109.0'],['CycloneDX-CLI','v0.30.0'],['Trivy','v0.69.2'],['OpenSSL','3.0.13']] },
@@ -1254,7 +1332,6 @@ function Dashboard({ config, onNav }) {
   );
 }
 
-/* ═══ PIPELINES ═══ */
 function PipelinesPage({ config }) {
   const [pipelines, setPipelines] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -1269,55 +1346,73 @@ function PipelinesPage({ config }) {
     try {
       const d = await GL(config.token, config.projectId, config.provider, '/pipelines?per_page=15');
       setPipelines(d);
-      if (selected) { const u = d.find(p=>p.id===selected.id); if(u) setSelected(u); }
-    } catch(e) { toast('Load failed: '+e.message,'err'); }
+      if (selected) {
+        const u = d.find(p => p.id === selected.id);
+        if (u) setSelected(u);
+      }
+    } catch (e) {
+      toast('Load failed: ' + e.message, 'err');
+    }
     setLoading(false);
   }, [config, selected?.id]);
 
   useEffect(() => { load(); }, []);
+
   useEffect(() => {
-    if (polling) { pollRef.current = setInterval(load, 5000); }
-    else clearInterval(pollRef.current);
+    if (polling) {
+      pollRef.current = setInterval(load, 5000);
+    } else {
+      clearInterval(pollRef.current);
+    }
     return () => clearInterval(pollRef.current);
   }, [polling, load]);
+
   async function launch() {
     setLaunching(true);
     try {
       const p = await GL(config.token, config.projectId, config.provider, '/pipeline', {
-        method:'POST', body: JSON.stringify({ ref, provider: config.provider, variables:[{key:'APP_VERSION',value:ver,variable_type:'env_var'}] })
+        method:'POST',
+        body: JSON.stringify({
+          ref,
+          provider: config.provider,
+          variables:[{key:'APP_VERSION',value:ver,variable_type:'env_var'}]
+        })
       });
       toast(`Pipeline #${p.id} launched`, 'ok');
       setPolling(true);
       setTimeout(load, 1500);
-    } catch(e) { toast('Launch failed: '+e.message,'err'); }
+    } catch (e) {
+      toast('Launch failed: ' + e.message, 'err');
+    }
     setLaunching(false);
   }
-
 
   return (
     <div className="page fade-in">
       <div className="page-hd">
-        <div><div className="page-title">Pipeline Control</div><div className="page-sub">Launch · Monitor · Inspect · Download</div></div>
+        <div>
+          <div className="page-title">Pipeline Control</div>
+          <div className="page-sub">Launch · Monitor · Inspect · Download</div>
+        </div>
         <div className="page-actions">
-          <button className={`btn ${polling?'btn-outline-teal':''}`} onClick={()=>setPolling(!polling)}>
+          <button className={`btn ${polling ? 'btn-outline-teal' : ''}`} onClick={() => setPolling(!polling)}>
             {polling ? <><Spin/> Polling</> : '🔄 Auto-Poll'}
           </button>
           <button className="btn" onClick={load}>↻ Refresh</button>
         </div>
       </div>
 
-      {/* Trigger */}
       <div className="card">
         <div className="card-hd"><div className="card-title"><span className="card-icon">⚡</span>Launch Pipeline</div></div>
         <div className="card-body">
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(180px,100%),1fr))',gap:10,alignItems:'flex-end'}}>
             <div className="field">
               <span className="field-label">Branch / Ref</span>
-              <input value={ref} onChange={e=>setRef(e.target.value)} placeholder="main"/>
+              <input value={ref} onChange={e => setRef(e.target.value)} placeholder="main"/>
             </div>
             <div className="field">
               <span className="field-label">App Version</span>
-              <input value={ver} onChange={e=>setVer(e.target.value)} placeholder="1.0.0"/>
+              <input value={ver} onChange={e => setVer(e.target.value)} placeholder="1.0.0"/>
             </div>
             <button className="btn btn-gold" style={{height:38,justifyContent:'center'}} onClick={launch} disabled={launching}>
               {launching ? <><Spin/> Launching…</> : '▶ Launch'}
@@ -1330,14 +1425,13 @@ function PipelinesPage({ config }) {
       </div>
 
       <div className="grid-2" style={{alignItems:'start'}}>
-        {/* List */}
         <div>
           <div style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--text2)',letterSpacing:'1.5px',textTransform:'uppercase',marginBottom:10}}>
             Recent ({pipelines.length})
           </div>
           {loading ? <div className="empty"><Spin/></div> :
             pipelines.map(p => (
-              <div key={p.id} className={`pipe-item${selected?.id===p.id?' selected':''}`} onClick={()=>setSelected(p)}>
+              <div key={p.id} className={`pipe-item${selected?.id === p.id ? ' selected' : ''}`} onClick={() => setSelected(p)}>
                 <Bdg s={p.status}/>
                 <div className="pipe-meta">
                   <div className="pipe-ref">#{p.id} · {p.ref}</div>
@@ -1349,7 +1443,6 @@ function PipelinesPage({ config }) {
           }
         </div>
 
-        {/* Detail */}
         {selected ? (
           <PipelineDetail config={config} pipeline={selected} key={selected.id}/>
         ) : (
@@ -1365,7 +1458,6 @@ function PipelinesPage({ config }) {
   );
 }
 
-/* ═══ PIPELINE DETAIL ═══ */
 function PipelineDetail({ config, pipeline }) {
   const [jobs, setJobs] = useState([]);
   const [logJob, setLogJob] = useState(null);
@@ -1374,7 +1466,9 @@ function PipelineDetail({ config, pipeline }) {
   const logRef = useRef(null);
 
   const refreshJobs = useCallback(() => {
-    return GL(config.token, config.projectId, config.provider, `/pipelines/${pipeline.id}/jobs`).then(setJobs).catch(()=>{});
+    return GL(config.token, config.projectId, config.provider, `/pipelines/${pipeline.id}/jobs`)
+      .then(setJobs)
+      .catch(() => {});
   }, [config.token, config.projectId, config.provider, pipeline.id]);
 
   useEffect(() => {
@@ -1389,13 +1483,21 @@ function PipelineDetail({ config, pipeline }) {
   }, [jobs, pipeline.status, refreshJobs]);
 
   async function viewLog(job) {
-    setLogJob(job); setLog(''); setLogLoading(true);
+    setLogJob(job);
+    setLog('');
+    setLogLoading(true);
+
     try {
       const t = await fetchJobTrace(config, pipeline.id, job.id);
       setLog(t);
-    } catch(e) { setLog('Error: '+e.message); }
+    } catch (e) {
+      setLog('Error: ' + e.message);
+    }
+
     setLogLoading(false);
-    setTimeout(() => { if(logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, 80);
+    setTimeout(() => {
+      if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+    }, 80);
   }
 
   useEffect(() => {
@@ -1442,11 +1544,8 @@ function PipelineDetail({ config, pipeline }) {
                     <td className="mono" style={{fontSize:11,color:'var(--text2)'}}>{dur(j.duration)}</td>
                     <td>
                       <div className="flex gap-6">
-                        <button className="btn btn-xs btn-outline-gold" onClick={()=>viewLog(j)}>📋 Log</button>
-                        <button className="btn btn-xs btn-outline-teal"
-                          onClick={()=>window.open(pipeline?.html_url,'_blank')}>
-                          ⬇
-                        </button>
+                        <button className="btn btn-xs btn-outline-gold" onClick={() => viewLog(j)}>📋 Log</button>
+                        <button className="btn btn-xs btn-outline-teal" onClick={() => window.open(pipeline?.html_url, '_blank')}>⬇</button>
                       </div>
                     </td>
                   </tr>
@@ -1463,7 +1562,7 @@ function PipelineDetail({ config, pipeline }) {
                 <span style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--gold)',letterSpacing:'1px'}}>LOG: {logJob.name}</span>
                 <Bdg s={logJob.status}/>
               </div>
-              <button className="btn btn-xs btn-outline-red" onClick={()=>setLogJob(null)}>✕ Close</button>
+              <button className="btn btn-xs btn-outline-red" onClick={() => setLogJob(null)}>✕ Close</button>
             </div>
             <div className="terminal">
               <div className="terminal-hd">
@@ -1484,14 +1583,12 @@ function PipelineDetail({ config, pipeline }) {
   );
 }
 
-/* ═══ SBOM VIEWER ═══ */
 function SBOMPage() {
   const [sbom, setSbom] = useState(null);
   const [projectZip, setProjectZip] = useState(null);
-const [projectFiles, setProjectFiles] = useState([]);
-const [uploadStatus, setUploadStatus] = useState('');
-const [uploadedSourcePath, setUploadedSourcePath] = useState('');
-  const [file, setFile] = useState(null);
+  const [projectFiles, setProjectFiles] = useState([]);
+  const [uploadStatus, setUploadStatus] = useState('');
+  const [uploadedSourcePath, setUploadedSourcePath] = useState('');
   const [search, setSearch] = useState('');
   const [typeF, setTypeF] = useState('All');
   const [view, setView] = useState('table');
@@ -1500,10 +1597,6 @@ const [uploadedSourcePath, setUploadedSourcePath] = useState('');
   const [loadingApi, setLoadingApi] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState('');
   const [history, setHistory] = useState([]);
-  const [projectZip, setProjectZip] = useState(null);
-const [projectFiles, setProjectFiles] = useState([]);
-const [uploadStatus, setUploadStatus] = useState('');
-const [uploadedSourcePath, setUploadedSourcePath] = useState('');
 
   useEffect(() => {
     try {
@@ -1516,7 +1609,9 @@ const [uploadedSourcePath, setUploadedSourcePath] = useState('');
   function pushHistory(entry) {
     const next = [entry, ...history].slice(0, 8);
     setHistory(next);
-    try { sessionStorage.setItem('sbom_view_history', JSON.stringify(next)); } catch {}
+    try {
+      sessionStorage.setItem('sbom_view_history', JSON.stringify(next));
+    } catch {}
   }
 
   function load(file) {
@@ -1576,214 +1671,211 @@ const [uploadedSourcePath, setUploadedSourcePath] = useState('');
     setView('table');
     setLastLoadedAt('');
   }
-async function handleUploadSource() {
+
+  async function handleUploadSource() {
+    setUploadStatus('');
+    setErr('');
+
+    if (!projectZip && projectFiles.length === 0) {
+      setUploadStatus('Please choose a ZIP file or a project folder.');
+      return;
+    }
+
+    const formData = new FormData();
+
+    if (projectZip) {
+      formData.append('project_zip', projectZip);
+    } else {
+      for (const file of projectFiles) {
+        formData.append('project_files', file, file.webkitRelativePath || file.name);
+      }
+    }
+
+    try {
+      setUploadStatus('Uploading source...');
+      const res = await fetch(apiUrl('/api/upload-source'), {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || data.status !== 'ok') {
+        throw new Error(data.message || 'Upload failed');
+      }
+
+      setUploadedSourcePath(data.source_path || '');
+      setUploadStatus(`Upload successful: ${data.source_path || 'source uploaded'}`);
+      toast('Source uploaded successfully', 'ok');
+    } catch (e) {
+      setUploadStatus(`Upload failed: ${e.message}`);
+      toast(`Upload failed: ${e.message}`, 'err');
+    }
+  }
+
   async function handleGenerateFromUpload() {
-  if (!uploadedSourcePath) {
-    setUploadStatus('Upload a source project first.');
-    return;
-  }
-
-  try {
-    setUploadStatus('Generating SBOM...');
-    const res = await fetch(apiUrl('/api/generate'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        source_path: uploadedSourcePath,
-        mode: 'native'
-      })
-    });
-
-    const data = await res.json();
-
-    if (!res.ok || data.status !== 'ok') {
-      throw new Error(data.log || data.message || 'SBOM generation failed');
+    if (!uploadedSourcePath) {
+      setUploadStatus('Upload a source project first.');
+      return;
     }
 
-    setUploadStatus('SBOM generated successfully. Loading viewer...');
-    await loadFromApi();
-    toast('SBOM generated successfully', 'ok');
-  } catch (e) {
-    setUploadStatus(`Generation failed: ${e.message}`);
-    toast(`Generation failed: ${e.message}`, 'err');
-  }
-}
-  setUploadStatus('');
-  setErr('');
+    try {
+      setUploadStatus('Generating SBOM...');
+      const res = await fetch(apiUrl('/api/generate'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_path: uploadedSourcePath,
+          mode: 'native'
+        })
+      });
 
-  if (!projectZip && projectFiles.length === 0) {
-    setUploadStatus('Please choose a ZIP file or a project folder.');
-    return;
-  }
+      const data = await res.json();
 
-  const formData = new FormData();
+      if (!res.ok || data.status !== 'ok') {
+        throw new Error(data.log || data.message || 'SBOM generation failed');
+      }
 
-  if (projectZip) {
-    formData.append('project_zip', projectZip);
-  } else {
-    for (const file of projectFiles) {
-      formData.append('project_files', file, file.webkitRelativePath || file.name);
+      setUploadStatus('SBOM generated successfully. Loading viewer...');
+      await loadFromApi();
+      toast('SBOM generated successfully', 'ok');
+    } catch (e) {
+      setUploadStatus(`Generation failed: ${e.message}`);
+      toast(`Generation failed: ${e.message}`, 'err');
     }
   }
 
-  try {
-    setUploadStatus('Uploading source...');
-    const res = await fetch(apiUrl('/api/upload-source'), {
-      method: 'POST',
-      body: formData
-    });
-
-    const data = await res.json();
-
-    if (!res.ok || data.status !== 'ok') {
-      throw new Error(data.message || 'Upload failed');
-    }
-
-    setUploadedSourcePath(data.source_path || '');
-    setUploadStatus(`Upload successful: ${data.source_path || 'source uploaded'}`);
-    toast('Source uploaded successfully', 'ok');
-  } catch (e) {
-    setUploadStatus(`Upload failed: ${e.message}`);
-    toast(`Upload failed: ${e.message}`, 'err');
-  }
-}
-  async function handleUploadSource() { ... }
-
-async function handleGenerateFromUpload() { ... }
   useEffect(() => {
     loadFromApi();
   }, []);
 
-  const types = useMemo(() => sbom ? ['All', ...new Set(sbom.components?.map(c=>c.type)||[])] : [], [sbom]);
+  const types = useMemo(() => sbom ? ['All', ...new Set(sbom.components?.map(c => c.type) || [])] : [], [sbom]);
+
   const filtered = useMemo(() => {
     if (!sbom?.components) return [];
     const q = search.toLowerCase();
     return sbom.components.filter(c => {
-      const m = !q || [c.name,c.version,c.type,c.supplier?.name].some(v=>v?.toLowerCase().includes(q));
-      return m && (typeF==='All' || c.type===typeF);
+      const m = !q || [c.name, c.version, c.type, c.supplier?.name].some(v => v?.toLowerCase().includes(q));
+      return m && (typeF === 'All' || c.type === typeF);
     });
   }, [sbom, search, typeF]);
 
-  if (!sbom) return (
-    <div className="page fade-in">
-      <div className="page-hd">
-        <div><div className="page-title">SBOM Viewer</div><div className="page-sub">CycloneDX 1.4 · Component Intelligence</div></div>
-        <div className="flex gap-6">
-          <button className="btn btn-xs" onClick={loadFromApi} disabled={loadingApi}>{loadingApi ? 'Refreshing...' : '↻ Refresh Latest'}</button>
-          <button className="btn btn-outline-red btn-xs" onClick={resetViewer}>Reset View</button>
-        </div>
-      </div>
-      <div className="card">
-        <div className="card-body">
-          <div className="flex gap-6" style={{marginBottom:12,flexWrap:'wrap'}}>
-            <button className="btn btn-outline-gold" onClick={loadFromApi} disabled={loadingApi}>
-              {loadingApi ? 'Loading...' : 'Load Latest SBOM'}
+  if (!sbom) {
+    return (
+      <div className="page fade-in">
+        <div className="page-hd">
+          <div>
+            <div className="page-title">SBOM Viewer</div>
+            <div className="page-sub">CycloneDX 1.4 · Component Intelligence</div>
+          </div>
+          <div className="flex gap-6">
+            <button className="btn btn-xs" onClick={loadFromApi} disabled={loadingApi}>
+              {loadingApi ? 'Refreshing...' : '↻ Refresh Latest'}
             </button>
-            <br /><br />
-
-<input 
-  type="file" 
-  onChange={(e) => setProjectZip(e.target.files[0])}
-/>
-
-<br /><br />
-
-<button 
-  className="btn btn-outline-gold"
-  onClick={handleUploadSource}
->
-  Upload Source
-</button>
-
-<button 
-  className="btn btn-outline-teal"
-  onClick={handleGenerateFromUpload}
-  style={{ marginLeft: 10 }}
->
-  Generate SBOM
-</button>
-            {uploadStatus && (
-  <div style={{ marginTop: 10 }}>
-    {uploadStatus}
-  </div>
-)}
+            <button className="btn btn-outline-red btn-xs" onClick={resetViewer}>Reset View</button>
           </div>
-          <div style={{marginTop: 20}}>
-  <h3>Upload Project</h3>
+        </div>
 
-  <input 
-    type="file" 
-    onChange={(e) => setFile(e.target.files[0])} 
-  />
+        <div className="card">
+          <div className="card-body">
+            <div className="flex gap-6" style={{marginBottom:12,flexWrap:'wrap'}}>
+              <button className="btn btn-outline-gold" onClick={loadFromApi} disabled={loadingApi}>
+                {loadingApi ? 'Loading...' : 'Load Latest SBOM'}
+              </button>
+            </div>
 
-  <br /><br />
+            <div className="card" style={{marginBottom:12}}>
+              <div className="card-body">
+                <div style={{fontSize:11, marginBottom:10, fontFamily:'var(--mono)', color:'var(--gold)'}}>
+                  UPLOAD PROJECT SOURCE
+                </div>
 
-  <button 
-    className="btn btn-outline-gold"
-    onClick={handleUpload}
-  >
-    Upload File
-  </button>
-</div>
-          <div className="card" style={{marginBottom:12}}>
-  <div className="card-body">
-    <div style={{fontSize:11, marginBottom:10, fontFamily:'var(--mono)', color:'var(--gold)'}}>
-      UPLOAD PROJECT SOURCE
-    </div>
+                <div className="field" style={{marginBottom:12}}>
+                  <span className="field-label">ZIP Upload</span>
+                  <input type="file" accept=".zip" onChange={(e) => setProjectZip(e.target.files[0] || null)} />
+                </div>
 
-    <input
-      type="file"
-      onChange={(e) => setFile(e.target.files[0])}
-    />
+                <div className="field" style={{marginBottom:12}}>
+                  <span className="field-label">Folder Upload</span>
+                  <input
+                    type="file"
+                    webkitdirectory="true"
+                    directory=""
+                    multiple
+                    onChange={(e) => setProjectFiles(Array.from(e.target.files || []))}
+                  />
+                </div>
 
-    <br /><br />
+                <div className="flex gap-6" style={{flexWrap:'wrap'}}>
+                  <button className="btn btn-outline-gold" onClick={handleUploadSource}>
+                    Upload Source
+                  </button>
 
-    <button
-      className="btn btn-outline-gold"
-      onClick={handleUpload}
-    >
-      Upload File
-    </button>
-  </div>
-</div>
-          <div className={`dropzone${drag?' drag':''}`}
-            onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)}
-            onDrop={e=>{e.preventDefault();setDrag(false);load(e.dataTransfer.files[0]);}}
-            onClick={()=>document.getElementById('sbf').click()}>
-            <div className="dropzone-icon">📦</div>
-            <div className="dropzone-title">Drop holistic-sbom.json here</div>
-            <div className="dropzone-sub">or click to browse · Download from pipeline artifacts</div>
-            <input id="sbf" type="file" accept=".json" style={{display:'none'}} onChange={e=>load(e.target.files[0])}/>
+                  <button className="btn btn-outline-teal" onClick={handleGenerateFromUpload}>
+                    Generate SBOM
+                  </button>
+                </div>
+
+                {uploadStatus && (
+                  <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text0)' }}>
+                    {uploadStatus}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div
+              className={`dropzone${drag ? ' drag' : ''}`}
+              onDragOver={e => { e.preventDefault(); setDrag(true); }}
+              onDragLeave={() => setDrag(false)}
+              onDrop={e => { e.preventDefault(); setDrag(false); load(e.dataTransfer.files[0]); }}
+              onClick={() => document.getElementById('sbf').click()}
+            >
+              <div className="dropzone-icon">📦</div>
+              <div className="dropzone-title">Drop holistic-sbom.json here</div>
+              <div className="dropzone-sub">or click to browse · Download from pipeline artifacts</div>
+              <input id="sbf" type="file" accept=".json" style={{display:'none'}} onChange={e => load(e.target.files[0])}/>
+            </div>
+
+            {err && <div className="modal-err" style={{marginTop:12}}>{err}</div>}
           </div>
-          {err && <div className="modal-err" style={{marginTop:12}}>{err}</div>}
         </div>
       </div>
-    </div>
-  );
+    );
+  }
 
-  const licCounts = sbom.components?.reduce((a,c)=>{ const l=c.licenses?.[0]?.license?.id||'Unknown'; a[l]=(a[l]||0)+1; return a; },{}) ?? {};
+  const licCounts = sbom.components?.reduce((a, c) => {
+    const l = c.licenses?.[0]?.license?.id || 'Unknown';
+    a[l] = (a[l] || 0) + 1;
+    return a;
+  }, {}) ?? {};
 
   return (
     <div className="page fade-in">
       <div className="page-hd">
-        <div><div className="page-title">SBOM Viewer</div><div className="page-sub">{sbom.metadata?.component?.name || 'Holistic SBOM'}</div></div>
+        <div>
+          <div className="page-title">SBOM Viewer</div>
+          <div className="page-sub">{sbom.metadata?.component?.name || 'Holistic SBOM'}</div>
+        </div>
         <div className="flex gap-6">
-          <button className="btn btn-xs" onClick={loadFromApi} disabled={loadingApi}>{loadingApi ? 'Refreshing...' : '↻ Refresh Latest'}</button>
+          <button className="btn btn-xs" onClick={loadFromApi} disabled={loadingApi}>
+            {loadingApi ? 'Refreshing...' : '↻ Refresh Latest'}
+          </button>
           <button className="btn btn-outline-red btn-xs" onClick={resetViewer}>Reset View</button>
-          <button className="btn btn-outline-red btn-sm" onClick={()=>setSbom(null)}>✕ Clear</button>
+          <button className="btn btn-outline-red btn-sm" onClick={() => setSbom(null)}>✕ Clear</button>
         </div>
       </div>
 
       <div className="stat-grid stagger">
         {[
-          {v:sbom.components?.length||0,l:'Components',col:'var(--gold)'},
-          {v:Object.keys(licCounts).length,l:'Licenses',col:'var(--teal)'},
-          {v:sbom.specVersion,l:'CycloneDX',col:'#a78bfa'},
-          {v:sbom.metadata?.component?.name||'—',l:'Root Component',col:'var(--amber)'},
-          {v:lastLoadedAt ? new Date(lastLoadedAt).toLocaleTimeString() : '—',l:'Last Refreshed',col:'var(--green)'},
-        ].map(s=>(
+          {v:sbom.components?.length || 0, l:'Components', col:'var(--gold)'},
+          {v:Object.keys(licCounts).length, l:'Licenses', col:'var(--teal)'},
+          {v:sbom.specVersion, l:'CycloneDX', col:'#a78bfa'},
+          {v:sbom.metadata?.component?.name || '—', l:'Root Component', col:'var(--amber)'},
+          {v:lastLoadedAt ? new Date(lastLoadedAt).toLocaleTimeString() : '—', l:'Last Refreshed', col:'var(--green)'},
+        ].map(s => (
           <div className="stat-card" key={s.l} style={{'--stat-color':s.col}}>
-            <div className="stat-val" style={{fontSize:typeof s.v==='string'&&s.v.length>5?16:28}}>{s.v}</div>
+            <div className="stat-val" style={{fontSize: typeof s.v === 'string' && s.v.length > 5 ? 16 : 28}}>{s.v}</div>
             <div className="stat-lbl">{s.l}</div>
           </div>
         ))}
@@ -1805,35 +1897,38 @@ async function handleGenerateFromUpload() { ... }
 
       <div className="card">
         <div className="card-hd">
-          <div className="card-title"><span className="card-icon">🔎</span>Components ({filtered.length}/{sbom.components?.length||0})</div>
+          <div className="card-title"><span className="card-icon">🔎</span>Components ({filtered.length}/{sbom.components?.length || 0})</div>
           <div className="flex gap-6" style={{flexWrap:'wrap'}}>
-            <button className={`btn btn-xs${view==='table'?' btn-outline-gold':''}`} onClick={()=>setView('table')}>≡ Table</button>
-            <button className={`btn btn-xs${view==='cards'?' btn-outline-gold':''}`} onClick={()=>setView('cards')}>⊞ Cards</button>
+            <button className={`btn btn-xs${view === 'table' ? ' btn-outline-gold' : ''}`} onClick={() => setView('table')}>≡ Table</button>
+            <button className={`btn btn-xs${view === 'cards' ? ' btn-outline-gold' : ''}`} onClick={() => setView('cards')}>⊞ Cards</button>
           </div>
         </div>
         <div className="card-body">
           <div className="search-bar" style={{marginBottom:14}}>
             <div className="search-input-wrap">
               <span className="search-icon">🔍</span>
-              <input className="search-input" placeholder="Search components…" value={search} onChange={e=>setSearch(e.target.value)}/>
+              <input className="search-input" placeholder="Search components…" value={search} onChange={e => setSearch(e.target.value)}/>
             </div>
-            <select style={{padding:'8px 10px',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'var(--r)',color:'var(--text0)',fontSize:12,fontFamily:'var(--mono)'}}
-              value={typeF} onChange={e=>setTypeF(e.target.value)}>
-              {types.map(t=><option key={t}>{t}</option>)}
+            <select
+              style={{padding:'8px 10px',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'var(--r)',color:'var(--text0)',fontSize:12,fontFamily:'var(--mono)'}}
+              value={typeF}
+              onChange={e => setTypeF(e.target.value)}
+            >
+              {types.map(t => <option key={t}>{t}</option>)}
             </select>
           </div>
 
-          {view==='table' ? (
+          {view === 'table' ? (
             <div className="tbl-wrap">
               <table>
                 <thead><tr><th>Component</th><th>Version</th><th>Type</th><th>License</th></tr></thead>
                 <tbody>
-                  {filtered.map((c,i)=>(
+                  {filtered.map((c, i) => (
                     <tr key={i}>
                       <td className="mono" style={{color:'var(--gold)',fontSize:12}}>{c.name}</td>
-                      <td className="mono" style={{fontSize:11}}>{c.version||'—'}</td>
-                      <td><span style={{fontSize:9,padding:'2px 7px',background:'rgba(167,139,250,.1)',color:'#a78bfa',borderRadius:'20px',border:'1px solid rgba(167,139,250,.2)',fontFamily:'var(--mono)'}}>{c.type||'—'}</span></td>
-                      <td className="mono" style={{fontSize:11,color:'var(--teal)'}}>{c.licenses?.[0]?.license?.id||'—'}</td>
+                      <td className="mono" style={{fontSize:11}}>{c.version || '—'}</td>
+                      <td><span style={{fontSize:9,padding:'2px 7px',background:'rgba(167,139,250,.1)',color:'#a78bfa',borderRadius:'20px',border:'1px solid rgba(167,139,250,.2)',fontFamily:'var(--mono)'}}>{c.type || '—'}</span></td>
+                      <td className="mono" style={{fontSize:11,color:'var(--teal)'}}>{c.licenses?.[0]?.license?.id || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1841,13 +1936,16 @@ async function handleGenerateFromUpload() { ... }
             </div>
           ) : (
             <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(min(200px,100%),1fr))',gap:10}}>
-              {filtered.map((c,i)=>(
-                <div key={i} style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'var(--r)',padding:12,transition:'border-color .2s'}}
-                  onMouseEnter={e=>e.currentTarget.style.borderColor='rgba(240,165,0,.3)'}
-                  onMouseLeave={e=>e.currentTarget.style.borderColor='var(--border)'}>
+              {filtered.map((c, i) => (
+                <div
+                  key={i}
+                  style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'var(--r)',padding:12,transition:'border-color .2s'}}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(240,165,0,.3)'}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+                >
                   <div className="mono truncate" style={{fontSize:11,color:'var(--gold)',marginBottom:4}}>{c.name}</div>
-                  <div style={{fontSize:10,color:'var(--text2)',marginBottom:5}}>v{c.version||'—'} · {c.type||'—'}</div>
-                  <div style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--teal)'}}>{c.licenses?.[0]?.license?.id||'—'}</div>
+                  <div style={{fontSize:10,color:'var(--text2)',marginBottom:5}}>v{c.version || '—'} · {c.type || '—'}</div>
+                  <div style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--teal)'}}>{c.licenses?.[0]?.license?.id || '—'}</div>
                 </div>
               ))}
             </div>
@@ -1858,7 +1956,6 @@ async function handleGenerateFromUpload() { ... }
   );
 }
 
-/* ═══ VULNERABILITIES ═══ */
 function VulnPage() {
   const [data, setData] = useState(null);
   const [scanner, setScanner] = useState('grype');
@@ -1871,7 +1968,14 @@ function VulnPage() {
   function load(file) {
     if (!file) return;
     const r = new FileReader();
-    r.onload = e => { try { setData(JSON.parse(e.target.result)); setErr(''); } catch { setErr('Invalid JSON'); } };
+    r.onload = e => {
+      try {
+        setData(JSON.parse(e.target.result));
+        setErr('');
+      } catch {
+        setErr('Invalid JSON');
+      }
+    };
     r.readAsText(file);
   }
 
@@ -1922,47 +2026,75 @@ function VulnPage() {
     return out;
   }, [data]);
 
-  const counts = useMemo(() => normalized.reduce((a,m)=>{ const s=m.severity||'Unknown'; a[s]=(a[s]||0)+1; return a; },{}), [normalized]);
-  const maxC = Math.max(...Object.values(counts),1);
+  const counts = useMemo(() => normalized.reduce((a,m) => {
+    const s = m.severity || 'Unknown';
+    a[s] = (a[s] || 0) + 1;
+    return a;
+  }, {}), [normalized]);
+
+  const maxC = Math.max(...Object.values(counts), 1);
+
   const filtered = useMemo(() => {
     let a = [...normalized];
-    if (sev!=='All') a=a.filter(m=>(m.severity||'Unknown')===sev);
-    if (search) { const q=search.toLowerCase(); a=a.filter(m=>(m.id||'').toLowerCase().includes(q)||(m.component||'').toLowerCase().includes(q)); }
+    if (sev !== 'All') a = a.filter(m => (m.severity || 'Unknown') === sev);
+    if (search) {
+      const q = search.toLowerCase();
+      a = a.filter(m => (m.id || '').toLowerCase().includes(q) || (m.component || '').toLowerCase().includes(q));
+    }
     return a;
   }, [normalized, sev, search]);
 
-  if (!data) return (
-    <div className="page fade-in">
-      <div className="page-hd"><div><div className="page-title">Vulnerability Scanner</div><div className="page-sub">Grype + Trivy SBOM cross-check (NVD/GHSA/OSV)</div></div></div>
-      <div className="card">
-        <div className="card-body">
-          <div className="flex gap-6" style={{marginBottom:12,flexWrap:'wrap'}}>
-            <button className="btn btn-outline-gold" onClick={()=>loadFromApi('grype')} disabled={loading}>{loading ? 'Loading...' : 'Load Grype Report'}</button>
-            <button className="btn btn-outline-teal" onClick={()=>loadFromApi('trivy')} disabled={loading}>{loading ? 'Loading...' : 'Load Trivy Report'}</button>
+  if (!data) {
+    return (
+      <div className="page fade-in">
+        <div className="page-hd">
+          <div>
+            <div className="page-title">Vulnerability Scanner</div>
+            <div className="page-sub">Grype + Trivy SBOM cross-check</div>
           </div>
-          <div className={`dropzone${drag?' drag':''}`}
-            onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)}
-            onDrop={e=>{e.preventDefault();setDrag(false);load(e.dataTransfer.files[0]);}}
-            onClick={()=>document.getElementById('vf').click()}>
-            <div className="dropzone-icon">📄</div>
-            <div className="dropzone-title">Drop vulnerability JSON here</div>
-            <div className="dropzone-sub">or load directly from local reports via buttons above</div>
-            <input id="vf" type="file" accept=".json" style={{display:'none'}} onChange={e=>load(e.target.files[0])}/>
+        </div>
+        <div className="card">
+          <div className="card-body">
+            <div className="flex gap-6" style={{marginBottom:12,flexWrap:'wrap'}}>
+              <button className="btn btn-outline-gold" onClick={() => loadFromApi('grype')} disabled={loading}>
+                {loading ? 'Loading...' : 'Load Grype Report'}
+              </button>
+              <button className="btn btn-outline-teal" onClick={() => loadFromApi('trivy')} disabled={loading}>
+                {loading ? 'Loading...' : 'Load Trivy Report'}
+              </button>
+            </div>
+
+            <div
+              className={`dropzone${drag ? ' drag' : ''}`}
+              onDragOver={e => { e.preventDefault(); setDrag(true); }}
+              onDragLeave={() => setDrag(false)}
+              onDrop={e => { e.preventDefault(); setDrag(false); load(e.dataTransfer.files[0]); }}
+              onClick={() => document.getElementById('vf').click()}
+            >
+              <div className="dropzone-icon">📄</div>
+              <div className="dropzone-title">Drop vulnerability JSON here</div>
+              <div className="dropzone-sub">or load directly from local reports via buttons above</div>
+              <input id="vf" type="file" accept=".json" style={{display:'none'}} onChange={e => load(e.target.files[0])}/>
+            </div>
+
+            {err && <div className="modal-err" style={{marginTop:12}}>{err}</div>}
           </div>
-          {err && <div className="modal-err" style={{marginTop:12}}>{err}</div>}
         </div>
       </div>
-    </div>
-  );
+    );
+  }
 
   return (
     <div className="page fade-in">
       <div className="page-hd">
-        <div><div className="page-title">Vulnerability Scanner</div><div className="page-sub">{scanner==='trivy' ? 'Trivy SBOM (NVD/GHSA/OSV)' : 'Grype SBOM'} · {normalized.length} findings</div></div>
+        <div>
+          <div className="page-title">Vulnerability Scanner</div>
+          <div className="page-sub">{scanner === 'trivy' ? 'Trivy SBOM' : 'Grype SBOM'} · {normalized.length} findings</div>
+        </div>
         <div className="flex gap-6">
-          <button className="btn btn-xs" onClick={()=>loadFromApi('grype')}>Reload Grype</button>
-          <button className="btn btn-xs" onClick={()=>loadFromApi('trivy')}>Reload Trivy</button>
-          <button className="btn btn-outline-red btn-sm" onClick={()=>setData(null)}>Clear</button>
+          <button className="btn btn-xs" onClick={() => loadFromApi('grype')}>Reload Grype</button>
+          <button className="btn btn-xs" onClick={() => loadFromApi('trivy')}>Reload Trivy</button>
+          <button className="btn btn-outline-red btn-sm" onClick={() => setData(null)}>Clear</button>
         </div>
       </div>
 
@@ -1976,11 +2108,11 @@ function VulnPage() {
                 <div style={{fontFamily:'var(--mono)',color:'var(--green)',fontSize:14,fontWeight:700}}>ZERO VULNERABILITIES</div>
                 <div style={{fontSize:11,color:'var(--text2)',marginTop:4}}>No findings in selected report.</div>
               </div>
-            ) : SEV_ORD.filter(s=>counts[s]).map(s=>(
-              <div key={s} className="sev-row" onClick={()=>setSev(s===sev?'All':s)} style={{cursor:'pointer'}}>
+            ) : SEV_ORD.filter(s => counts[s]).map(s => (
+              <div key={s} className="sev-row" onClick={() => setSev(s === sev ? 'All' : s)} style={{cursor:'pointer'}}>
                 <div className="sev-lbl" style={{color:SEV_COL[s]}}>{s}</div>
                 <div className="sev-track">
-                  <div className="sev-fill" style={{width:`${(counts[s]||0)/maxC*100}%`,background:SEV_COL[s]}}>
+                  <div className="sev-fill" style={{width:`${(counts[s] || 0) / maxC * 100}%`,background:SEV_COL[s]}}>
                     <span className="sev-num">{counts[s]}</span>
                   </div>
                 </div>
@@ -1998,7 +2130,7 @@ function VulnPage() {
               ['Source', scanner === 'trivy' ? 'NVD, GHSA, OSV' : 'Grype vulnerability DB'],
               ['Active Filter', sev],
               ['Showing', filtered.length],
-            ].map(([k,v])=>(
+            ].map(([k,v]) => (
               <div className="info-row" key={k}>
                 <span className="info-key">{k}</span>
                 <span className="info-val" style={{color:'var(--gold)'}}>{v}</span>
@@ -2013,35 +2145,38 @@ function VulnPage() {
           <div className="search-bar" style={{marginBottom:14}}>
             <div className="search-input-wrap">
               <span className="search-icon">🔎</span>
-              <input className="search-input" placeholder="Search CVE ID or component..." value={search} onChange={e=>setSearch(e.target.value)}/>
+              <input className="search-input" placeholder="Search CVE ID or component..." value={search} onChange={e => setSearch(e.target.value)}/>
             </div>
-            <select style={{padding:'8px 10px',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'var(--r)',color:'var(--text0)',fontSize:12,fontFamily:'var(--mono)'}}
-              value={sev} onChange={e=>setSev(e.target.value)}>
+            <select
+              style={{padding:'8px 10px',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'var(--r)',color:'var(--text0)',fontSize:12,fontFamily:'var(--mono)'}}
+              value={sev}
+              onChange={e => setSev(e.target.value)}
+            >
               <option value="All">All Severities ({normalized.length})</option>
-              {SEV_ORD.map(s=><option key={s} value={s}>{s} ({counts[s]||0})</option>)}
+              {SEV_ORD.map(s => <option key={s} value={s}>{s} ({counts[s] || 0})</option>)}
             </select>
           </div>
 
           {filtered.length === 0 ? (
             <div className="empty">
               <div className="empty-icon">🔍</div>
-              <div className="empty-msg">{normalized.length===0?'Zero vulnerabilities detected':'No results for current filter'}</div>
+              <div className="empty-msg">{normalized.length === 0 ? 'Zero vulnerabilities detected' : 'No results for current filter'}</div>
             </div>
           ) : (
             <div className="tbl-wrap">
               <table>
                 <thead><tr><th>CVE ID</th><th>Severity</th><th>Component</th><th>Version</th><th>Fix</th><th>Link</th></tr></thead>
                 <tbody>
-                  {filtered.map((m,i)=>{
-                    const sc=SEV_COL[m.severity]||'var(--text2)';
+                  {filtered.map((m, i) => {
+                    const sc = SEV_COL[m.severity] || 'var(--text2)';
                     return (
                       <tr key={i}>
-                        <td className="mono" style={{color:'var(--gold)',fontSize:11}}>{m.id||'-'}</td>
-                        <td><span className="badge" style={{background:`${sc}18`,color:sc,border:`1px solid ${sc}30`}}>{m.severity||'-'}</span></td>
-                        <td className="mono" style={{fontSize:11}}>{m.component||'-'}</td>
-                        <td className="mono" style={{fontSize:10,color:'var(--text2)'}}>{m.version||'-'}</td>
-                        <td className="mono" style={{fontSize:10,color:'var(--green)'}}>{m.fix||'-'}</td>
-                        <td>{(m.id||'').startsWith('CVE')&&<a href={`https://nvd.nist.gov/vuln/detail/${m.id}`} target="_blank" rel="noreferrer" style={{color:'var(--teal)',fontSize:10,fontFamily:'var(--mono)'}}>NVD</a>}</td>
+                        <td className="mono" style={{color:'var(--gold)',fontSize:11}}>{m.id || '-'}</td>
+                        <td><span className="badge" style={{background:`${sc}18`,color:sc,border:`1px solid ${sc}30`}}>{m.severity || '-'}</span></td>
+                        <td className="mono" style={{fontSize:11}}>{m.component || '-'}</td>
+                        <td className="mono" style={{fontSize:10,color:'var(--text2)'}}>{m.version || '-'}</td>
+                        <td className="mono" style={{fontSize:10,color:'var(--green)'}}>{m.fix || '-'}</td>
+                        <td>{(m.id || '').startsWith('CVE') && <a href={`https://nvd.nist.gov/vuln/detail/${m.id}`} target="_blank" rel="noreferrer" style={{color:'var(--teal)',fontSize:10,fontFamily:'var(--mono)'}}>NVD</a>}</td>
                       </tr>
                     );
                   })}
@@ -2055,8 +2190,6 @@ function VulnPage() {
   );
 }
 
-
-/* ��� PKI PAGE ��� */
 function PKIPage() {
   const cmds = [
     { label:'Generate RSA-4096', cmd:'openssl genrsa -out keys/signing/sbom-rsa-signing.key 4096' },
@@ -2069,10 +2202,14 @@ function PKIPage() {
 
   return (
     <div className="page fade-in">
-      <div className="page-hd"><div><div className="page-title">PKI Infrastructure</div><div className="page-sub">RSA-4096 · EC P-384 · CNSA 1.0 · CycloneDX XML Signing</div></div></div>
+      <div className="page-hd">
+        <div>
+          <div className="page-title">PKI Infrastructure</div>
+          <div className="page-sub">RSA-4096 · EC P-384 · CNSA 1.0 · CycloneDX XML Signing</div>
+        </div>
+      </div>
 
       <div className="grid-2" style={{alignItems:'start'}}>
-        {/* Trust chain */}
         <div className="card">
           <div className="card-hd"><div className="card-title"><span className="card-icon">🔐</span>Trust Chain</div></div>
           <div className="card-body">
@@ -2081,7 +2218,7 @@ function PKIPage() {
               {icon:'📜',name:'Signing Certificate',detail:'RSA-4096 · 1 year · Issued by Root CA · sbom-signing.crt',badge:'SIGNING',col:'#a78bfa',safe:false},
               {icon:'🔑',name:'Private Key (PKCS#1)',detail:'sbom-rsa-signing-pkcs1.key · GitLab CI: $SBOM_SIGNING_KEY',badge:'PROTECTED',col:'var(--amber)',safe:false},
               {icon:'🔓',name:'Public Key',detail:'keys/public/sbom-rsa-public.pem · Committed to repo',badge:'PUBLIC',col:'var(--green)',safe:true},
-            ].map((n,i,arr)=>(
+            ].map((n, i, arr) => (
               <React.Fragment key={n.name}>
                 <div className="pki-node">
                   <div className="pki-ico">{n.icon}</div>
@@ -2090,25 +2227,29 @@ function PKIPage() {
                     <div className="pki-detail">{n.detail}</div>
                   </div>
                   <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:4,flexShrink:0}}>
-                    <span style={{fontSize:8,padding:'2px 6px',background:`rgba(${n.col},.12)`,color:n.col,border:`1px solid ${n.col}30`,borderRadius:3,fontFamily:'var(--mono)',letterSpacing:'1px'}}>{n.badge}</span>
-                    <span style={{fontSize:9,color:n.safe?'var(--green)':'var(--red)',fontFamily:'var(--mono)'}}>{n.safe?'✓ COMMITTED':'🔒 NEVER COMMIT'}</span>
+                    <span style={{fontSize:8,padding:'2px 6px',background:'var(--bg3)',color:n.col,border:'1px solid var(--border)',borderRadius:3,fontFamily:'var(--mono)',letterSpacing:'1px'}}>{n.badge}</span>
+                    <span style={{fontSize:9,color:n.safe ? 'var(--green)' : 'var(--red)',fontFamily:'var(--mono)'}}>{n.safe ? '✓ COMMITTED' : '🔒 NEVER COMMIT'}</span>
                   </div>
                 </div>
-                {i<arr.length-1&&<div className="pki-conn"/>}
+                {i < arr.length - 1 && <div className="pki-conn"/>}
               </React.Fragment>
             ))}
           </div>
         </div>
 
-        {/* Specs */}
         <div className="card">
           <div className="card-hd"><div className="card-title"><span className="card-icon">⚙️</span>Algorithm Specs</div></div>
           <div className="card-body" style={{padding:'8px 16px'}}>
             {[
-              ['Root CA','EC P-384'],['Signing Key','RSA-4096'],['Hash','SHA-384 / SHA-256'],
-              ['Compliance','CNSA 1.0'],['SBOM Format','CycloneDX XML 1.4'],['CLI Tool','CycloneDX-CLI v0.30.0'],
-              ['Key Format','PKCS#1 PEM'],['Signature','Embedded in XML'],
-            ].map(([k,v])=>(
+              ['Root CA','EC P-384'],
+              ['Signing Key','RSA-4096'],
+              ['Hash','SHA-384 / SHA-256'],
+              ['Compliance','CNSA 1.0'],
+              ['SBOM Format','CycloneDX XML 1.4'],
+              ['CLI Tool','CycloneDX-CLI v0.30.0'],
+              ['Key Format','PKCS#1 PEM'],
+              ['Signature','Embedded in XML'],
+            ].map(([k,v]) => (
               <div className="info-row" key={k}>
                 <span className="info-key">{k}</span>
                 <span className="info-val" style={{color:'var(--gold)'}}>{v}</span>
@@ -2118,12 +2259,11 @@ function PKIPage() {
         </div>
       </div>
 
-      {/* Commands */}
       <div className="card">
         <div className="card-hd"><div className="card-title"><span className="card-icon">💻</span>Command Reference</div></div>
         <div className="card-body">
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(320px,100%),1fr))',gap:10}}>
-            {cmds.map(({label,cmd})=>(
+            {cmds.map(({label,cmd}) => (
               <div key={label} style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'var(--r)',padding:12}}>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8,gap:8,flexWrap:'wrap'}}>
                   <span style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--text2)',textTransform:'uppercase',letterSpacing:'1px'}}>{label}</span>
@@ -2143,7 +2283,6 @@ function PKIPage() {
   );
 }
 
-/* ═══ NAV CONFIG ═══ */
 const PAGES = [
   { id:'dashboard', label:'Overview', icon:'🌐', tab:'Overview' },
   { id:'pipelines', label:'Pipelines', icon:'⚡', tab:'Pipelines' },
@@ -2152,22 +2291,25 @@ const PAGES = [
   { id:'pki', label:'PKI / Signing', icon:'🔐', tab:'PKI' },
 ];
 
-/* ═══ ROOT APP ═══ */
 function App() {
   const [config, setConfig] = useState(() => {
-    const fallback = { token:'', projectId:'Richmansolom/SBOM-ATTESTATION', provider:'github' }; 
+    const fallback = { token:'', projectId:'Richmansolom/SBOM-ATTESTATION', provider:'github' };
     try {
-      const saved = JSON.parse(sessionStorage.getItem('sbom_cfg')||'null');
+      const saved = JSON.parse(sessionStorage.getItem('sbom_cfg') || 'null');
       if (!saved || saved === 'prompt' || !saved.projectId) return fallback;
-      return { token: saved.token || '', projectId: saved.projectId, provider: saved.provider || 'github' };
+      return {
+        token: saved.token || '',
+        projectId: saved.projectId,
+        provider: saved.provider || 'github'
+      };
     } catch {
       return fallback;
     }
   });
+
   const [nav, setNav] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // keyboard shortcuts
   useEffect(() => {
     const handler = e => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
@@ -2175,11 +2317,15 @@ function App() {
       if (map[e.key]) setNav(map[e.key]);
       if (e.key === 'Escape') setSidebarOpen(false);
     };
+
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  function onNav(id) { setNav(id); setSidebarOpen(false); }
+  function onNav(id) {
+    setNav(id);
+    setSidebarOpen(false);
+  }
 
   function disconnect() {
     sessionStorage.removeItem('sbom_cfg');
@@ -2195,11 +2341,12 @@ function App() {
           <div className="empty" style={{minHeight:'50vh'}}>
             <div className="empty-icon">🔌</div>
             <div className="empty-msg" style={{fontSize:14}}>Connect to your project to view live pipeline data</div>
-            <button className="btn btn-gold" style={{marginTop:8}} onClick={()=>setConfig('prompt')}>⚡ Connect Now</button>
+            <button className="btn btn-gold" style={{marginTop:8}} onClick={() => setConfig('prompt')}>⚡ Connect Now</button>
           </div>
         </div>
       );
     }
+
     switch(nav) {
       case 'dashboard': return <Dashboard config={config} onNav={onNav}/>;
       case 'pipelines': return <PipelinesPage config={config}/>;
@@ -2217,9 +2364,8 @@ function App() {
         <ConnectModal onConnect={cfg => setConfig(cfg)}/>
       )}
 
-      {/* Header */}
       <header className="hdr">
-        <button className="menu-btn" onClick={()=>setSidebarOpen(!sidebarOpen)}>☰</button>
+        <button className="menu-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>☰</button>
         <div className="hdr-logo"><div className="hdr-logo-inner">SB</div></div>
         <div className="hdr-brand">
           <div className="hdr-title">SBOM Attestation</div>
@@ -2228,26 +2374,25 @@ function App() {
         <div className="hdr-spacer"/>
         <div className="hdr-right">
           <Clock/>
-          <button className={`hdr-pill${config&&config!=='prompt'?' connected':''}`}
-            onClick={config&&config!=='prompt' ? disconnect : ()=>setConfig('prompt')}>
-            <span className={`status-dot${config&&config!=='prompt'?' pulse':''}`}/>
-            {config&&config!=='prompt'
-              ? `${(config.provider || 'github').toUpperCase().slice(0,2)}:${(config.projectId.split('/')[1]||'Connected').toUpperCase().slice(0,9)}`
+          <button
+            className={`hdr-pill${config && config !== 'prompt' ? ' connected' : ''}`}
+            onClick={config && config !== 'prompt' ? disconnect : () => setConfig('prompt')}
+          >
+            <span className={`status-dot${config && config !== 'prompt' ? ' pulse' : ''}`}/>
+            {config && config !== 'prompt'
+              ? `${(config.provider || 'github').toUpperCase().slice(0,2)}:${(config.projectId.split('/')[1] || 'Connected').toUpperCase().slice(0,9)}`
               : 'CONNECT'}
           </button>
         </div>
       </header>
 
-      {/* Main Shell */}
       <div className="shell">
-        {/* Sidebar overlay */}
-        <div className={`sidebar-overlay${sidebarOpen?' open':''}`} onClick={()=>setSidebarOpen(false)}/>
+        <div className={`sidebar-overlay${sidebarOpen ? ' open' : ''}`} onClick={() => setSidebarOpen(false)}/>
 
-        {/* Sidebar */}
-        <nav className={`sidebar${sidebarOpen?' open':''}`}>
+        <nav className={`sidebar${sidebarOpen ? ' open' : ''}`}>
           <div className="sidebar-section-label">Navigation</div>
           {PAGES.map(p => (
-            <div key={p.id} className={`nav-item${nav===p.id?' active':''}`} onClick={()=>onNav(p.id)}>
+            <div key={p.id} className={`nav-item${nav === p.id ? ' active' : ''}`} onClick={() => onNav(p.id)}>
               <span className="nav-icon">{p.icon}</span>
               {p.label}
             </div>
@@ -2255,7 +2400,7 @@ function App() {
 
           <div style={{height:1,background:'var(--border)',margin:'12px 0'}}/>
           <div className="sidebar-section-label">Keyboard</div>
-          {[['D','Overview'],['P','Pipelines'],['S','SBOM'],['V','Vulns'],['K','PKI']].map(([k,l])=>(
+          {[['D','Overview'],['P','Pipelines'],['S','SBOM'],['V','Vulns'],['K','PKI']].map(([k,l]) => (
             <div key={k} style={{display:'flex',justifyContent:'space-between',padding:'5px 16px',fontSize:11,color:'var(--text2)'}}>
               <span>{l}</span>
               <span style={{fontFamily:'var(--mono)',background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:3,padding:'0 5px',fontSize:10,color:'var(--text1)'}}>{k}</span>
@@ -2272,16 +2417,14 @@ function App() {
           </div>
         </nav>
 
-        {/* Content */}
         <main className="main">
           {renderPage()}
         </main>
       </div>
 
-      {/* Mobile tab bar */}
       <div className="tabbar">
         {PAGES.map(p => (
-          <button key={p.id} className={`tab-btn${nav===p.id?' active':''}`} onClick={()=>onNav(p.id)}>
+          <button key={p.id} className={`tab-btn${nav === p.id ? ' active' : ''}`} onClick={() => onNav(p.id)}>
             <span className="tab-icon">{p.icon}</span>
             <span>{p.tab}</span>
           </button>
