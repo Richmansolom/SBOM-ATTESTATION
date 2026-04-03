@@ -1341,10 +1341,47 @@ function PipelinesPage({ config }) {
   const [ver, setVer] = useState('1.0.0');
   const [launching, setLaunching] = useState(false);
   const pollRef = useRef(null);
+  const prevStatusRef = useRef({});
+
+  function notifyPipelineFinished(p) {
+    const status = String(p?.status || '').toLowerCase();
+    const payload = {
+      id: p?.id,
+      status,
+      provider: config?.provider || 'github',
+      projectId: config?.projectId || '',
+      finishedAt: new Date().toISOString(),
+    };
+    try {
+      localStorage.setItem('sbom_last_pipeline_event', JSON.stringify(payload));
+    } catch {}
+    try {
+      window.dispatchEvent(new CustomEvent('sbom:pipeline-finished', { detail: payload }));
+    } catch {}
+    if (status === 'success') {
+      toast(`Pipeline #${p.id} completed. Refreshing SBOM/Components.`, 'ok');
+    } else if (status === 'failed' || status === 'canceled') {
+      toast(`Pipeline #${p.id} ended with status: ${status}`, 'warn');
+    }
+  }
 
   const load = useCallback(async () => {
     try {
       const d = await GL(config.token, config.projectId, config.provider, '/pipelines?per_page=15');
+      const nextMap = {};
+      d.forEach((p) => {
+        const id = String(p?.id ?? '');
+        if (!id) return;
+        const nextStatus = String(p?.status || '').toLowerCase();
+        const prevStatus = String(prevStatusRef.current[id] || '').toLowerCase();
+        nextMap[id] = nextStatus;
+        const finished = ['success', 'failed', 'canceled'].includes(nextStatus);
+        const wasActive = ['running', 'pending'].includes(prevStatus);
+        if (finished && wasActive && prevStatus !== nextStatus) {
+          notifyPipelineFinished(p);
+        }
+      });
+      prevStatusRef.current = nextMap;
       setPipelines(d);
       if (selected) {
         const u = d.find(p => p.id === selected.id);
@@ -1597,6 +1634,8 @@ function SBOMPage() {
   const [loadingApi, setLoadingApi] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState('');
   const [history, setHistory] = useState([]);
+  const [dataSource, setDataSource] = useState('');
+  const [sbomMeta, setSbomMeta] = useState(null);
   const [capabilities, setCapabilities] = useState({ can_generate: true, has_syft: false, has_docker: false, message: '' });
 
   useEffect(() => {
@@ -1639,6 +1678,8 @@ function SBOMPage() {
       try {
         const parsed = JSON.parse(e.target.result);
         setSbom(parsed);
+        setDataSource('upload');
+        setSbomMeta({ source: 'uploaded-file' });
         setErr('');
         const now = new Date().toISOString();
         setLastLoadedAt(now);
@@ -1657,13 +1698,42 @@ function SBOMPage() {
     r.readAsText(file);
   }
 
-  async function loadFromApi() {
+  function readConnectConfig() {
+    try {
+      const raw = JSON.parse(sessionStorage.getItem('sbom_cfg') || '{}');
+      return {
+        token: raw?.token || '',
+        projectId: raw?.projectId || 'Richmansolom/SBOM-ATTESTATION',
+        provider: raw?.provider || 'github',
+      };
+    } catch {
+      return { token: '', projectId: 'Richmansolom/SBOM-ATTESTATION', provider: 'github' };
+    }
+  }
+
+  async function loadFromApi(opts = {}) {
+    const { silentError = false, pipelineEvent = null } = opts;
     setLoadingApi(true);
     try {
-      const r = await fetch(apiUrl('/api/sbom'));
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
+      const cfg = readConnectConfig();
+      const q = new URLSearchParams();
+      q.set('source', 'auto');
+      if (pipelineEvent?.id) {
+        if ((pipelineEvent.provider || cfg.provider) === 'gitlab') {
+          q.set('pipeline_id', String(pipelineEvent.id));
+        } else {
+          q.set('run_id', String(pipelineEvent.id));
+        }
+      }
+      const j = await GL(
+        cfg.token,
+        cfg.projectId,
+        cfg.provider,
+        `/sbom/unified?${q.toString()}`
+      );
       setSbom(j);
+      setDataSource('api');
+      setSbomMeta(j?._meta || null);
       setErr('');
       const now = new Date().toISOString();
       setLastLoadedAt(now);
@@ -1675,7 +1745,9 @@ function SBOMPage() {
         components: j?.components?.length || 0,
       });
     } catch (e) {
-      setErr(`No local SBOM yet: ${e.message}`);
+      if (!silentError) {
+        setErr(`No SBOM found yet: ${e.message}`);
+      }
     } finally {
       setLoadingApi(false);
     }
@@ -1688,6 +1760,8 @@ function SBOMPage() {
     setTypeF('All');
     setView('table');
     setLastLoadedAt('');
+    setDataSource('');
+    setSbomMeta(null);
   }
 
   async function handleUploadSource() {
@@ -1760,9 +1834,21 @@ function SBOMPage() {
         throw new Error(data.log || data.message || 'SBOM generation failed');
       }
 
-      setUploadStatus('SBOM generated successfully. Loading viewer...');
+      setUploadStatus('SBOM generated. Running vulnerability scan/report...');
+      const scanRes = await fetch(apiUrl('/api/scan'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_path: uploadedSourcePath })
+      });
+      const scanData = await scanRes.json().catch(() => ({}));
+      if (!scanRes.ok || scanData.status !== 'ok') {
+        const msg = scanData.message || scanData.log || `HTTP ${scanRes.status}`;
+        throw new Error(`SBOM generated, but report scan failed: ${msg}`);
+      }
+
+      setUploadStatus('SBOM and vulnerability reports generated successfully. Loading viewer...');
       await loadFromApi();
-      toast('SBOM generated successfully', 'ok');
+      toast('SBOM + reports generated successfully', 'ok');
     } catch (e) {
       setUploadStatus(`Generation failed: ${e.message}`);
       toast(`Generation failed: ${e.message}`, 'err');
@@ -1773,6 +1859,33 @@ function SBOMPage() {
     loadFromApi();
     loadCapabilities();
   }, []);
+
+  useEffect(() => {
+    const onPipelineFinished = (event) => {
+      loadFromApi({ silentError: true, pipelineEvent: event?.detail || null });
+    };
+    const onStorage = (event) => {
+      if (event.key !== 'sbom_last_pipeline_event' || !event.newValue) return;
+      try {
+        const payload = JSON.parse(event.newValue);
+        loadFromApi({ silentError: true, pipelineEvent: payload });
+      } catch {}
+    };
+    window.addEventListener('sbom:pipeline-finished', onPipelineFinished);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('sbom:pipeline-finished', onPipelineFinished);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (dataSource === 'upload') return;
+    const id = setInterval(() => {
+      loadFromApi({ silentError: true });
+    }, 20000);
+    return () => clearInterval(id);
+  }, [dataSource]);
 
   const types = useMemo(() => sbom ? ['All', ...new Set(sbom.components?.map(c => c.type) || [])] : [], [sbom]);
 
@@ -1886,6 +1999,13 @@ function SBOMPage() {
         <div>
           <div className="page-title">SBOM Viewer</div>
           <div className="page-sub">{sbom.metadata?.component?.name || 'Holistic SBOM'}</div>
+          {sbomMeta?.source && (
+            <div className="mono text-muted" style={{fontSize:10,marginTop:4}}>
+              Source: {sbomMeta.source}
+              {sbomMeta.run_id ? ` · Run #${sbomMeta.run_id}` : ''}
+              {sbomMeta.pipeline_id ? ` · Pipeline #${sbomMeta.pipeline_id}` : ''}
+            </div>
+          )}
         </div>
         <div className="flex gap-6">
           <button className="btn btn-xs" onClick={loadFromApi} disabled={loadingApi}>
