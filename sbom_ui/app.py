@@ -5,6 +5,7 @@ import platform
 import re
 import shutil
 import subprocess
+import tarfile
 import threading
 import uuid
 import zipfile
@@ -26,6 +27,7 @@ SBOM_DIR = REPO_ROOT / "sbom"
 REPORT_DIR = REPO_ROOT / "reports"
 STATIC_DIR = REPO_ROOT / "sbom_ui" / "static"
 UPLOAD_DIR = REPO_ROOT / ".ui_uploads"
+TOOLS_BIN_DIR = REPO_ROOT / ".tools" / "bin"
 STAGE_NAMES = ["Build", "Generate", "Sign", "Scan", "Report"]
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
@@ -264,6 +266,102 @@ def ensure_dirs():
     SBOM_DIR.mkdir(parents=True, exist_ok=True)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    TOOLS_BIN_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def resolve_syft_binary(log_callback=None, auto_install=True):
+    syft_path = shutil.which("syft")
+    if syft_path:
+        return syft_path, "system"
+
+    local_name = "syft.exe" if os.name == "nt" else "syft"
+    local_path = TOOLS_BIN_DIR / local_name
+    if local_path.exists():
+        return str(local_path), "local-cache"
+
+    if not auto_install:
+        return None, "missing"
+
+    auto_flag = (os.getenv("SBOM_AUTO_INSTALL_SYFT", "1") or "1").strip().lower()
+    if auto_flag in ("0", "false", "no", "off"):
+        return None, "auto-install-disabled"
+
+    sys_name = platform.system().lower()
+    arch = platform.machine().lower()
+    os_map = {"linux": "linux", "darwin": "darwin", "windows": "windows"}
+    arch_map = {
+        "x86_64": "amd64",
+        "amd64": "amd64",
+        "aarch64": "arm64",
+        "arm64": "arm64",
+    }
+    os_token = os_map.get(sys_name)
+    arch_token = arch_map.get(arch)
+    if not os_token or not arch_token:
+        return None, f"unsupported-platform:{sys_name}/{arch}"
+
+    version = os.getenv("SYFT_VERSION", "v1.22.0").strip() or "v1.22.0"
+    version_num = version[1:] if version.startswith("v") else version
+    ext = "zip" if os_token == "windows" else "tar.gz"
+    filename = f"syft_{version_num}_{os_token}_{arch_token}.{ext}"
+    url = f"https://github.com/anchore/syft/releases/download/{version}/{filename}"
+    try:
+        if log_callback:
+            log_callback(f"==> syft missing; downloading {filename}\n")
+        req = Request(url=url, headers={"User-Agent": "sbom-mission-control"})
+        with urlopen(req, timeout=120) as resp:
+            archive_bytes = resp.read()
+
+        TOOLS_BIN_DIR.mkdir(parents=True, exist_ok=True)
+        if ext == "zip":
+            with zipfile.ZipFile(io.BytesIO(archive_bytes), "r") as zf:
+                target_member = next(
+                    (n for n in zf.namelist() if Path(n).name.lower() in ("syft.exe", "syft")),
+                    None,
+                )
+                if not target_member:
+                    return None, "download-invalid-archive"
+                local_path.write_bytes(zf.read(target_member))
+        else:
+            with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as tf:
+                target_member = next(
+                    (m for m in tf.getmembers() if Path(m.name).name == "syft"),
+                    None,
+                )
+                if not target_member:
+                    return None, "download-invalid-archive"
+                extracted = tf.extractfile(target_member)
+                if extracted is None:
+                    return None, "download-invalid-archive"
+                local_path.write_bytes(extracted.read())
+
+        if os.name != "nt":
+            try:
+                local_path.chmod(0o755)
+            except Exception:
+                pass
+        if log_callback:
+            log_callback(f"==> syft bootstrapped at {local_path}\n")
+        return str(local_path), "bootstrap"
+    except Exception as exc:
+        return None, f"download-failed:{exc}"
+
+
+def get_generate_capabilities():
+    syft_path, syft_source = resolve_syft_binary(auto_install=False)
+    has_docker = shutil.which("docker") is not None
+    has_syft = bool(syft_path)
+    can_generate = has_syft or has_docker
+    msg = ""
+    if not can_generate:
+        msg = "Missing dependencies: syft and docker are not available on server."
+    return {
+        "can_generate": can_generate,
+        "has_syft": has_syft,
+        "has_docker": has_docker,
+        "syft_source": syft_source,
+        "message": msg,
+    }
 
 
 def normalize_path_for_script(path_value):
@@ -334,9 +432,11 @@ def run_generate_pipeline(body, log_callback=None):
         # Generate SBOM:
         # - prefer local syft binary when available
         # - otherwise fall back to containerized Syft via Docker
-        syft_bin = shutil.which("syft")
+        syft_bin, syft_source = resolve_syft_binary(log_callback=log_callback, auto_install=True)
         docker_bin = shutil.which("docker")
         if syft_bin:
+            if log_callback and syft_source:
+                log_callback(f"==> Using syft ({syft_source})\n")
             gen_cmd = [
                 syft_bin,
                 str(source_dir),
@@ -1093,6 +1193,11 @@ def version():
 @app.route("/api/status")
 def status():
     return jsonify(get_local_snapshot())
+
+
+@app.route("/api/capabilities")
+def capabilities():
+    return jsonify(get_generate_capabilities())
 
 
 @app.route("/api/db-status")

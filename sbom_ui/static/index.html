@@ -871,17 +871,6 @@ let API_BASE = (() => {
 
 const apiUrl = (path) => `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
 const normalizeApiBase = (value) => String(value || '').trim().replace(/\/$/, '');
-const isHostedBackendBase = (value) => {
-  try {
-    const raw = normalizeApiBase(value || API_BASE);
-    if (!raw) return false;
-    const parsed = new URL(raw);
-    const host = (parsed.hostname || '').toLowerCase();
-    return !(host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local'));
-  } catch {
-    return false;
-  }
-};
 
 const GL = (tok, proj, provider, path, opts = {}) => {
   const url = new URL(apiUrl(`/api${path}`));
@@ -1608,7 +1597,7 @@ function SBOMPage() {
   const [loadingApi, setLoadingApi] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState('');
   const [history, setHistory] = useState([]);
-  const hostedBackend = isHostedBackendBase(localStorage.getItem('sbom_api_base') || API_BASE);
+  const [capabilities, setCapabilities] = useState({ can_generate: true, has_syft: false, has_docker: false, message: '' });
 
   useEffect(() => {
     try {
@@ -1624,6 +1613,23 @@ function SBOMPage() {
     try {
       sessionStorage.setItem('sbom_view_history', JSON.stringify(next));
     } catch {}
+  }
+
+  async function loadCapabilities() {
+    try {
+      const r = await fetch(apiUrl('/api/capabilities'));
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
+      setCapabilities({
+        can_generate: !!j.can_generate,
+        has_syft: !!j.has_syft,
+        has_docker: !!j.has_docker,
+        message: j.message || '',
+      });
+    } catch {
+      // Leave generate enabled when capability probe is unavailable.
+      setCapabilities({ can_generate: true, has_syft: false, has_docker: false, message: '' });
+    }
   }
 
   function load(file) {
@@ -1726,8 +1732,8 @@ function SBOMPage() {
   }
 
   async function handleGenerateFromUpload() {
-    if (hostedBackend) {
-      const msg = 'Hosted backend detected. Use Pipeline Control → Launch to run generate/scan in CI.';
+    if (!capabilities.can_generate) {
+      const msg = capabilities.message || 'Generate is unavailable: syft/docker not found on server.';
       setUploadStatus(msg);
       toast(msg, 'err');
       return;
@@ -1765,6 +1771,7 @@ function SBOMPage() {
 
   useEffect(() => {
     loadFromApi();
+    loadCapabilities();
   }, []);
 
   const types = useMemo(() => sbom ? ['All', ...new Set(sbom.components?.map(c => c.type) || [])] : [], [sbom]);
@@ -1829,13 +1836,13 @@ function SBOMPage() {
                     Upload Source
                   </button>
 
-                  <button className="btn btn-outline-teal" onClick={handleGenerateFromUpload} disabled={hostedBackend} title={hostedBackend ? 'Disabled on hosted backend; use Pipeline Launch' : ''}>
+                  <button className="btn btn-outline-teal" onClick={handleGenerateFromUpload} disabled={!capabilities.can_generate} title={!capabilities.can_generate ? 'Generate unavailable: missing syft/docker on backend' : ''}>
                     Generate SBOM
                   </button>
                 </div>
-                {hostedBackend && (
+                {!capabilities.can_generate && (
                   <div style={{ marginTop: 10, fontSize: 11, color: 'var(--amber)', fontFamily: 'var(--mono)' }}>
-                    Hosted backend mode: local generate is disabled here. Trigger pipeline from <span style={{color:'var(--gold)'}}>Pipeline Control</span> to generate/scan in CI.
+                    Generate is currently unavailable on this backend. Trigger pipeline from <span style={{color:'var(--gold)'}}>Pipeline Control</span> or install syft on the server.
                   </div>
                 )}
 
