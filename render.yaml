@@ -1,4 +1,4 @@
-services:
+﻿services:
   - type: web
     name: sbom-control-api
     env: python
@@ -11,3 +11,7 @@ services:
         value: 3.12.6
       - key: CORS_ALLOW_ORIGIN
         value: "*"
+      - key: SBOM_AUTO_INSTALL_SYFT
+        value: "1"
+      - key: SYFT_VERSION
+        value: "v1.22.0"
