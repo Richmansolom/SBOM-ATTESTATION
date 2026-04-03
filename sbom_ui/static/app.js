@@ -1,3 +1,4 @@
+const BASE_URL = "https://YOUR-NEW-DOCKER-URL.onrender.com";
 const logOutput = document.getElementById("logOutput");
 const envBadge = document.getElementById("envBadge");
 const repoName = document.getElementById("repoName");
@@ -52,7 +53,7 @@ async function api(path, method = "GET", body = null) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);
   }
-  const res = await fetch(path, options);
+ const res = await fetch(`${BASE_URL}${path}`, options);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.message || data.log || `HTTP ${res.status}`);
