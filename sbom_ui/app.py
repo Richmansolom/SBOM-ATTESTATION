@@ -1037,21 +1037,53 @@ def pick_metadata():
 @app.route("/api/sign", methods=["POST"])
 def sign():
     ensure_dirs()
-    if shutil.which("docker") is None:
-        return jsonify({"status": "error", "log": "Docker is required for signing endpoint"}), 500
+
     source_sbom = SBOM_DIR / "sbom-source.enriched.json"
     build_sbom = SBOM_DIR / "sbom-build.enriched.json"
-    cmds = []
+    sign_script = REPO_ROOT / "scripts" / "sign-sbom.sh"
+    pki_dir = SBOM_DIR / "pki"
+
+    if not sign_script.exists():
+        return jsonify({"status": "error", "log": f"Signing script not found: {sign_script}"}), 500
+
+    targets = []
     if source_sbom.exists():
-        cmds.append("bash scripts/sign-sbom.sh sbom/sbom-source.enriched.json sbom/sbom-source.enriched.signed.json sbom/pki && mv sbom/sbom-source.enriched.signed.json sbom/sbom-source.enriched.json")
+        targets.append(source_sbom)
     if build_sbom.exists():
-        cmds.append("bash scripts/sign-sbom.sh sbom/sbom-build.enriched.json sbom/sbom-build.enriched.signed.json sbom/pki && mv sbom/sbom-build.enriched.signed.json sbom/sbom-build.enriched.json")
-    if not cmds:
+        targets.append(build_sbom)
+
+    if not targets:
         return jsonify({"status": "error", "log": "No enriched SBOM found to sign in sbom/"}), 400
-    inner = " && ".join(["apk add --no-cache bash jq openssl python3 coreutils >/dev/null", *cmds])
-    cmd = ["docker", "run", "--rm", "-v", f"{REPO_ROOT}:/work", "-w", "/work", "alpine:3.20", "sh", "-lc", inner]
-    code, output = run_cmd(cmd)
-    return jsonify({"status": "ok" if code == 0 else "error", "exit_code": code, "log": output})
+
+    combined_log = []
+
+    for sbom_file in targets:
+        signed_tmp = sbom_file.with_suffix(".signed.json")
+        cmd = [
+            "bash",
+            str(sign_script),
+            str(sbom_file),
+            str(signed_tmp),
+            str(pki_dir),
+        ]
+        code, output = run_cmd(cmd)
+        combined_log.append(output)
+
+        if code != 0:
+            return jsonify({
+                "status": "error",
+                "exit_code": code,
+                "log": "\n".join(combined_log)
+            })
+
+        if signed_tmp.exists():
+            shutil.move(str(signed_tmp), str(sbom_file))
+
+    return jsonify({
+        "status": "ok",
+        "exit_code": 0,
+        "log": "\n".join(combined_log)
+    })
 
 
 @app.route("/api/scan", methods=["POST"])
