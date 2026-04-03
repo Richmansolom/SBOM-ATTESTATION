@@ -1487,6 +1487,7 @@ function PipelineDetail({ config, pipeline }) {
 /* ═══ SBOM VIEWER ═══ */
 function SBOMPage() {
   const [sbom, setSbom] = useState(null);
+  const [file, setFile] = useState(null);
   const [search, setSearch] = useState('');
   const [typeF, setTypeF] = useState('All');
   const [view, setView] = useState('table');
@@ -1495,6 +1496,10 @@ function SBOMPage() {
   const [loadingApi, setLoadingApi] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState('');
   const [history, setHistory] = useState([]);
+  const [projectZip, setProjectZip] = useState(null);
+const [projectFiles, setProjectFiles] = useState([]);
+const [uploadStatus, setUploadStatus] = useState('');
+const [uploadedSourcePath, setUploadedSourcePath] = useState('');
 
   useEffect(() => {
     try {
@@ -1567,7 +1572,77 @@ function SBOMPage() {
     setView('table');
     setLastLoadedAt('');
   }
+async function handleUploadSource() {
+  async function handleGenerateFromUpload() {
+  if (!uploadedSourcePath) {
+    setUploadStatus('Upload a source project first.');
+    return;
+  }
 
+  try {
+    setUploadStatus('Generating SBOM...');
+    const res = await fetch(apiUrl('/api/generate'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source_path: uploadedSourcePath,
+        mode: 'native'
+      })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.status !== 'ok') {
+      throw new Error(data.log || data.message || 'SBOM generation failed');
+    }
+
+    setUploadStatus('SBOM generated successfully. Loading viewer...');
+    await loadFromApi();
+    toast('SBOM generated successfully', 'ok');
+  } catch (e) {
+    setUploadStatus(`Generation failed: ${e.message}`);
+    toast(`Generation failed: ${e.message}`, 'err');
+  }
+}
+  setUploadStatus('');
+  setErr('');
+
+  if (!projectZip && projectFiles.length === 0) {
+    setUploadStatus('Please choose a ZIP file or a project folder.');
+    return;
+  }
+
+  const formData = new FormData();
+
+  if (projectZip) {
+    formData.append('project_zip', projectZip);
+  } else {
+    for (const file of projectFiles) {
+      formData.append('project_files', file, file.webkitRelativePath || file.name);
+    }
+  }
+
+  try {
+    setUploadStatus('Uploading source...');
+    const res = await fetch(apiUrl('/api/upload-source'), {
+      method: 'POST',
+      body: formData
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.status !== 'ok') {
+      throw new Error(data.message || 'Upload failed');
+    }
+
+    setUploadedSourcePath(data.source_path || '');
+    setUploadStatus(`Upload successful: ${data.source_path || 'source uploaded'}`);
+    toast('Source uploaded successfully', 'ok');
+  } catch (e) {
+    setUploadStatus(`Upload failed: ${e.message}`);
+    toast(`Upload failed: ${e.message}`, 'err');
+  }
+}
   useEffect(() => {
     loadFromApi();
   }, []);
@@ -1598,6 +1673,44 @@ function SBOMPage() {
               {loadingApi ? 'Loading...' : 'Load Latest SBOM'}
             </button>
           </div>
+          <div style={{marginTop: 20}}>
+  <h3>Upload Project</h3>
+
+  <input 
+    type="file" 
+    onChange={(e) => setFile(e.target.files[0])} 
+  />
+
+  <br /><br />
+
+  <button 
+    className="btn btn-outline-gold"
+    onClick={handleUpload}
+  >
+    Upload File
+  </button>
+</div>
+          <div className="card" style={{marginBottom:12}}>
+  <div className="card-body">
+    <div style={{fontSize:11, marginBottom:10, fontFamily:'var(--mono)', color:'var(--gold)'}}>
+      UPLOAD PROJECT SOURCE
+    </div>
+
+    <input
+      type="file"
+      onChange={(e) => setFile(e.target.files[0])}
+    />
+
+    <br /><br />
+
+    <button
+      className="btn btn-outline-gold"
+      onClick={handleUpload}
+    >
+      Upload File
+    </button>
+  </div>
+</div>
           <div className={`dropzone${drag?' drag':''}`}
             onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)}
             onDrop={e=>{e.preventDefault();setDrag(false);load(e.dataTransfer.files[0]);}}
