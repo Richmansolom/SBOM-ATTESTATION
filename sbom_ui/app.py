@@ -265,13 +265,38 @@ def run_generate_pipeline(body, log_callback=None):
         sbom_path = SBOM_DIR / "sbom-source.enriched.json"
         signed_sbom_path = SBOM_DIR / "sbom-source.signed.json"
 
-        # Generate SBOM
-        gen_cmd = [
-            "syft",
-            str(source_dir),
-            "-o",
-            f"cyclonedx-json={sbom_path}"
-        ]
+        # Generate SBOM:
+        # - prefer local syft binary when available
+        # - otherwise fall back to containerized Syft via Docker
+        syft_bin = shutil.which("syft")
+        docker_bin = shutil.which("docker")
+        if syft_bin:
+            gen_cmd = [
+                syft_bin,
+                str(source_dir),
+                "-o",
+                f"cyclonedx-json={sbom_path}",
+            ]
+        elif docker_bin:
+            source_rel = os.path.relpath(str(source_dir), str(REPO_ROOT)).replace("\\", "/")
+            gen_cmd = [
+                docker_bin,
+                "run",
+                "--rm",
+                "-v",
+                f"{REPO_ROOT}:/work",
+                "anchore/syft:latest",
+                f"dir:/work/{source_rel}",
+                "-o",
+                "cyclonedx-json=/work/sbom/sbom-source.enriched.json",
+            ]
+        else:
+            return {
+                "status": "error",
+                "message": "SBOM generation requires either syft binary or Docker runtime on this host",
+                "log": "Missing dependency: syft and docker are not available on server.",
+                "exit_code": 1,
+            }
 
         if log_callback:
             code, output = run_cmd_stream(gen_cmd, on_output=log_callback)
