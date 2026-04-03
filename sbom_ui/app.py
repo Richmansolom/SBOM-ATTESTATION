@@ -1093,7 +1093,7 @@ def scan():
     # lots of trivy stuff
     return jsonify(...)
 
-@app.route("/api/something_else")   👈 STOP HERE
+@app.route("/api/something_else")   
 def something_else():
     ...
 
