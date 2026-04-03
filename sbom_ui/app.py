@@ -348,7 +348,9 @@ def resolve_syft_binary(log_callback=None, auto_install=True):
 
 
 def get_generate_capabilities():
-    syft_path, syft_source = resolve_syft_binary(auto_install=False)
+    # Probe with auto-install enabled so hosted backends can self-heal
+    # and immediately expose generate capability in the UI.
+    syft_path, syft_source = resolve_syft_binary(auto_install=True)
     has_docker = shutil.which("docker") is not None
     has_syft = bool(syft_path)
     can_generate = has_syft or has_docker
