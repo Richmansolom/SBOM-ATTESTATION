@@ -244,51 +244,88 @@ def build_temp_metadata(app_name, source_path):
 def run_generate_pipeline(body, log_callback=None):
     ensure_dirs()
     body = body or {}
-    mode = body.get("mode", "native")
-    if mode not in ("native", "container"):
-        mode = "native"
-    if shutil.which("pwsh") is None:
-        return {"status": "error", "log": "PowerShell (pwsh) not found in PATH", "exit_code": 1}
-    cmd = ["pwsh", "-ExecutionPolicy", "Bypass", "-File", str(REPO_ROOT / "generate-sbom.ps1"), "-Mode", mode]
 
-    source_path = normalize_path_for_script(body.get("source_path"))
-    if source_path:
-        cmd.extend(["-SourcePath", source_path])
+    source_path = body.get("source_path")
+    if not source_path:
+        return {
+            "status": "error",
+            "message": "Missing source_path",
+            "exit_code": 1
+        }
 
-    app_meta = normalize_path_for_script(body.get("app_metadata_path"))
-    temp_meta_path = None
-    if app_meta:
-        cmd.extend(["-AppMetadataPath", app_meta])
-    elif body.get("app_name"):
-        temp_meta_path = build_temp_metadata(body.get("app_name"), source_path)
-        cmd.extend(["-AppMetadataPath", normalize_path_for_script(str(temp_meta_path))])
+    try:
+        source_dir = (REPO_ROOT / source_path).resolve()
+        if not source_dir.exists():
+            return {
+                "status": "error",
+                "message": f"Source path does not exist: {source_path}",
+                "exit_code": 1
+            }
 
-    runtime = (body.get("container_runtime") or "").strip().lower()
-    if runtime in ("auto", "docker", "podman"):
-        cmd.extend(["-ContainerRuntime", runtime])
-    image_name = (body.get("image_name") or "").strip()
-    if image_name:
-        cmd.extend(["-ImageName", image_name])
-    image_tag = (body.get("image_tag") or "").strip()
-    if image_tag:
-        cmd.extend(["-ImageTag", image_tag])
+        sbom_path = SBOM_DIR / "sbom-source.enriched.json"
+        signed_sbom_path = SBOM_DIR / "sbom-source.signed.json"
 
-    if log_callback:
-        code, output = run_cmd_stream(cmd, on_output=log_callback)
-    else:
-        code, output = run_cmd(cmd)
-    if temp_meta_path and temp_meta_path.exists():
-        try:
-            temp_meta_path.unlink()
-        except Exception:
-            pass
-    return {
-        "status": "ok" if code == 0 else "error",
-        "exit_code": code,
-        "log": output,
-        "source_path": source_path or "example-app",
-        "app_metadata_path": app_meta or ("generated from app_name" if body.get("app_name") else "example-app/app-metadata.json"),
-    }
+        # Generate SBOM
+        gen_cmd = [
+            "syft",
+            str(source_dir),
+            "-o",
+            f"cyclonedx-json={sbom_path}"
+        ]
+
+        if log_callback:
+            code, output = run_cmd_stream(gen_cmd, on_output=log_callback)
+        else:
+            code, output = run_cmd(gen_cmd)
+
+        if code != 0:
+            return {
+                "status": "error",
+                "message": "SBOM generation failed",
+                "log": output,
+                "exit_code": code
+            }
+
+        # Sign SBOM
+        sign_cmd = [
+            "bash",
+            str(REPO_ROOT / "scripts" / "sign-sbom.sh"),
+            str(sbom_path),
+            str(signed_sbom_path),
+            str(SBOM_DIR / "pki")
+        ]
+
+        if log_callback:
+            sign_code, sign_output = run_cmd_stream(sign_cmd, on_output=log_callback)
+        else:
+            sign_code, sign_output = run_cmd(sign_cmd)
+
+        if sign_code != 0:
+            return {
+                "status": "error",
+                "message": "SBOM signing failed",
+                "log": output + "\n" + sign_output,
+                "exit_code": sign_code
+            }
+
+        # Replace original with signed version
+        if signed_sbom_path.exists():
+            shutil.move(str(signed_sbom_path), str(sbom_path))
+
+        return {
+            "status": "ok",
+            "message": "SBOM generated and signed successfully",
+            "log": output + "\n" + sign_output,
+            "exit_code": 0,
+            "source_path": source_path
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e),
+            "exit_code": 1
+        }
 
 
 def _local_run_worker(run_id, body):
