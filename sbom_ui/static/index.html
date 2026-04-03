@@ -871,6 +871,17 @@ let API_BASE = (() => {
 
 const apiUrl = (path) => `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
 const normalizeApiBase = (value) => String(value || '').trim().replace(/\/$/, '');
+const isHostedBackendBase = (value) => {
+  try {
+    const raw = normalizeApiBase(value || API_BASE);
+    if (!raw) return false;
+    const parsed = new URL(raw);
+    const host = (parsed.hostname || '').toLowerCase();
+    return !(host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local'));
+  } catch {
+    return false;
+  }
+};
 
 const GL = (tok, proj, provider, path, opts = {}) => {
   const url = new URL(apiUrl(`/api${path}`));
@@ -1597,6 +1608,7 @@ function SBOMPage() {
   const [loadingApi, setLoadingApi] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState('');
   const [history, setHistory] = useState([]);
+  const hostedBackend = isHostedBackendBase(localStorage.getItem('sbom_api_base') || API_BASE);
 
   useEffect(() => {
     try {
@@ -1714,6 +1726,12 @@ function SBOMPage() {
   }
 
   async function handleGenerateFromUpload() {
+    if (hostedBackend) {
+      const msg = 'Hosted backend detected. Use Pipeline Control → Launch to run generate/scan in CI.';
+      setUploadStatus(msg);
+      toast(msg, 'err');
+      return;
+    }
     if (!uploadedSourcePath) {
       setUploadStatus('Upload a source project first.');
       return;
@@ -1811,10 +1829,15 @@ function SBOMPage() {
                     Upload Source
                   </button>
 
-                  <button className="btn btn-outline-teal" onClick={handleGenerateFromUpload}>
+                  <button className="btn btn-outline-teal" onClick={handleGenerateFromUpload} disabled={hostedBackend} title={hostedBackend ? 'Disabled on hosted backend; use Pipeline Launch' : ''}>
                     Generate SBOM
                   </button>
                 </div>
+                {hostedBackend && (
+                  <div style={{ marginTop: 10, fontSize: 11, color: 'var(--amber)', fontFamily: 'var(--mono)' }}>
+                    Hosted backend mode: local generate is disabled here. Trigger pipeline from <span style={{color:'var(--gold)'}}>Pipeline Control</span> to generate/scan in CI.
+                  </div>
+                )}
 
                 {uploadStatus && (
                   <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text0)' }}>
