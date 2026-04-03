@@ -854,6 +854,20 @@ def health():
     return jsonify({"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()})
 
 
+@app.route("/version")
+def version():
+    return jsonify(
+        {
+            "status": "ok",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            # Render commonly provides this for each deploy; if absent, keep fallback fields.
+            "commit": os.getenv("RENDER_GIT_COMMIT") or os.getenv("SOURCE_VERSION") or "unknown",
+            "service": os.getenv("RENDER_SERVICE_NAME") or "",
+            "instance": os.getenv("RENDER_INSTANCE_ID") or "",
+        }
+    )
+
+
 @app.route("/api/status")
 def status():
     return jsonify(get_local_snapshot())
