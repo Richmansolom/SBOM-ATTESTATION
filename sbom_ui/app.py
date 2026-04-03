@@ -1088,93 +1088,14 @@ def sign():
 
 @app.route("/api/scan", methods=["POST"])
 def scan():
-    ensure_dirs()
-    if shutil.which("docker") is None:
-        return jsonify({"status": "error", "log": "Docker is required for scan endpoint"}), 500
-    target = SBOM_DIR / "sbom-source.enriched.json"
-    if not target.exists():
-        return jsonify({"status": "error", "log": "Run generate first: sbom-source.enriched.json not found"}), 400
+    # lots of docker code
+    # lots of grype stuff
+    # lots of trivy stuff
+    return jsonify(...)
 
-    convert_cmd = [
-        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "cyclonedx/cyclonedx-cli:latest", "convert",
-        "--input-file", "/data/sbom/sbom-source.enriched.json",
-        "--output-file", "/data/sbom/sbom-source.enriched.v16.json",
-        "--output-format", "json", "--output-version", "v1_6",
-    ]
-    c1, o1 = run_cmd(convert_cmd)
-    if c1 != 0:
-        return jsonify({"status": "error", "exit_code": c1, "log": o1})
-
-    grype_cache = REPO_ROOT / ".cache" / "grype-db"
-    grype_cache.mkdir(parents=True, exist_ok=True)
-    trivy_cache = REPO_ROOT / ".cache" / "trivy"
-    trivy_cache.mkdir(parents=True, exist_ok=True)
-
-    grype_db_vol = ["-e", "GRYPE_DB_CACHE_DIR=/grype-db", "-v", f"{grype_cache}:/grype-db"]
-    grype_db_update_cmd = ["docker", "run", "--rm", *grype_db_vol, GRYPE_IMAGE, "db", "update"]
-    _, gdb_update = run_cmd(grype_db_update_cmd)
-    (REPORT_DIR / "grype-db-update.txt").write_text(gdb_update, encoding="utf-8")
-
-    grype_db_status_cmd = ["docker", "run", "--rm", *grype_db_vol, GRYPE_IMAGE, "db", "status"]
-    _, gdb_status = run_cmd(grype_db_status_cmd)
-    (REPORT_DIR / "grype-db-status.txt").write_text(gdb_status, encoding="utf-8")
-
-    grype_db_providers_cmd = ["docker", "run", "--rm", *grype_db_vol, GRYPE_IMAGE, "db", "providers"]
-    _, gdb_providers = run_cmd(grype_db_providers_cmd)
-    (REPORT_DIR / "grype-db-providers.txt").write_text(gdb_providers, encoding="utf-8")
-
-    trivy_db_update_cmd = [
-        "docker", "run", "--rm",
-        "-v", f"{trivy_cache}:/root/.cache/trivy",
-        TRIVY_IMAGE, "image", "--download-db-only", "--no-progress", "--debug",
-    ]
-    _, tdb_update = run_cmd(trivy_db_update_cmd)
-    (REPORT_DIR / "trivy-db-update.txt").write_text(tdb_update, encoding="utf-8")
-    # Keep a dedicated status artifact so the UI can parse DB freshness quickly.
-    (REPORT_DIR / "trivy-db-status.txt").write_text(tdb_update, encoding="utf-8")
-
-    grype_json_cmd = [
-        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", *grype_db_vol, GRYPE_IMAGE,
-        "sbom:/data/sbom/sbom-source.enriched.v16.json", "-o", "json",
-    ]
-    c2, o2 = run_cmd(grype_json_cmd)
-    if c2 != 0:
-        return jsonify({"status": "error", "exit_code": c2, "log": o1 + "\n" + o2})
-    (REPORT_DIR / "grype-report.json").write_text(o2, encoding="utf-8")
-
-    grype_table_cmd = [
-        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", *grype_db_vol, GRYPE_IMAGE,
-        "sbom:/data/sbom/sbom-source.enriched.v16.json", "-o", "table",
-    ]
-    c3, o3 = run_cmd(grype_table_cmd)
-    (REPORT_DIR / "grype-report.txt").write_text(o3, encoding="utf-8")
-    if c3 != 0:
-        return jsonify({"status": "error", "exit_code": c3, "log": o1 + "\n" + o2 + "\n" + o3})
-
-    trivy_json_cmd = [
-        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "-v", f"{trivy_cache}:/root/.cache/trivy", TRIVY_IMAGE, "sbom",
-        "--cache-dir", "/root/.cache/trivy",
-        "--scanners", "vuln", "--vuln-severity-source", "nvd,ghsa,osv",
-        "--format", "json", "--output", "/data/reports/trivy-sbom-report.json",
-        "/data/sbom/sbom-source.enriched.v16.json",
-    ]
-    c4, o4 = run_cmd(trivy_json_cmd)
-    if c4 != 0:
-        return jsonify({"status": "error", "exit_code": c4, "log": o1 + "\n" + o2 + "\n" + o3 + "\n" + o4})
-
-    trivy_table_cmd = [
-        "docker", "run", "--rm", "-v", f"{REPO_ROOT}:/data", "-v", f"{trivy_cache}:/root/.cache/trivy", TRIVY_IMAGE, "sbom",
-        "--cache-dir", "/root/.cache/trivy",
-        "--scanners", "vuln", "--vuln-severity-source", "nvd,ghsa,osv",
-        "--format", "table", "--output", "/data/reports/trivy-sbom-report.txt",
-        "/data/sbom/sbom-source.enriched.v16.json",
-    ]
-    c5, o5 = run_cmd(trivy_table_cmd)
-    if c5 != 0:
-        return jsonify({"status": "error", "exit_code": c5, "log": o1 + "\n" + o2 + "\n" + o3 + "\n" + o4 + "\n" + o5})
-
-    return jsonify({"status": "ok", "exit_code": 0, "log": "\n".join([o1, gdb_update, gdb_status, gdb_providers, tdb_update, o2, o3, o4, o5])})
-
+@app.route("/api/something_else")   👈 STOP HERE
+def something_else():
+    ...
 
 @app.route("/api/sbom")
 def get_sbom():
