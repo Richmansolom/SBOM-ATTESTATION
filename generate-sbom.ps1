@@ -97,30 +97,65 @@ Write-Host "==> Pull COTS SBOM tool images (Syft, Trivy, CycloneDX, Hoppr)"
 if ($runMode -eq "container") {
   $appDir = Join-Path $repoRoot $SourcePath
   $image = "${ImageName}:${ImageTag}"
+  $imageTar = Join-Path $sbomPath "image.tar"
   Write-Host "==> Build image: $image (from $SourcePath)"
   Push-Location $appDir
   try {
     & $containerCmd build -t $image . 2>&1 | Out-Host
   } finally { Pop-Location }
+  if ($LASTEXITCODE -ne 0) { throw "Container build failed for image $image" }
+
   Write-Host "==> Generate COTS SBOM from image (Syft)"
-  $rawContent = & $containerCmd run --rm -v "/var/run/docker.sock:/var/run/docker.sock" anchore/syft:latest $image -o cyclonedx-json 2>$null
-  if ($containerCmd -eq "podman") {
-    $imageTar = Join-Path $sbomPath "image.tar"
-    & $containerCmd save $image -o $imageTar 2>&1 | Out-Host
-    $rawContent = & $containerCmd run --rm -v "${sbomPath}:/data" anchore/syft:latest "oci-archive:/data/image.tar" -o cyclonedx-json 2>$null
+  & $containerCmd save $image -o $imageTar 2>&1 | Out-Host
+  if ($LASTEXITCODE -ne 0) { throw "Failed to export image tar for $image" }
+  & $containerCmd run --rm -v "${sbomPath}:/data" anchore/syft:latest "docker-archive:/data/image.tar" -o "cyclonedx-json=/data/$syftLeaf" 2>&1 | Out-Host
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path $syftSbom)) {
+    throw "Syft failed to generate image SBOM ($syftSbom) from docker archive."
   }
-  [System.IO.File]::WriteAllText($syftSbom, $rawContent, (New-Object System.Text.UTF8Encoding $false))
 
   Write-Host "==> Generate COTS SBOM from image (Trivy)"
-  & $containerCmd run --rm -v "${repoRoot}:/work" $trivyImage @trivyQuiet image --format cyclonedx --output "/work/$SbomDir/$trivyLeaf" "$image" 2>&1 | Out-Host
+  $trivyOutput = & $containerCmd run --rm -v "${sbomPath}:/data" $trivyImage @trivyQuiet image --input "/data/image.tar" --format cyclonedx --output "/data/$trivyLeaf" 2>&1
+  $trivyOutput | Out-Host
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path $trivySbom)) {
+    Write-Warning "Trivy image scan via oci-archive failed; falling back to exported rootfs filesystem scan."
+    $rootfsTar = Join-Path $sbomPath "image-rootfs.tar"
+    $rootfsDir = Join-Path $sbomPath "image-rootfs"
+    if (Test-Path $rootfsTar) { Remove-Item $rootfsTar -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $rootfsDir) { Remove-Item $rootfsDir -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path $rootfsDir -Force | Out-Null
+
+    $tmpContainerId = ""
+    try {
+      $tmpContainerId = (& $containerCmd create $image).Trim()
+      if (-not $tmpContainerId) { throw "Failed to create temporary container from $image" }
+      & $containerCmd export $tmpContainerId -o $rootfsTar 2>&1 | Out-Host
+      if ($LASTEXITCODE -ne 0 -or -not (Test-Path $rootfsTar)) {
+        throw "Failed to export rootfs tar from container $tmpContainerId"
+      }
+    } finally {
+      if ($tmpContainerId) { & $containerCmd rm $tmpContainerId 2>&1 | Out-Null }
+    }
+
+    & $containerCmd run --rm -v "${sbomPath}:/data" alpine:3.20 sh -lc "mkdir -p /data/image-rootfs && tar -xf /data/image-rootfs.tar -C /data/image-rootfs" 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "Failed to unpack exported rootfs tar for Trivy fallback." }
+
+    & $containerCmd run --rm -v "${rootfsDir}:/scan" -v "${sbomPath}:/data" $trivyImage @trivyQuiet filesystem --format cyclonedx --output "/data/$trivyLeaf" /scan 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $trivySbom)) {
+      throw "Trivy failed in both image and filesystem fallback modes ($trivySbom)."
+    }
+  }
 } else {
   $resolvedSource = (Resolve-Path (Join-Path $repoRoot $SourcePath)).Path
   Write-Host "==> Generate COTS SBOM from directory (Syft): $resolvedSource"
   $rawContent = & $containerCmd run --rm -v "${resolvedSource}:/src" anchore/syft:latest dir:/src -o cyclonedx-json 2>$null
+  if (-not $rawContent) { throw "Syft failed to generate source SBOM from $resolvedSource" }
   [System.IO.File]::WriteAllText($syftSbom, $rawContent, (New-Object System.Text.UTF8Encoding $false))
 
   Write-Host "==> Generate COTS SBOM from directory (Trivy): $resolvedSource"
   & $containerCmd run --rm -v "${resolvedSource}:/src" -v "${repoRoot}:/work" $trivyImage @trivyQuiet filesystem --format cyclonedx --output "/work/$SbomDir/$trivyLeaf" /src 2>&1 | Out-Host
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path $trivySbom)) {
+    throw "Trivy failed to generate filesystem SBOM ($trivySbom)."
+  }
 }
 
 Write-Host "==> Generate distro package SBOM (Distro2SBOM)"
