@@ -1,4 +1,5 @@
 import json
+import io
 import os
 import platform
 import re
@@ -107,6 +108,71 @@ def parse_json(path):
             return obj
     except Exception:
         return None
+
+
+def parse_json_text(raw):
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        # Some scanner outputs may contain extra non-JSON lines.
+        try:
+            start_positions = [pos for pos in (raw.find("{"), raw.find("[")) if pos >= 0]
+            if not start_positions:
+                return None
+            start = min(start_positions)
+            obj, _ = json.JSONDecoder().raw_decode(raw[start:])
+            return obj
+        except Exception:
+            return None
+
+
+def parse_json_bytes(raw_bytes):
+    if raw_bytes is None:
+        return None
+    try:
+        text = raw_bytes.decode("utf-8", errors="replace")
+    except Exception:
+        return None
+    return parse_json_text(text)
+
+
+def extract_report_from_zip_bytes(zip_bytes, scanner):
+    scanner = (scanner or "grype").strip().lower()
+    candidates = {
+        "grype": ["reports/grype-report.json", "grype-report.json"],
+        "trivy": ["reports/trivy-sbom-report.json", "trivy-sbom-report.json"],
+    }.get(scanner, ["reports/grype-report.json", "grype-report.json"])
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+            names = zf.namelist()
+            lowered = {n.lower(): n for n in names}
+            # Try exact known paths first.
+            for want in candidates:
+                for lname, original in lowered.items():
+                    if lname.endswith(want.lower()):
+                        payload = parse_json_bytes(zf.read(original))
+                        if payload is not None:
+                            return payload, original
+            # Fallback: any JSON that ends with the expected filename.
+            fallback_suffix = "grype-report.json" if scanner == "grype" else "trivy-sbom-report.json"
+            for lname, original in lowered.items():
+                if lname.endswith(fallback_suffix):
+                    payload = parse_json_bytes(zf.read(original))
+                    if payload is not None:
+                        return payload, original
+    except Exception:
+        return None, None
+    return None, None
+
+
+def with_report_meta(payload, meta):
+    if isinstance(payload, dict):
+        out = dict(payload)
+        out["_meta"] = meta
+        return out
+    return {"_meta": meta, "data": payload}
 
 
 def parse_key_value_lines(text):
@@ -585,16 +651,14 @@ def get_gh_json(path):
 def _github_token_for_request():
     """
     Get GitHub token from:
-    1. Request (UI input)
+    1. Request token (header/query/body via Connect)
     2. Environment variable (Render)
     """
-    body = request.get_json(silent=True) or {}
-    token = (body.get("token") or "").strip()
-
+    token = get_requested_token()
     if token:
         return token
 
-    # fallback to Render env
+    # fallback to backend env
     env_token = os.getenv("GITHUB_TOKEN", "").strip()
     return env_token
 
@@ -632,6 +696,26 @@ def github_rest_request(path, method="GET", token="", json_body=None):
         return 599, str(e.reason or e)
     except Exception as exc:
         return 500, str(exc)
+
+
+def github_download_bytes(url, token=""):
+    headers = {
+        "Accept": "application/octet-stream",
+        "User-Agent": "sbom-mission-control",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = Request(url=url, method="GET", headers=headers)
+    try:
+        with urlopen(req, timeout=180) as resp:
+            return resp.status, resp.read()
+    except HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+        return e.code, body.encode("utf-8", errors="replace")
+    except URLError as e:
+        return 599, str(e.reason or e).encode("utf-8", errors="replace")
+    except Exception as exc:
+        return 500, str(exc).encode("utf-8", errors="replace")
 
 
 def fetch_github_json(path):
@@ -701,6 +785,119 @@ def gitlab_api(path, method="GET", token="", data=None):
             return resp.status, body
     except Exception as exc:
         return 500, str(exc)
+
+
+def gitlab_api_binary(path, token=""):
+    base = "https://gitlab.com/api/v4"
+    url = f"{base}/{path.lstrip('/')}"
+    headers = {"Accept": "application/octet-stream"}
+    if token:
+        headers["PRIVATE-TOKEN"] = token
+    req = Request(url=url, method="GET", headers=headers)
+    try:
+        with urlopen(req, timeout=180) as resp:
+            return resp.status, resp.read()
+    except HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+        return e.code, body.encode("utf-8", errors="replace")
+    except URLError as e:
+        return 599, str(e.reason or e).encode("utf-8", errors="replace")
+    except Exception as exc:
+        return 500, str(exc).encode("utf-8", errors="replace")
+
+
+def fetch_github_report_from_artifacts(repo, scanner, token="", run_id=None):
+    run_ids = []
+    if run_id:
+        run_ids.append(int(run_id))
+    else:
+        status, out = github_rest_request(f"repos/{repo}/actions/runs?per_page=20", "GET", token)
+        if status >= 300:
+            return None, f"GitHub runs lookup failed ({status})"
+        runs_json = parse_json_text(out) or {}
+        runs = runs_json.get("workflow_runs") or []
+        for run in runs:
+            if (run.get("conclusion") or "").lower() == "success":
+                rid = run.get("id")
+                if rid:
+                    run_ids.append(int(rid))
+        # Fallback to latest runs if no successful run has artifacts yet.
+        if not run_ids:
+            for run in runs[:5]:
+                rid = run.get("id")
+                if rid:
+                    run_ids.append(int(rid))
+    if not run_ids:
+        return None, "No GitHub workflow runs found"
+
+    for rid in run_ids[:8]:
+        status, out = github_rest_request(f"repos/{repo}/actions/runs/{rid}/artifacts?per_page=30", "GET", token)
+        if status >= 300:
+            continue
+        payload = parse_json_text(out) or {}
+        artifacts = payload.get("artifacts") or []
+        for artifact in artifacts:
+            if artifact.get("expired"):
+                continue
+            archive_url = artifact.get("archive_download_url")
+            if not archive_url:
+                continue
+            a_status, raw_zip = github_download_bytes(archive_url, token=token)
+            if a_status >= 300:
+                continue
+            report_payload, entry = extract_report_from_zip_bytes(raw_zip, scanner)
+            if report_payload is not None:
+                return {
+                    "payload": report_payload,
+                    "run_id": rid,
+                    "artifact_name": artifact.get("name") or "",
+                    "zip_entry": entry or "",
+                }, None
+    return None, "No matching vulnerability report found in GitHub artifacts"
+
+
+def fetch_gitlab_report_from_artifacts(project, scanner, token="", pipeline_id=None):
+    encoded_project = quote(project, safe="")
+    pipeline_ids = []
+    if pipeline_id:
+        pipeline_ids.append(int(pipeline_id))
+    else:
+        status, out = gitlab_api(f"projects/{encoded_project}/pipelines?status=success&per_page=20", token=token)
+        if status >= 300:
+            return None, f"GitLab pipelines lookup failed ({status})"
+        pipelines = parse_json_text(out) or []
+        for p in pipelines:
+            pid = p.get("id")
+            if pid:
+                pipeline_ids.append(int(pid))
+    if not pipeline_ids:
+        return None, "No GitLab successful pipelines found"
+
+    for pid in pipeline_ids[:8]:
+        status, out = gitlab_api(f"projects/{encoded_project}/pipelines/{pid}/jobs?per_page=100", token=token)
+        if status >= 300:
+            continue
+        jobs = parse_json_text(out) or []
+        for job in jobs:
+            artifacts_file = (job.get("artifacts_file") or {}).get("filename")
+            if not artifacts_file:
+                continue
+            jid = job.get("id")
+            if not jid:
+                continue
+            z_status, raw_zip = gitlab_api_binary(f"projects/{encoded_project}/jobs/{jid}/artifacts", token=token)
+            if z_status >= 300:
+                continue
+            report_payload, entry = extract_report_from_zip_bytes(raw_zip, scanner)
+            if report_payload is not None:
+                return {
+                    "payload": report_payload,
+                    "pipeline_id": pid,
+                    "job_id": jid,
+                    "job_name": job.get("name") or "",
+                    "zip_entry": entry or "",
+                }, None
+    return None, "No matching vulnerability report found in GitLab artifacts"
 
 
 def get_stage_status_from_steps(steps):
@@ -1158,6 +1355,96 @@ def get_report():
     if payload is None:
         return jsonify({"status": "error", "message": f"Report exists but is not valid JSON for scanner '{scanner}'"}), 500
     return jsonify(payload)
+
+
+@app.route("/api/report/unified")
+def get_unified_report():
+    scanner = (request.args.get("scanner") or "grype").strip().lower()
+    if scanner not in ("grype", "trivy"):
+        return jsonify({"status": "error", "message": "scanner must be 'grype' or 'trivy'"}), 400
+
+    source = (request.args.get("source") or "auto").strip().lower()
+    provider = get_requested_provider()
+    repo = get_requested_repo()
+    token = get_requested_token()
+    run_id = (request.args.get("run_id") or "").strip()
+    pipeline_id = (request.args.get("pipeline_id") or "").strip()
+
+    local_paths = {
+        "grype": REPORT_DIR / "grype-report.json",
+        "trivy": REPORT_DIR / "trivy-sbom-report.json",
+    }
+
+    if source in ("auto", "local"):
+        local_path = local_paths[scanner]
+        if local_path.exists():
+            payload = parse_json(local_path)
+            if payload is not None:
+                return jsonify(
+                    with_report_meta(
+                        payload,
+                        {
+                            "source": "local",
+                            "scanner": scanner,
+                            "path": str(local_path.relative_to(REPO_ROOT)),
+                        },
+                    )
+                )
+            if source == "local":
+                return jsonify({"status": "error", "message": "Local report exists but is not valid JSON"}), 500
+        elif source == "local":
+            return jsonify({"status": "error", "message": f"No local report found for scanner '{scanner}'"}), 404
+
+    if source not in ("auto", "ci"):
+        return jsonify({"status": "error", "message": "source must be 'auto', 'local', or 'ci'"}), 400
+
+    if provider == "gitlab":
+        ci_token = token or os.getenv("GITLAB_TOKEN", "").strip()
+        ci_result, ci_error = fetch_gitlab_report_from_artifacts(
+            project=repo,
+            scanner=scanner,
+            token=ci_token,
+            pipeline_id=pipeline_id or None,
+        )
+        if ci_result and ci_result.get("payload") is not None:
+            return jsonify(
+                with_report_meta(
+                    ci_result["payload"],
+                    {
+                        "source": "gitlab-artifact",
+                        "scanner": scanner,
+                        "project": repo,
+                        "pipeline_id": ci_result.get("pipeline_id"),
+                        "job_id": ci_result.get("job_id"),
+                        "job_name": ci_result.get("job_name"),
+                        "zip_entry": ci_result.get("zip_entry"),
+                    },
+                )
+            )
+        return jsonify({"status": "error", "message": ci_error or "No CI report found"}), 404
+
+    ci_token = token or os.getenv("GITHUB_TOKEN", "").strip()
+    ci_result, ci_error = fetch_github_report_from_artifacts(
+        repo=repo,
+        scanner=scanner,
+        token=ci_token,
+        run_id=run_id or None,
+    )
+    if ci_result and ci_result.get("payload") is not None:
+        return jsonify(
+            with_report_meta(
+                ci_result["payload"],
+                {
+                    "source": "github-artifact",
+                    "scanner": scanner,
+                    "project": repo,
+                    "run_id": ci_result.get("run_id"),
+                    "artifact_name": ci_result.get("artifact_name"),
+                    "zip_entry": ci_result.get("zip_entry"),
+                },
+            )
+        )
+    return jsonify({"status": "error", "message": ci_error or "No CI report found"}), 404
 
 
 @app.route("/api/pipelines")
