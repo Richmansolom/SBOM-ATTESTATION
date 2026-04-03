@@ -1487,6 +1487,10 @@ function PipelineDetail({ config, pipeline }) {
 /* ═══ SBOM VIEWER ═══ */
 function SBOMPage() {
   const [sbom, setSbom] = useState(null);
+  const [projectZip, setProjectZip] = useState(null);
+const [projectFiles, setProjectFiles] = useState([]);
+const [uploadStatus, setUploadStatus] = useState('');
+const [uploadedSourcePath, setUploadedSourcePath] = useState('');
   const [file, setFile] = useState(null);
   const [search, setSearch] = useState('');
   const [typeF, setTypeF] = useState('All');
@@ -1643,6 +1647,9 @@ async function handleUploadSource() {
     toast(`Upload failed: ${e.message}`, 'err');
   }
 }
+  async function handleUploadSource() { ... }
+
+async function handleGenerateFromUpload() { ... }
   useEffect(() => {
     loadFromApi();
   }, []);
@@ -1672,6 +1679,34 @@ async function handleUploadSource() {
             <button className="btn btn-outline-gold" onClick={loadFromApi} disabled={loadingApi}>
               {loadingApi ? 'Loading...' : 'Load Latest SBOM'}
             </button>
+            <br /><br />
+
+<input 
+  type="file" 
+  onChange={(e) => setProjectZip(e.target.files[0])}
+/>
+
+<br /><br />
+
+<button 
+  className="btn btn-outline-gold"
+  onClick={handleUploadSource}
+>
+  Upload Source
+</button>
+
+<button 
+  className="btn btn-outline-teal"
+  onClick={handleGenerateFromUpload}
+  style={{ marginLeft: 10 }}
+>
+  Generate SBOM
+</button>
+            {uploadStatus && (
+  <div style={{ marginTop: 10 }}>
+    {uploadStatus}
+  </div>
+)}
           </div>
           <div style={{marginTop: 20}}>
   <h3>Upload Project</h3>
