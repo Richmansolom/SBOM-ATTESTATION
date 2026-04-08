@@ -2,8 +2,8 @@ param(
   [Parameter(Mandatory=$true)]
   [string]$InputSbom,
 
-  [Parameter(Mandatory=$true)]
-  [string]$AppMetadata,
+  [Parameter(Mandatory=$false)]
+  [string]$AppMetadata = "",
 
   [Parameter(Mandatory=$true)]
   [string]$OutputSbom
@@ -145,7 +145,6 @@ function Normalize-ComponentLicenses($component) {
 }
 
 if (-not (Test-Path $InputSbom)) { throw "Input SBOM not found: $InputSbom" }
-if (-not (Test-Path $AppMetadata)) { throw "App metadata not found: $AppMetadata" }
 
 $sbomRaw = Get-Content $InputSbom -Raw
 if ([string]::IsNullOrWhiteSpace($sbomRaw)) { throw "Input SBOM is empty." }
@@ -153,7 +152,45 @@ if ([string]::IsNullOrWhiteSpace($sbomRaw)) { throw "Input SBOM is empty." }
 try { $sbom = $sbomRaw | ConvertFrom-Json }
 catch { throw "Input SBOM is not valid JSON." }
 
-$app = Get-Content $AppMetadata -Raw | ConvertFrom-Json
+$app = $null
+if (-not [string]::IsNullOrWhiteSpace($AppMetadata) -and (Test-Path $AppMetadata)) {
+  try {
+    $app = Get-Content $AppMetadata -Raw | ConvertFrom-Json
+  } catch {
+    throw "App metadata is not valid JSON: $AppMetadata"
+  }
+}
+
+if ($null -eq $app) {
+  $rootName = "unknown-app"
+  $rootVersion = "0.0.0"
+  if ($sbom.metadata -and $sbom.metadata.component) {
+    if ($sbom.metadata.component.name) { $rootName = [string]$sbom.metadata.component.name }
+    if ($sbom.metadata.component.version) { $rootVersion = [string]$sbom.metadata.component.version }
+  }
+  $app = [pscustomobject]@{
+    name = $rootName
+    version = $rootVersion
+    description = "Auto-generated metadata (app-metadata.json not provided)"
+    language = "C++"
+    author = "Unknown"
+    repository = ""
+    build_system = "unknown"
+    entry_point = "main"
+    source_file = "unknown"
+    license = "unknown"
+    supplier = [pscustomobject]@{
+      name = "Unknown"
+      url = @()
+    }
+  }
+}
+
+if (-not $app.supplier) {
+  $app | Add-Member -MemberType NoteProperty -Name supplier -Value ([pscustomobject]@{ name = "Unknown"; url = @() }) -Force
+}
+if (-not $app.supplier.name) { $app.supplier.name = "Unknown" }
+if (-not $app.supplier.url) { $app.supplier.url = @() }
 
 if (-not ($sbom.PSObject.Properties.Name -contains "metadata") -or $null -eq $sbom.metadata) {
   $sbom | Add-Member -MemberType NoteProperty -Name metadata -Value ([ordered]@{})
@@ -211,7 +248,11 @@ $customComponent = @{
   )
 }
 
-if (-not $sbom.components) { $sbom | Add-Member -MemberType NoteProperty -Name components -Value @() }
+if (-not ($sbom.PSObject.Properties.Name -contains "components")) {
+  $sbom | Add-Member -MemberType NoteProperty -Name components -Value @()
+} elseif ($null -eq $sbom.components) {
+  $sbom.components = @()
+}
 
 $already = $false
 $rootBomRef = $appBomRef
@@ -234,7 +275,11 @@ if ($sbom.metadata -and $sbom.metadata.component) {
   Normalize-ComponentLicenses $sbom.metadata.component
 }
 
-if (-not $sbom.dependencies) { $sbom | Add-Member -MemberType NoteProperty -Name dependencies -Value @() }
+if (-not ($sbom.PSObject.Properties.Name -contains "dependencies")) {
+  $sbom | Add-Member -MemberType NoteProperty -Name dependencies -Value @()
+} elseif ($null -eq $sbom.dependencies) {
+  $sbom.dependencies = @()
+}
 
 foreach ($c in $sbom.components) {
   if (-not $c.'bom-ref') {

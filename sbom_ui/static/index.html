@@ -1339,6 +1339,7 @@ function PipelinesPage({ config }) {
   const [polling, setPolling] = useState(false);
   const [ref, setRef] = useState('main');
   const [ver, setVer] = useState('1.0.0');
+  const [appDir, setAppDir] = useState('example-app');
   const [launching, setLaunching] = useState(false);
   const pollRef = useRef(null);
 
@@ -1374,8 +1375,13 @@ function PipelinesPage({ config }) {
         method:'POST',
         body: JSON.stringify({
           ref,
+          app_dir: appDir,
+          app_version: ver,
           provider: config.provider,
-          variables:[{key:'APP_VERSION',value:ver,variable_type:'env_var'}]
+          variables:[
+            {key:'APP_DIR',value:appDir,variable_type:'env_var'},
+            {key:'APP_VERSION',value:ver,variable_type:'env_var'}
+          ]
         })
       });
       toast(`Pipeline #${p.id} launched`, 'ok');
@@ -1414,12 +1420,16 @@ function PipelinesPage({ config }) {
               <span className="field-label">App Version</span>
               <input value={ver} onChange={e => setVer(e.target.value)} placeholder="1.0.0"/>
             </div>
+            <div className="field">
+              <span className="field-label">Application Path (Repo)</span>
+              <input value={appDir} onChange={e => setAppDir(e.target.value)} placeholder="example-app"/>
+            </div>
             <button className="btn btn-gold" style={{height:38,justifyContent:'center'}} onClick={launch} disabled={launching}>
               {launching ? <><Spin/> Launching…</> : '▶ Launch'}
             </button>
           </div>
           <div style={{marginTop:10,fontSize:10,fontFamily:'var(--mono)',color:'var(--text3)'}}>
-            build:cpp → sbom:generate → sbom:sign → sbom:scan → report:publish
+            build:cpp → sbom:generate → sbom:sign → sbom:scan → report:publish (target path: {appDir || 'example-app'})
           </div>
         </div>
       </div>
@@ -1583,7 +1593,7 @@ function PipelineDetail({ config, pipeline }) {
   );
 }
 
-function SBOMPage() {
+function SBOMPage({ config }) {
   const [sbom, setSbom] = useState(null);
   const [projectZip, setProjectZip] = useState(null);
   const [projectFiles, setProjectFiles] = useState([]);
@@ -1597,6 +1607,7 @@ function SBOMPage() {
   const [loadingApi, setLoadingApi] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState('');
   const [history, setHistory] = useState([]);
+  const [sbomMeta, setSbomMeta] = useState(null);
   const [capabilities, setCapabilities] = useState({ can_generate: true, has_syft: false, has_docker: false, message: '' });
 
   useEffect(() => {
@@ -1657,13 +1668,39 @@ function SBOMPage() {
     r.readAsText(file);
   }
 
+  function readConnectConfig() {
+    try {
+      const raw = config && config !== 'prompt'
+        ? config
+        : JSON.parse(sessionStorage.getItem('sbom_cfg') || '{}');
+      return {
+        token: raw?.token || '',
+        projectId: raw?.projectId || 'Richmansolom/SBOM-ATTESTATION',
+        provider: raw?.provider || 'github',
+      };
+    } catch {
+      return { token: '', projectId: 'Richmansolom/SBOM-ATTESTATION', provider: 'github' };
+    }
+  }
+
   async function loadFromApi() {
     setLoadingApi(true);
     try {
-      const r = await fetch(apiUrl('/api/sbom'));
+      const cfg = readConnectConfig();
+      const q = new URLSearchParams({
+        source: 'auto',
+        project: cfg.projectId,
+        provider: cfg.provider,
+      });
+      const r = await fetch(apiUrl(`/api/sbom/unified?${q.toString()}`), {
+        headers: {
+          ...(cfg.token ? { 'X-SBOM-TOKEN': cfg.token } : {}),
+        }
+      });
       const j = await r.json();
       if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
       setSbom(j);
+      setSbomMeta(j?._meta || null);
       setErr('');
       const now = new Date().toISOString();
       setLastLoadedAt(now);
@@ -1675,7 +1712,7 @@ function SBOMPage() {
         components: j?.components?.length || 0,
       });
     } catch (e) {
-      setErr(`No local SBOM yet: ${e.message}`);
+      setErr(`No SBOM available yet: ${e.message}`);
     } finally {
       setLoadingApi(false);
     }
@@ -1683,6 +1720,7 @@ function SBOMPage() {
 
   function resetViewer() {
     setSbom(null);
+    setSbomMeta(null);
     setErr('');
     setSearch('');
     setTypeF('All');
@@ -1772,9 +1810,45 @@ function SBOMPage() {
   useEffect(() => {
     loadFromApi();
     loadCapabilities();
-  }, []);
+    const id = setInterval(() => { loadFromApi(); }, 20000);
+    return () => clearInterval(id);
+  }, [config?.projectId, config?.provider, config?.token]);
 
   const types = useMemo(() => sbom ? ['All', ...new Set(sbom.components?.map(c => c.type) || [])] : [], [sbom]);
+
+  const metadataAudit = useMemo(() => {
+    if (!sbom?.components?.length) return { missingCount: 0, totalChecks: 0, byField: [], topMissing: [] };
+    const counters = { version: 0, supplier: 0, license: 0, purl: 0 };
+    const topMissing = [];
+    let totalChecks = 0;
+    let missingCount = 0;
+    for (const c of sbom.components) {
+      const checks = [
+        ['version', !!String(c?.version || '').trim()],
+        ['supplier', !!String(c?.supplier?.name || '').trim()],
+        ['license', !!String(c?.licenses?.[0]?.license?.id || '').trim()],
+        ['purl', !!String(c?.purl || '').trim()],
+      ];
+      const missing = checks.filter(([, ok]) => !ok).map(([k]) => k);
+      totalChecks += checks.length;
+      missingCount += missing.length;
+      missing.forEach((m) => { counters[m] += 1; });
+      if (missing.length > 0) {
+        topMissing.push({ name: c?.name || '(unknown)', version: c?.version || '-', missing: missing.join(', ') });
+      }
+    }
+    return {
+      missingCount,
+      totalChecks,
+      byField: [
+        ['Missing version', counters.version],
+        ['Missing supplier', counters.supplier],
+        ['Missing license', counters.license],
+        ['Missing purl', counters.purl],
+      ],
+      topMissing: topMissing.slice(0, 8),
+    };
+  }, [sbom]);
 
   const filtered = useMemo(() => {
     if (!sbom?.components) return [];
@@ -1851,6 +1925,9 @@ function SBOMPage() {
                     {uploadStatus}
                   </div>
                 )}
+                <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text2)', fontFamily:'var(--mono)' }}>
+                  Uploaded source runs local backend generation. GitHub/GitLab pipeline launch uses repository paths (Pipeline Control).
+                </div>
               </div>
             </div>
 
@@ -1909,6 +1986,54 @@ function SBOMPage() {
             <div className="stat-lbl">{s.l}</div>
           </div>
         ))}
+      </div>
+
+      <div className="grid-2">
+        <div className="card">
+          <div className="card-hd"><div className="card-title"><span className="card-icon">🛰️</span>SBOM Source</div></div>
+          <div className="card-body" style={{padding:'8px 16px'}}>
+            {[
+              ['Loaded From', sbomMeta?.source || 'unknown'],
+              ['Provider', sbomMeta?.provider || '-'],
+              ['Project', sbomMeta?.project || '-'],
+              ['Run / Pipeline', sbomMeta?.run_id || sbomMeta?.pipeline_id || '-'],
+              ['Artifact Entry', sbomMeta?.zip_entry || sbomMeta?.path || '-'],
+            ].map(([k,v]) => (
+              <div className="info-row" key={k}>
+                <span className="info-key">{k}</span>
+                <span className="info-val text-mono" style={{fontSize:11,color:'var(--gold)'}}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-hd"><div className="card-title"><span className="card-icon">🧪</span>Metadata Completeness Audit</div></div>
+          <div className="card-body" style={{padding:'8px 16px'}}>
+            <div className="info-row">
+              <span className="info-key">Missing Fields (All Components)</span>
+              <span className="info-val text-mono" style={{fontSize:11,color: metadataAudit.missingCount ? 'var(--amber)' : 'var(--green)'}}>
+                {metadataAudit.missingCount} / {metadataAudit.totalChecks}
+              </span>
+            </div>
+            {metadataAudit.byField.map(([k,v]) => (
+              <div className="info-row" key={k}>
+                <span className="info-key">{k}</span>
+                <span className="info-val text-mono" style={{fontSize:11,color: v ? 'var(--amber)' : 'var(--green)'}}>{v}</span>
+              </div>
+            ))}
+            {metadataAudit.topMissing.length > 0 && (
+              <div style={{marginTop:10}}>
+                {metadataAudit.topMissing.map((row, idx) => (
+                  <div key={`${row.name}-${idx}`} className="info-row">
+                    <span className="info-key">{row.name}</span>
+                    <span className="info-val text-mono" style={{fontSize:10,color:'var(--amber)'}}>{row.missing}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {history.length > 0 && (
@@ -2424,7 +2549,7 @@ function App() {
     switch(nav) {
       case 'dashboard': return <Dashboard config={config} onNav={onNav}/>;
       case 'pipelines': return <PipelinesPage config={config}/>;
-      case 'sbom': return <SBOMPage/>;
+      case 'sbom': return <SBOMPage config={config}/>;
       case 'vulns': return <VulnPage/>;
       case 'pki': return <PKIPage/>;
       default: return null;
