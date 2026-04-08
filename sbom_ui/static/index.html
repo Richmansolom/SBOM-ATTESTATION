@@ -1339,49 +1339,13 @@ function PipelinesPage({ config }) {
   const [polling, setPolling] = useState(false);
   const [ref, setRef] = useState('main');
   const [ver, setVer] = useState('1.0.0');
+  const [appDir, setAppDir] = useState('example-app');
   const [launching, setLaunching] = useState(false);
   const pollRef = useRef(null);
-  const prevStatusRef = useRef({});
-
-  function notifyPipelineFinished(p) {
-    const status = String(p?.status || '').toLowerCase();
-    const payload = {
-      id: p?.id,
-      status,
-      provider: config?.provider || 'github',
-      projectId: config?.projectId || '',
-      finishedAt: new Date().toISOString(),
-    };
-    try {
-      localStorage.setItem('sbom_last_pipeline_event', JSON.stringify(payload));
-    } catch {}
-    try {
-      window.dispatchEvent(new CustomEvent('sbom:pipeline-finished', { detail: payload }));
-    } catch {}
-    if (status === 'success') {
-      toast(`Pipeline #${p.id} completed. Refreshing SBOM/Components.`, 'ok');
-    } else if (status === 'failed' || status === 'canceled') {
-      toast(`Pipeline #${p.id} ended with status: ${status}`, 'warn');
-    }
-  }
 
   const load = useCallback(async () => {
     try {
       const d = await GL(config.token, config.projectId, config.provider, '/pipelines?per_page=15');
-      const nextMap = {};
-      d.forEach((p) => {
-        const id = String(p?.id ?? '');
-        if (!id) return;
-        const nextStatus = String(p?.status || '').toLowerCase();
-        const prevStatus = String(prevStatusRef.current[id] || '').toLowerCase();
-        nextMap[id] = nextStatus;
-        const finished = ['success', 'failed', 'canceled'].includes(nextStatus);
-        const wasActive = ['running', 'pending'].includes(prevStatus);
-        if (finished && wasActive && prevStatus !== nextStatus) {
-          notifyPipelineFinished(p);
-        }
-      });
-      prevStatusRef.current = nextMap;
       setPipelines(d);
       if (selected) {
         const u = d.find(p => p.id === selected.id);
@@ -1411,8 +1375,13 @@ function PipelinesPage({ config }) {
         method:'POST',
         body: JSON.stringify({
           ref,
+          app_dir: appDir,
+          app_version: ver,
           provider: config.provider,
-          variables:[{key:'APP_VERSION',value:ver,variable_type:'env_var'}]
+          variables:[
+            {key:'APP_DIR',value:appDir,variable_type:'env_var'},
+            {key:'APP_VERSION',value:ver,variable_type:'env_var'}
+          ]
         })
       });
       toast(`Pipeline #${p.id} launched`, 'ok');
@@ -1451,12 +1420,16 @@ function PipelinesPage({ config }) {
               <span className="field-label">App Version</span>
               <input value={ver} onChange={e => setVer(e.target.value)} placeholder="1.0.0"/>
             </div>
+            <div className="field">
+              <span className="field-label">Application Path (Repo)</span>
+              <input value={appDir} onChange={e => setAppDir(e.target.value)} placeholder="example-app"/>
+            </div>
             <button className="btn btn-gold" style={{height:38,justifyContent:'center'}} onClick={launch} disabled={launching}>
               {launching ? <><Spin/> Launching…</> : '▶ Launch'}
             </button>
           </div>
           <div style={{marginTop:10,fontSize:10,fontFamily:'var(--mono)',color:'var(--text3)'}}>
-            build:cpp → sbom:generate → sbom:sign → sbom:scan → report:publish
+            build:cpp → sbom:generate → sbom:sign → sbom:scan → report:publish (target path: {appDir || 'example-app'})
           </div>
         </div>
       </div>
@@ -1620,7 +1593,7 @@ function PipelineDetail({ config, pipeline }) {
   );
 }
 
-function SBOMPage() {
+function SBOMPage({ config }) {
   const [sbom, setSbom] = useState(null);
   const [projectZip, setProjectZip] = useState(null);
   const [projectFiles, setProjectFiles] = useState([]);
@@ -1634,7 +1607,6 @@ function SBOMPage() {
   const [loadingApi, setLoadingApi] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState('');
   const [history, setHistory] = useState([]);
-  const [dataSource, setDataSource] = useState('');
   const [sbomMeta, setSbomMeta] = useState(null);
   const [capabilities, setCapabilities] = useState({ can_generate: true, has_syft: false, has_docker: false, message: '' });
 
@@ -1678,8 +1650,6 @@ function SBOMPage() {
       try {
         const parsed = JSON.parse(e.target.result);
         setSbom(parsed);
-        setDataSource('upload');
-        setSbomMeta({ source: 'uploaded-file' });
         setErr('');
         const now = new Date().toISOString();
         setLastLoadedAt(now);
@@ -1700,7 +1670,9 @@ function SBOMPage() {
 
   function readConnectConfig() {
     try {
-      const raw = JSON.parse(sessionStorage.getItem('sbom_cfg') || '{}');
+      const raw = config && config !== 'prompt'
+        ? config
+        : JSON.parse(sessionStorage.getItem('sbom_cfg') || '{}');
       return {
         token: raw?.token || '',
         projectId: raw?.projectId || 'Richmansolom/SBOM-ATTESTATION',
@@ -1711,28 +1683,23 @@ function SBOMPage() {
     }
   }
 
-  async function loadFromApi(opts = {}) {
-    const { silentError = false, pipelineEvent = null } = opts;
+  async function loadFromApi() {
     setLoadingApi(true);
     try {
       const cfg = readConnectConfig();
-      const q = new URLSearchParams();
-      q.set('source', 'auto');
-      if (pipelineEvent?.id) {
-        if ((pipelineEvent.provider || cfg.provider) === 'gitlab') {
-          q.set('pipeline_id', String(pipelineEvent.id));
-        } else {
-          q.set('run_id', String(pipelineEvent.id));
+      const q = new URLSearchParams({
+        source: 'auto',
+        project: cfg.projectId,
+        provider: cfg.provider,
+      });
+      const r = await fetch(apiUrl(`/api/sbom/unified?${q.toString()}`), {
+        headers: {
+          ...(cfg.token ? { 'X-SBOM-TOKEN': cfg.token } : {}),
         }
-      }
-      const j = await GL(
-        cfg.token,
-        cfg.projectId,
-        cfg.provider,
-        `/sbom/unified?${q.toString()}`
-      );
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
       setSbom(j);
-      setDataSource('api');
       setSbomMeta(j?._meta || null);
       setErr('');
       const now = new Date().toISOString();
@@ -1745,9 +1712,7 @@ function SBOMPage() {
         components: j?.components?.length || 0,
       });
     } catch (e) {
-      if (!silentError) {
-        setErr(`No SBOM found yet: ${e.message}`);
-      }
+      setErr(`No SBOM available yet: ${e.message}`);
     } finally {
       setLoadingApi(false);
     }
@@ -1755,13 +1720,12 @@ function SBOMPage() {
 
   function resetViewer() {
     setSbom(null);
+    setSbomMeta(null);
     setErr('');
     setSearch('');
     setTypeF('All');
     setView('table');
     setLastLoadedAt('');
-    setDataSource('');
-    setSbomMeta(null);
   }
 
   async function handleUploadSource() {
@@ -1834,21 +1798,9 @@ function SBOMPage() {
         throw new Error(data.log || data.message || 'SBOM generation failed');
       }
 
-      setUploadStatus('SBOM generated. Running vulnerability scan/report...');
-      const scanRes = await fetch(apiUrl('/api/scan'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_path: uploadedSourcePath })
-      });
-      const scanData = await scanRes.json().catch(() => ({}));
-      if (!scanRes.ok || scanData.status !== 'ok') {
-        const msg = scanData.message || scanData.log || `HTTP ${scanRes.status}`;
-        throw new Error(`SBOM generated, but report scan failed: ${msg}`);
-      }
-
-      setUploadStatus('SBOM and vulnerability reports generated successfully. Loading viewer...');
+      setUploadStatus('SBOM generated successfully. Loading viewer...');
       await loadFromApi();
-      toast('SBOM + reports generated successfully', 'ok');
+      toast('SBOM generated successfully', 'ok');
     } catch (e) {
       setUploadStatus(`Generation failed: ${e.message}`);
       toast(`Generation failed: ${e.message}`, 'err');
@@ -1858,36 +1810,45 @@ function SBOMPage() {
   useEffect(() => {
     loadFromApi();
     loadCapabilities();
-  }, []);
-
-  useEffect(() => {
-    const onPipelineFinished = (event) => {
-      loadFromApi({ silentError: true, pipelineEvent: event?.detail || null });
-    };
-    const onStorage = (event) => {
-      if (event.key !== 'sbom_last_pipeline_event' || !event.newValue) return;
-      try {
-        const payload = JSON.parse(event.newValue);
-        loadFromApi({ silentError: true, pipelineEvent: payload });
-      } catch {}
-    };
-    window.addEventListener('sbom:pipeline-finished', onPipelineFinished);
-    window.addEventListener('storage', onStorage);
-    return () => {
-      window.removeEventListener('sbom:pipeline-finished', onPipelineFinished);
-      window.removeEventListener('storage', onStorage);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (dataSource === 'upload') return;
-    const id = setInterval(() => {
-      loadFromApi({ silentError: true });
-    }, 20000);
+    const id = setInterval(() => { loadFromApi(); }, 20000);
     return () => clearInterval(id);
-  }, [dataSource]);
+  }, [config?.projectId, config?.provider, config?.token]);
 
   const types = useMemo(() => sbom ? ['All', ...new Set(sbom.components?.map(c => c.type) || [])] : [], [sbom]);
+
+  const metadataAudit = useMemo(() => {
+    if (!sbom?.components?.length) return { missingCount: 0, totalChecks: 0, byField: [], topMissing: [] };
+    const counters = { version: 0, supplier: 0, license: 0, purl: 0 };
+    const topMissing = [];
+    let totalChecks = 0;
+    let missingCount = 0;
+    for (const c of sbom.components) {
+      const checks = [
+        ['version', !!String(c?.version || '').trim()],
+        ['supplier', !!String(c?.supplier?.name || '').trim()],
+        ['license', !!String(c?.licenses?.[0]?.license?.id || '').trim()],
+        ['purl', !!String(c?.purl || '').trim()],
+      ];
+      const missing = checks.filter(([, ok]) => !ok).map(([k]) => k);
+      totalChecks += checks.length;
+      missingCount += missing.length;
+      missing.forEach((m) => { counters[m] += 1; });
+      if (missing.length > 0) {
+        topMissing.push({ name: c?.name || '(unknown)', version: c?.version || '-', missing: missing.join(', ') });
+      }
+    }
+    return {
+      missingCount,
+      totalChecks,
+      byField: [
+        ['Missing version', counters.version],
+        ['Missing supplier', counters.supplier],
+        ['Missing license', counters.license],
+        ['Missing purl', counters.purl],
+      ],
+      topMissing: topMissing.slice(0, 8),
+    };
+  }, [sbom]);
 
   const filtered = useMemo(() => {
     if (!sbom?.components) return [];
@@ -1964,6 +1925,9 @@ function SBOMPage() {
                     {uploadStatus}
                   </div>
                 )}
+                <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text2)', fontFamily:'var(--mono)' }}>
+                  Uploaded source runs local backend generation. GitHub/GitLab pipeline launch uses repository paths (Pipeline Control).
+                </div>
               </div>
             </div>
 
@@ -1999,13 +1963,6 @@ function SBOMPage() {
         <div>
           <div className="page-title">SBOM Viewer</div>
           <div className="page-sub">{sbom.metadata?.component?.name || 'Holistic SBOM'}</div>
-          {sbomMeta?.source && (
-            <div className="mono text-muted" style={{fontSize:10,marginTop:4}}>
-              Source: {sbomMeta.source}
-              {sbomMeta.run_id ? ` · Run #${sbomMeta.run_id}` : ''}
-              {sbomMeta.pipeline_id ? ` · Pipeline #${sbomMeta.pipeline_id}` : ''}
-            </div>
-          )}
         </div>
         <div className="flex gap-6">
           <button className="btn btn-xs" onClick={loadFromApi} disabled={loadingApi}>
@@ -2029,6 +1986,54 @@ function SBOMPage() {
             <div className="stat-lbl">{s.l}</div>
           </div>
         ))}
+      </div>
+
+      <div className="grid-2">
+        <div className="card">
+          <div className="card-hd"><div className="card-title"><span className="card-icon">🛰️</span>SBOM Source</div></div>
+          <div className="card-body" style={{padding:'8px 16px'}}>
+            {[
+              ['Loaded From', sbomMeta?.source || 'unknown'],
+              ['Provider', sbomMeta?.provider || '-'],
+              ['Project', sbomMeta?.project || '-'],
+              ['Run / Pipeline', sbomMeta?.run_id || sbomMeta?.pipeline_id || '-'],
+              ['Artifact Entry', sbomMeta?.zip_entry || sbomMeta?.path || '-'],
+            ].map(([k,v]) => (
+              <div className="info-row" key={k}>
+                <span className="info-key">{k}</span>
+                <span className="info-val text-mono" style={{fontSize:11,color:'var(--gold)'}}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-hd"><div className="card-title"><span className="card-icon">🧪</span>Metadata Completeness Audit</div></div>
+          <div className="card-body" style={{padding:'8px 16px'}}>
+            <div className="info-row">
+              <span className="info-key">Missing Fields (All Components)</span>
+              <span className="info-val text-mono" style={{fontSize:11,color: metadataAudit.missingCount ? 'var(--amber)' : 'var(--green)'}}>
+                {metadataAudit.missingCount} / {metadataAudit.totalChecks}
+              </span>
+            </div>
+            {metadataAudit.byField.map(([k,v]) => (
+              <div className="info-row" key={k}>
+                <span className="info-key">{k}</span>
+                <span className="info-val text-mono" style={{fontSize:11,color: v ? 'var(--amber)' : 'var(--green)'}}>{v}</span>
+              </div>
+            ))}
+            {metadataAudit.topMissing.length > 0 && (
+              <div style={{marginTop:10}}>
+                {metadataAudit.topMissing.map((row, idx) => (
+                  <div key={`${row.name}-${idx}`} className="info-row">
+                    <span className="info-key">{row.name}</span>
+                    <span className="info-val text-mono" style={{fontSize:10,color:'var(--amber)'}}>{row.missing}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {history.length > 0 && (
@@ -2544,7 +2549,7 @@ function App() {
     switch(nav) {
       case 'dashboard': return <Dashboard config={config} onNav={onNav}/>;
       case 'pipelines': return <PipelinesPage config={config}/>;
-      case 'sbom': return <SBOMPage/>;
+      case 'sbom': return <SBOMPage config={config}/>;
       case 'vulns': return <VulnPage/>;
       case 'pki': return <PKIPage/>;
       default: return null;

@@ -1,6 +1,5 @@
 import json
 import io
-import base64
 import os
 import platform
 import re
@@ -12,7 +11,6 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
@@ -81,25 +79,6 @@ def run_cmd_stream(cmd, on_output=None):
             except Exception:
                 pass
     return proc.returncode, "".join(chunks)
-
-
-def _emit(log_callback, line):
-    if log_callback:
-        try:
-            log_callback(line if line.endswith("\n") else f"{line}\n")
-        except Exception:
-            pass
-
-
-def _is_usable_bash(path_value):
-    if not path_value:
-        return False
-    p = str(path_value).replace("/", "\\").lower()
-    # On Windows, System32 bash.exe is the WSL launcher and often fails
-    # for local script execution when WSL is not configured.
-    if os.name == "nt" and p.endswith("\\windows\\system32\\bash.exe"):
-        return False
-    return True
 
 
 def iso_duration_seconds(started_at, completed_at):
@@ -193,21 +172,13 @@ def extract_report_from_zip_bytes(zip_bytes, scanner):
 def extract_sbom_from_zip_bytes(zip_bytes):
     candidates = [
         "sbom/sbom-source.enriched.json",
+        "sbom-source.enriched.json",
         "sbom/sbom-build.enriched.json",
-        "sbom/sbom-image.enriched.json",
+        "sbom-build.enriched.json",
         "sbom/sbom-source.json",
-        "sbom-source.enriched.json",
-        "sbom-build.enriched.json",
-        "sbom-image.enriched.json",
         "sbom-source.json",
-        "holistic-sbom.json",
-    ]
-    fallback_suffixes = [
-        "sbom-source.enriched.json",
-        "sbom-build.enriched.json",
-        "sbom-image.enriched.json",
-        "sbom-source.json",
-        "holistic-sbom.json",
+        "sbom/sbom-build.json",
+        "sbom-build.json",
     ]
     try:
         with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
@@ -219,12 +190,11 @@ def extract_sbom_from_zip_bytes(zip_bytes):
                         payload = parse_json_bytes(zf.read(original))
                         if payload is not None:
                             return payload, original
+            # Fallback: any JSON in sbom folder that looks like final SBOM output.
             for lname, original in lowered.items():
-                if not lname.endswith(".json"):
-                    continue
-                if any(lname.endswith(sfx) for sfx in fallback_suffixes):
+                if "/sbom/" in f"/{lname}" and lname.endswith(".json"):
                     payload = parse_json_bytes(zf.read(original))
-                    if payload is not None:
+                    if payload is not None and isinstance(payload, dict) and payload.get("components") is not None:
                         return payload, original
     except Exception:
         return None, None
@@ -426,326 +396,6 @@ def get_generate_capabilities():
         "syft_source": syft_source,
         "message": msg,
     }
-def _scan_target_sbom_path():
-    candidates = [
-        SBOM_DIR / "sbom-source.enriched.unsigned.v16.json",
-        SBOM_DIR / "sbom-source.enriched.json",
-        SBOM_DIR / "sbom-source.json",
-        SBOM_DIR / "sbom-build.enriched.unsigned.v16.json",
-        SBOM_DIR / "sbom-build.enriched.json",
-    ]
-    for p in candidates:
-        if p.exists():
-            return p
-    return get_latest_sbom_path()
-
-
-def _build_vulnerability_analysis(grype_report, trivy_report):
-    def _inc(d, k):
-        d[k] = int(d.get(k, 0)) + 1
-
-    grype_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "negligible": 0, "unknown": 0}
-    grype_total = 0
-    for match in (grype_report or {}).get("matches", []) or []:
-        grype_total += 1
-        sev = str(((match.get("vulnerability") or {}).get("severity") or "unknown")).strip().lower()
-        if sev not in grype_counts:
-            sev = "unknown"
-        _inc(grype_counts, sev)
-
-    trivy_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0}
-    trivy_total = 0
-    for result in (trivy_report or {}).get("Results", []) or []:
-        for vuln in (result.get("Vulnerabilities") or []):
-            trivy_total += 1
-            sev = str(vuln.get("Severity") or "UNKNOWN").strip().lower()
-            if sev not in trivy_counts:
-                sev = "unknown"
-            _inc(trivy_counts, sev)
-
-    lines = [
-        "Vulnerability Analysis Summary",
-        "==============================",
-        f"Grype Total: {grype_total}",
-        f"Grype Critical: {grype_counts['critical']}",
-        f"Grype High: {grype_counts['high']}",
-        f"Grype Medium: {grype_counts['medium']}",
-        f"Grype Low: {grype_counts['low']}",
-        f"Grype Negligible: {grype_counts['negligible']}",
-        "",
-        "Secondary Scan (Trivy SBOM, NVD/GHSA/OSV sources)",
-        "==================================================",
-        f"Trivy Total: {trivy_total}",
-        f"Trivy Critical: {trivy_counts['critical']}",
-        f"Trivy High: {trivy_counts['high']}",
-        f"Trivy Medium: {trivy_counts['medium']}",
-        f"Trivy Low: {trivy_counts['low']}",
-        f"Trivy Unknown: {trivy_counts['unknown']}",
-    ]
-    return "\n".join(lines) + "\n"
-
-
-def run_scan_pipeline(log_callback=None):
-    ensure_dirs()
-    sbom_path = _scan_target_sbom_path()
-    if not sbom_path or not sbom_path.exists():
-        return {
-            "status": "error",
-            "message": "No SBOM found to scan. Generate SBOM first.",
-            "exit_code": 1,
-            "log": "Missing scan input in sbom/ directory.",
-        }
-
-    grype_json_path = REPORT_DIR / "grype-report.json"
-    trivy_json_path = REPORT_DIR / "trivy-sbom-report.json"
-    summary_path = REPORT_DIR / "vulnerability-analysis.txt"
-
-    logs = []
-
-    def _log(text):
-        line = text if text.endswith("\n") else f"{text}\n"
-        logs.append(line)
-        _emit(log_callback, line)
-
-    sbom_rel = os.path.relpath(str(sbom_path), str(REPO_ROOT)).replace("\\", "/")
-    docker_bin = shutil.which("docker")
-
-    grype_ok = False
-    trivy_ok = False
-
-    grype_bin = shutil.which("grype")
-    if grype_bin:
-        _log("==> Running Grype scan (local binary)")
-        code, out = run_cmd([grype_bin, f"sbom:{sbom_path}", "-o", "json"])
-        logs.append(out or "")
-        if code == 0:
-            payload = parse_json_text(out)
-            if payload is not None:
-                grype_json_path.write_text(json.dumps(payload), encoding="utf-8")
-                grype_ok = True
-            else:
-                _log("WARN: Grype output was not valid JSON")
-        else:
-            _log("WARN: Grype scan failed")
-    elif docker_bin:
-        _log("==> Running Grype scan (docker)")
-        code, out = run_cmd(
-            [
-                docker_bin,
-                "run",
-                "--rm",
-                "-v",
-                f"{REPO_ROOT}:/work",
-                "anchore/grype:latest",
-                f"sbom:/work/{sbom_rel}",
-                "-o",
-                "json",
-            ]
-        )
-        logs.append(out or "")
-        if code == 0:
-            payload = parse_json_text(out)
-            if payload is not None:
-                grype_json_path.write_text(json.dumps(payload), encoding="utf-8")
-                grype_ok = True
-            else:
-                _log("WARN: Grype docker output was not valid JSON")
-        else:
-            _log("WARN: Grype docker scan failed")
-    else:
-        _log("WARN: Grype unavailable (missing grype and docker)")
-
-    trivy_bin = shutil.which("trivy")
-    if trivy_bin:
-        _log("==> Running Trivy scan (local binary)")
-        code, out = run_cmd(
-            [
-                trivy_bin,
-                "sbom",
-                "--scanners",
-                "vuln",
-                "--vuln-severity-source",
-                "nvd,ghsa,osv",
-                "--format",
-                "json",
-                "--output",
-                str(trivy_json_path),
-                str(sbom_path),
-            ]
-        )
-        logs.append(out or "")
-        if code == 0 and trivy_json_path.exists():
-            trivy_ok = True
-        else:
-            _log("WARN: Trivy scan failed")
-    elif docker_bin:
-        _log("==> Running Trivy scan (docker)")
-        code, out = run_cmd(
-            [
-                docker_bin,
-                "run",
-                "--rm",
-                "-v",
-                f"{REPO_ROOT}:/work",
-                TRIVY_IMAGE,
-                "sbom",
-                "--scanners",
-                "vuln",
-                "--vuln-severity-source",
-                "nvd,ghsa,osv",
-                "--format",
-                "json",
-                "--output",
-                "/work/reports/trivy-sbom-report.json",
-                f"/work/{sbom_rel}",
-            ]
-        )
-        logs.append(out or "")
-        if code == 0 and trivy_json_path.exists():
-            trivy_ok = True
-        else:
-            _log("WARN: Trivy docker scan failed")
-    else:
-        _log("WARN: Trivy unavailable (missing trivy and docker)")
-
-    grype_report = parse_json(grype_json_path) if grype_json_path.exists() else None
-    trivy_report = parse_json(trivy_json_path) if trivy_json_path.exists() else None
-
-    if grype_report is None and trivy_report is None:
-        return {
-            "status": "error",
-            "message": "No vulnerability report was generated. Ensure grype/trivy or docker is installed.",
-            "exit_code": 1,
-            "log": "".join(logs),
-        }
-
-    summary_path.write_text(_build_vulnerability_analysis(grype_report, trivy_report), encoding="utf-8")
-    _log(f"==> Vulnerability summary written to {summary_path}")
-
-    return {
-        "status": "ok",
-        "message": "Vulnerability scan and report generation completed",
-        "exit_code": 0,
-        "log": "".join(logs),
-        "grype_ok": grype_ok,
-        "trivy_ok": trivy_ok,
-        "sbom": str(sbom_path.relative_to(REPO_ROOT)),
-        "reports": {
-            "grype": str(grype_json_path.relative_to(REPO_ROOT)) if grype_json_path.exists() else None,
-            "trivy": str(trivy_json_path.relative_to(REPO_ROOT)) if trivy_json_path.exists() else None,
-            "summary": str(summary_path.relative_to(REPO_ROOT)),
-        },
-    }
-
-
-def sign_sbom_without_bash(sbom_path, signed_sbom_path, pki_dir, log_callback=None):
-    """Windows-friendly signer fallback when bash is unavailable."""
-    ensure_dirs()
-    pki_dir.mkdir(parents=True, exist_ok=True)
-    priv_key = pki_dir / "sbom_private_key.pem"
-    pub_key = pki_dir / "sbom_public_key.pem"
-
-    openssl_bin = shutil.which("openssl")
-    if not openssl_bin:
-        return {
-            "status": "error",
-            "message": "OpenSSL is required for signing when bash is unavailable",
-            "exit_code": 1,
-            "log": "Missing dependency: openssl is not available on PATH.",
-        }
-
-    logs = []
-
-    def _log(line):
-        logs.append(line if line.endswith("\n") else f"{line}\n")
-        _emit(log_callback, line)
-
-    try:
-        if not priv_key.exists():
-            _log("==> Generating RSA 3072-bit key pair (CNSA 2.0)")
-            c1, o1 = run_cmd([openssl_bin, "genrsa", "-out", str(priv_key), "3072"])
-            logs.append(o1 or "")
-            if c1 != 0:
-                return {"status": "error", "message": "Key generation failed", "exit_code": c1, "log": "".join(logs)}
-            c2, o2 = run_cmd([openssl_bin, "rsa", "-in", str(priv_key), "-pubout", "-out", str(pub_key)])
-            logs.append(o2 or "")
-            if c2 != 0:
-                return {"status": "error", "message": "Public key extraction failed", "exit_code": c2, "log": "".join(logs)}
-
-        payload = parse_json(sbom_path)
-        if payload is None or not isinstance(payload, dict):
-            return {
-                "status": "error",
-                "message": "Input SBOM is not valid JSON",
-                "exit_code": 1,
-                "log": "".join(logs),
-            }
-
-        payload.pop("signature", None)
-        canonical_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-
-        with NamedTemporaryFile(delete=False) as can_tmp:
-            can_tmp.write(canonical_bytes)
-            canonical_path = can_tmp.name
-
-        with NamedTemporaryFile(delete=False) as sig_tmp:
-            sig_path = sig_tmp.name
-
-        c3, o3 = run_cmd([openssl_bin, "dgst", "-sha384", "-sign", str(priv_key), "-out", sig_path, canonical_path])
-        logs.append(o3 or "")
-        if c3 != 0:
-            try:
-                os.remove(canonical_path)
-            except Exception:
-                pass
-            try:
-                os.remove(sig_path)
-            except Exception:
-                pass
-            return {"status": "error", "message": "SBOM signing failed", "exit_code": c3, "log": "".join(logs)}
-
-        sig_b64 = base64.b64encode(Path(sig_path).read_bytes()).decode("ascii")
-
-        c4, o4 = run_cmd([openssl_bin, "rsa", "-pubin", "-in", str(pub_key), "-noout", "-modulus"])
-        logs.append(o4 or "")
-        if c4 != 0:
-            return {"status": "error", "message": "Failed to read public key modulus", "exit_code": c4, "log": "".join(logs)}
-
-        mod_hex = ""
-        for line in (o4 or "").splitlines():
-            if "Modulus=" in line:
-                mod_hex = line.split("Modulus=", 1)[1].strip()
-                break
-        mod_hex = re.sub(r"[^0-9A-Fa-f]", "", mod_hex)
-        if not mod_hex:
-            return {"status": "error", "message": "Invalid public key modulus", "exit_code": 1, "log": "".join(logs)}
-        if len(mod_hex) % 2 == 1:
-            mod_hex = "0" + mod_hex
-        n_b64url = base64.urlsafe_b64encode(bytes.fromhex(mod_hex)).decode("ascii").rstrip("=")
-
-        signed_payload = dict(payload)
-        signed_payload["signature"] = {
-            "algorithm": "RS384",
-            "publicKey": {"kty": "RSA", "n": n_b64url, "e": "AQAB"},
-            "value": sig_b64,
-        }
-        signed_sbom_path.write_text(json.dumps(signed_payload, separators=(",", ":"), sort_keys=True), encoding="utf-8")
-        _log(f"==> Signed SBOM written to {signed_sbom_path} (algorithm: RS384)")
-
-        c5, o5 = run_cmd([openssl_bin, "dgst", "-sha384", "-verify", str(pub_key), "-signature", sig_path, canonical_path])
-        logs.append(o5 or "")
-        if c5 != 0:
-            return {"status": "error", "message": "Signature verification failed", "exit_code": c5, "log": "".join(logs)}
-        _log("==> Signature verification passed")
-
-        return {"status": "ok", "exit_code": 0, "log": "".join(logs)}
-    finally:
-        for p in ("canonical_path", "sig_path"):
-            try:
-                if locals().get(p) and os.path.exists(locals()[p]):
-                    os.remove(locals()[p])
-            except Exception:
-                pass
 
 
 def normalize_path_for_script(path_value):
@@ -862,24 +512,18 @@ def run_generate_pipeline(body, log_callback=None):
             }
 
         # Sign SBOM
-        bash_bin = shutil.which("bash")
-        if _is_usable_bash(bash_bin):
-            sign_cmd = [
-                bash_bin,
-                str(REPO_ROOT / "scripts" / "sign-sbom.sh"),
-                str(sbom_path),
-                str(signed_sbom_path),
-                str(SBOM_DIR / "pki")
-            ]
+        sign_cmd = [
+            "bash",
+            str(REPO_ROOT / "scripts" / "sign-sbom.sh"),
+            str(sbom_path),
+            str(signed_sbom_path),
+            str(SBOM_DIR / "pki")
+        ]
 
-            if log_callback:
-                sign_code, sign_output = run_cmd_stream(sign_cmd, on_output=log_callback)
-            else:
-                sign_code, sign_output = run_cmd(sign_cmd)
+        if log_callback:
+            sign_code, sign_output = run_cmd_stream(sign_cmd, on_output=log_callback)
         else:
-            fallback = sign_sbom_without_bash(sbom_path, signed_sbom_path, SBOM_DIR / "pki", log_callback=log_callback)
-            sign_code = int(fallback.get("exit_code") or 1)
-            sign_output = fallback.get("log", "")
+            sign_code, sign_output = run_cmd(sign_cmd)
 
         if sign_code != 0:
             return {
@@ -1401,19 +1045,13 @@ def fetch_github_sbom_from_artifacts(repo, token="", run_id=None):
         runs_json = parse_json_text(out) or {}
         runs = runs_json.get("workflow_runs") or []
         for run in runs:
-            if (run.get("conclusion") or "").lower() == "success":
-                rid = run.get("id")
-                if rid:
-                    run_ids.append(int(rid))
-        if not run_ids:
-            for run in runs[:5]:
-                rid = run.get("id")
-                if rid:
-                    run_ids.append(int(rid))
+            rid = run.get("id")
+            if rid:
+                run_ids.append(int(rid))
     if not run_ids:
         return None, "No GitHub workflow runs found"
 
-    for rid in run_ids[:8]:
+    for rid in run_ids[:10]:
         status, out = github_rest_request(f"repos/{repo}/actions/runs/{rid}/artifacts?per_page=30", "GET", token)
         if status >= 300:
             continue
@@ -1445,7 +1083,7 @@ def fetch_gitlab_sbom_from_artifacts(project, token="", pipeline_id=None):
     if pipeline_id:
         pipeline_ids.append(int(pipeline_id))
     else:
-        status, out = gitlab_api(f"projects/{encoded_project}/pipelines?status=success&per_page=20", token=token)
+        status, out = gitlab_api(f"projects/{encoded_project}/pipelines?per_page=20", token=token)
         if status >= 300:
             return None, f"GitLab pipelines lookup failed ({status})"
         pipelines = parse_json_text(out) or []
@@ -1454,9 +1092,9 @@ def fetch_gitlab_sbom_from_artifacts(project, token="", pipeline_id=None):
             if pid:
                 pipeline_ids.append(int(pid))
     if not pipeline_ids:
-        return None, "No GitLab successful pipelines found"
+        return None, "No GitLab pipelines found"
 
-    for pid in pipeline_ids[:8]:
+    for pid in pipeline_ids[:10]:
         status, out = gitlab_api(f"projects/{encoded_project}/pipelines/{pid}/jobs?per_page=100", token=token)
         if status >= 300:
             continue
@@ -1880,23 +1518,17 @@ def sign():
         return jsonify({"status": "error", "log": "No enriched SBOM found to sign in sbom/"}), 400
 
     combined_log = []
-    bash_bin = shutil.which("bash")
 
     for sbom_file in targets:
         signed_tmp = sbom_file.with_suffix(".signed.json")
-        if _is_usable_bash(bash_bin):
-            cmd = [
-                bash_bin,
-                str(sign_script),
-                str(sbom_file),
-                str(signed_tmp),
-                str(pki_dir),
-            ]
-            code, output = run_cmd(cmd)
-        else:
-            fallback = sign_sbom_without_bash(sbom_file, signed_tmp, pki_dir)
-            code = int(fallback.get("exit_code") or 1)
-            output = fallback.get("log", "")
+        cmd = [
+            "bash",
+            str(sign_script),
+            str(sbom_file),
+            str(signed_tmp),
+            str(pki_dir),
+        ]
+        code, output = run_cmd(cmd)
         combined_log.append(output)
 
         if code != 0:
@@ -1918,8 +1550,10 @@ def sign():
 
 @app.route("/api/scan", methods=["POST"])
 def scan():
-    result = run_scan_pipeline()
-    return jsonify(result), (200 if result.get("status") == "ok" else 500)
+    # lots of docker code
+    # lots of grype stuff
+    # lots of trivy stuff
+    return jsonify(...)
 
 @app.route("/api/something_else")   
 def something_else():
@@ -1942,71 +1576,78 @@ def get_unified_sbom():
     run_id = (request.args.get("run_id") or "").strip()
     pipeline_id = (request.args.get("pipeline_id") or "").strip()
 
-    if source in ("auto", "local"):
-        local_path = get_latest_sbom_path()
-        if local_path and local_path.exists():
-            payload = parse_json(local_path)
-            if payload is not None:
+    local_path = get_latest_sbom_path()
+
+    # Auto mode prefers CI artifacts when a project/provider is connected, then falls back local.
+    if source in ("auto", "ci"):
+        if provider == "gitlab":
+            ci_token = token or os.getenv("GITLAB_TOKEN", "").strip()
+            ci_result, ci_error = fetch_gitlab_sbom_from_artifacts(
+                project=repo,
+                token=ci_token,
+                pipeline_id=pipeline_id or None,
+            )
+            if ci_result and ci_result.get("payload") is not None:
                 return jsonify(
                     with_report_meta(
-                        payload,
+                        ci_result["payload"],
                         {
-                            "source": "local",
-                            "path": str(local_path.relative_to(REPO_ROOT)),
+                            "source": "gitlab-artifact",
+                            "provider": "gitlab",
+                            "project": repo,
+                            "pipeline_id": ci_result.get("pipeline_id"),
+                            "job_id": ci_result.get("job_id"),
+                            "job_name": ci_result.get("job_name"),
+                            "zip_entry": ci_result.get("zip_entry"),
                         },
                     )
                 )
-            if source == "local":
-                return jsonify({"status": "error", "message": "Local SBOM exists but is not valid JSON"}), 500
-        elif source == "local":
-            return jsonify({"status": "error", "message": "No local SBOM found"}), 404
+            if source == "ci":
+                return jsonify({"status": "error", "message": ci_error or "No CI SBOM found"}), 404
+        else:
+            ci_token = token or os.getenv("GITHUB_TOKEN", "").strip()
+            ci_result, ci_error = fetch_github_sbom_from_artifacts(
+                repo=repo,
+                token=ci_token,
+                run_id=run_id or None,
+            )
+            if ci_result and ci_result.get("payload") is not None:
+                return jsonify(
+                    with_report_meta(
+                        ci_result["payload"],
+                        {
+                            "source": "github-artifact",
+                            "provider": "github",
+                            "project": repo,
+                            "run_id": ci_result.get("run_id"),
+                            "artifact_name": ci_result.get("artifact_name"),
+                            "zip_entry": ci_result.get("zip_entry"),
+                        },
+                    )
+                )
+            if source == "ci":
+                return jsonify({"status": "error", "message": ci_error or "No CI SBOM found"}), 404
 
-    if source not in ("auto", "ci"):
+    if source not in ("auto", "local", "ci"):
         return jsonify({"status": "error", "message": "source must be 'auto', 'local', or 'ci'"}), 400
 
-    if provider == "gitlab":
-        ci_token = token or os.getenv("GITLAB_TOKEN", "").strip()
-        ci_result, ci_error = fetch_gitlab_sbom_from_artifacts(
-            project=repo,
-            token=ci_token,
-            pipeline_id=pipeline_id or None,
-        )
-        if ci_result and ci_result.get("payload") is not None:
+    if local_path and local_path.exists():
+        payload = parse_json(local_path)
+        if payload is not None:
             return jsonify(
                 with_report_meta(
-                    ci_result["payload"],
+                    payload,
                     {
-                        "source": "gitlab-artifact",
+                        "source": "local",
+                        "provider": provider,
                         "project": repo,
-                        "pipeline_id": ci_result.get("pipeline_id"),
-                        "job_id": ci_result.get("job_id"),
-                        "job_name": ci_result.get("job_name"),
-                        "zip_entry": ci_result.get("zip_entry"),
+                        "path": str(local_path.relative_to(REPO_ROOT)),
                     },
                 )
             )
-        return jsonify({"status": "error", "message": ci_error or "No CI SBOM found"}), 404
+        return jsonify({"status": "error", "message": "Local SBOM exists but is not valid JSON"}), 500
 
-    ci_token = token or os.getenv("GITHUB_TOKEN", "").strip()
-    ci_result, ci_error = fetch_github_sbom_from_artifacts(
-        repo=repo,
-        token=ci_token,
-        run_id=run_id or None,
-    )
-    if ci_result and ci_result.get("payload") is not None:
-        return jsonify(
-            with_report_meta(
-                ci_result["payload"],
-                {
-                    "source": "github-artifact",
-                    "project": repo,
-                    "run_id": ci_result.get("run_id"),
-                    "artifact_name": ci_result.get("artifact_name"),
-                    "zip_entry": ci_result.get("zip_entry"),
-                },
-            )
-        )
-    return jsonify({"status": "error", "message": ci_error or "No CI SBOM found"}), 404
+    return jsonify({"status": "error", "message": "No SBOM found in CI artifacts or local workspace"}), 404
 
 
 @app.route("/api/report")
@@ -2276,18 +1917,47 @@ def trigger_pipeline():
     ref = body.get("ref") or "main"
     workflow = body.get("workflow") or "sbom-pipeline.yml"
     token = get_requested_token() or os.getenv("GITLAB_TOKEN", "")
+    variables = body.get("variables") or []
+    var_map = {}
+    if isinstance(variables, list):
+        for item in variables:
+            if not isinstance(item, dict):
+                continue
+            k = str(item.get("key") or "").strip()
+            v = str(item.get("value") or "").strip()
+            if k:
+                var_map[k] = v
+    app_dir = str(body.get("app_dir") or var_map.get("APP_DIR") or "example-app").strip() or "example-app"
+    app_version = str(body.get("app_version") or var_map.get("APP_VERSION") or "1.0.0").strip() or "1.0.0"
 
     if provider == "gitlab":
         encoded_project = quote(repo, safe="")
         trigger_token = str(body.get("trigger_token") or "").strip() or os.getenv("GITLAB_TRIGGER_TOKEN", "")
         if trigger_token:
-            query = urlencode({"token": trigger_token, "ref": str(ref)})
+            query = urlencode(
+                {
+                    "token": trigger_token,
+                    "ref": str(ref),
+                    "variables[APP_DIR]": app_dir,
+                    "variables[APP_VERSION]": app_version,
+                }
+            )
             status, out = gitlab_api(f"projects/{encoded_project}/trigger/pipeline?{query}", method="POST")
         else:
             if not token:
                 return jsonify({"message": "GitLab token required to trigger pipeline. Set GITLAB_TOKEN or provide token in Connect."}), 400
-            query = urlencode({"ref": str(ref)})
-            status, out = gitlab_api(f"projects/{encoded_project}/pipeline?{query}", method="POST", token=token)
+            status, out = gitlab_api(
+                f"projects/{encoded_project}/pipeline",
+                method="POST",
+                token=token,
+                data={
+                    "ref": str(ref),
+                    "variables": [
+                        {"key": "APP_DIR", "value": app_dir},
+                        {"key": "APP_VERSION", "value": app_version},
+                    ],
+                },
+            )
         if status >= 300:
             return jsonify({"message": out.strip() or "Failed to trigger GitLab pipeline"}), 500
         try:
@@ -2309,7 +1979,18 @@ def trigger_pipeline():
 
     if token:
         dispatch_path = f"repos/{repo}/actions/workflows/{wf_enc}/dispatches"
-        code, body = github_rest_request(dispatch_path, "POST", token, json_body={"ref": ref_full})
+        code, body = github_rest_request(
+            dispatch_path,
+            "POST",
+            token,
+            json_body={
+                "ref": ref_full,
+                "inputs": {
+                    "app_dir": app_dir,
+                    "app_version": app_version,
+                },
+            },
+        )
         if code not in (200, 201, 204):
             msg = body
             try:

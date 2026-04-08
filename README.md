@@ -47,7 +47,7 @@ sbom-attestation/
 |-- check-ntia.ps1                       # NTIA minimum-elements check
 |-- .github/workflows/sbom-pipeline.yml  # GitHub Actions pipeline
 |-- .gitlab-ci.yml                       # GitLab CI pipeline
-|-- start-ui-local.ps1                   # Local UI starter on port 80
+|-- start-ui-local.ps1                   # Local UI starter (auto-selects open port)
 `-- README.md
 ```
 
@@ -136,59 +136,44 @@ After a successful run, confirm these key files exist:
 
 ## Mission Control UI
 
-Run locally:
+### Run locally (recommended for development)
+
+Start the UI backend with automatic open-port selection:
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File .\start-ui-local.ps1
+```
+
+Or run directly:
 
 ```powershell
 python .\sbom_ui\app.py
 ```
 
-Open:
+The starter script prints the exact URL (for example `http://127.0.0.1:5000/`).
 
-- `http://127.0.0.1:5000`
+Current local UI capabilities:
 
-Optional local vanity URL:
+- Connect modal supports `github` and `gitlab` providers
+- Pipeline launch/monitor with stage strip (`Build -> Generate -> Sign -> Scan -> Report`)
+- Live job log retrieval (`/api/jobs/<job_id>/trace`) with periodic refresh while running
+- SBOM Viewer supports file upload, latest local fetch (`/api/sbom`), and source upload + generate flow
+- Vulnerability Viewer supports unified report loading from local files or CI artifacts (`/api/report/unified`)
+- DB freshness panel consumes `/api/db-status`
 
-1. Add to hosts file as Administrator:
-   - `127.0.0.1 www.sbomcontrol.com`
-2. Start UI on port 80:
-   - `pwsh -ExecutionPolicy Bypass -File .\start-ui-local.ps1`
-3. Open:
-   - `http://www.sbomcontrol.com`
+### Hosted frontend/API mode
 
-Important:
+This repo supports hosted operation with:
 
-- The hosts-file mapping (`127.0.0.1 www.sbomcontrol.com`) is local-only and points the domain to your own machine.
-- If you want public access, remove that hosts-file entry or use your GitHub Pages URL/custom domain DNS setup.
-- Leaving that entry in place can cause `ERR_CONNECTION_REFUSED` when no local server is running.
+- Frontend: `sbom_ui/static` published by `.github/workflows/pages-ui.yml`
+- API backend: `sbom_ui/app.py` deployed from `render.yaml`
 
-### Public Access Quick Start (No Dependence on Your PC)
+Hosted behavior currently implemented:
 
-To make the UI reachable by anyone, deploy frontend and backend separately:
-
-1. Deploy API backend (`sbom_ui/app.py`) to Render:
-   - Use this repo's `render.yaml`
-   - Service URL will look like: `https://sbom-control-api.onrender.com`
-2. Deploy frontend (`sbom_ui/static`) to GitHub Pages:
-   - This repo includes `.github/workflows/pages-ui.yml`
-   - Enable Pages with GitHub Actions in repo settings
-3. Open/share your Pages URL:
-   - `https://<user>.github.io/<repo>/`
-   - Example for this repo: `https://richmansolom.github.io/SBOM-ATTESTATION/`
-
-Current UI behavior:
-
-- On GitHub Pages, the frontend now auto-targets `https://sbom-control-api.onrender.com` by default.
-- If you use a different backend URL, override once using:
-  - `https://<user>.github.io/<repo>/?api=https://your-api-host`
-- The override is saved in browser localStorage (`sbom_api_base`) for future loads.
-- You can also set/update the API base URL directly in the UI Connect modal (`API Base URL` field).
-
-Detailed steps: see `FREE_HOSTING_SETUP.md`.
-
-Note:
-
-- Custom domains (for example `www.sbomcontrol.com`) require owning that domain and configuring DNS records at the domain registrar/DNS host.
-- Flask/local scripts cannot create a public DNS domain by themselves.
+- GitHub Pages defaults API base to `https://sbom-control-api.onrender.com`
+- You can override API base once via `?api=https://your-api-host`
+- Override is stored in browser localStorage (`sbom_api_base`)
+- `?reset_api=1` clears saved API base and reloads default resolution
 
 ### UI Provider Modes (GitHub + GitLab)
 
@@ -315,13 +300,6 @@ Use this checklist before accepting a run:
 - Grype and Trivy reports generated
 - DB status files generated and fresh
 - Artifacts uploaded and downloadable
-
-## Free Hosting (Optional)
-
-- Frontend: GitHub Pages (`sbom_ui/static`)
-- Backend API: Render (`sbom_ui/app.py`)
-
-See `FREE_HOSTING_SETUP.md` for deployment wiring using `?api=https://...`.
 
 ## Security Notes
 
