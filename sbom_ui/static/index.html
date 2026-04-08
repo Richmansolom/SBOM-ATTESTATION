@@ -1342,11 +1342,19 @@ function PipelinesPage({ config }) {
   const [appDir, setAppDir] = useState('example-app');
   const [launching, setLaunching] = useState(false);
   const pollRef = useRef(null);
+  const lastAnnouncedSuccessRef = useRef(null);
 
   const load = useCallback(async () => {
     try {
       const d = await GL(config.token, config.projectId, config.provider, '/pipelines?per_page=15');
       setPipelines(d);
+      const latest = d?.[0];
+      if (latest && String(latest.status || '').toLowerCase() === 'success' && lastAnnouncedSuccessRef.current !== latest.id) {
+        lastAnnouncedSuccessRef.current = latest.id;
+        const payload = { id: latest.id, provider: config.provider, projectId: config.projectId, at: Date.now() };
+        try { sessionStorage.setItem('sbom_last_pipeline_event', JSON.stringify(payload)); } catch {}
+        window.dispatchEvent(new CustomEvent('sbom:pipeline-finished', { detail: payload }));
+      }
       if (selected) {
         const u = d.find(p => p.id === selected.id);
         if (u) setSelected(u);
@@ -1607,6 +1615,7 @@ function SBOMPage({ config }) {
   const [loadingApi, setLoadingApi] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState('');
   const [history, setHistory] = useState([]);
+  const [dataSource, setDataSource] = useState('');
   const [sbomMeta, setSbomMeta] = useState(null);
   const [capabilities, setCapabilities] = useState({ can_generate: true, has_syft: false, has_docker: false, message: '' });
 
@@ -1650,6 +1659,8 @@ function SBOMPage({ config }) {
       try {
         const parsed = JSON.parse(e.target.result);
         setSbom(parsed);
+        setDataSource('upload');
+        setSbomMeta({ source: 'uploaded-file' });
         setErr('');
         const now = new Date().toISOString();
         setLastLoadedAt(now);
@@ -1683,23 +1694,25 @@ function SBOMPage({ config }) {
     }
   }
 
-  async function loadFromApi() {
+  async function loadFromApi(opts = {}) {
+    const { source = 'auto', silentError = false, pipelineEvent = null } = opts;
     setLoadingApi(true);
     try {
       const cfg = readConnectConfig();
-      const q = new URLSearchParams({
-        source: 'auto',
-        project: cfg.projectId,
-        provider: cfg.provider,
-      });
-      const r = await fetch(apiUrl(`/api/sbom/unified?${q.toString()}`), {
-        headers: {
-          ...(cfg.token ? { 'X-SBOM-TOKEN': cfg.token } : {}),
-        }
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
+      const q = new URLSearchParams();
+      q.set('source', source);
+      if (pipelineEvent?.id) {
+        if ((pipelineEvent.provider || cfg.provider) === 'gitlab') q.set('pipeline_id', String(pipelineEvent.id));
+        else q.set('run_id', String(pipelineEvent.id));
+      }
+      const j = await GL(
+        cfg.token,
+        cfg.projectId,
+        cfg.provider,
+        `/sbom/unified?${q.toString()}`
+      );
       setSbom(j);
+      setDataSource(source === 'local' ? 'local' : 'api');
       setSbomMeta(j?._meta || null);
       setErr('');
       const now = new Date().toISOString();
@@ -1712,7 +1725,7 @@ function SBOMPage({ config }) {
         components: j?.components?.length || 0,
       });
     } catch (e) {
-      setErr(`No SBOM available yet: ${e.message}`);
+      if (!silentError) setErr(`No SBOM available yet: ${e.message}`);
     } finally {
       setLoadingApi(false);
     }
@@ -1720,6 +1733,7 @@ function SBOMPage({ config }) {
 
   function resetViewer() {
     setSbom(null);
+    setDataSource('');
     setSbomMeta(null);
     setErr('');
     setSearch('');
@@ -1798,9 +1812,11 @@ function SBOMPage({ config }) {
         throw new Error(data.log || data.message || 'SBOM generation failed');
       }
 
-      setUploadStatus('SBOM generated successfully. Loading viewer...');
-      await loadFromApi();
-      toast('SBOM generated successfully', 'ok');
+      setUploadStatus('SBOM and reports generated successfully. Loading viewer...');
+      await loadFromApi({ source: 'local' });
+      try { sessionStorage.setItem('sbom_local_scan_done', String(Date.now())); } catch {}
+      window.dispatchEvent(new Event('sbom:local-scan-done'));
+      toast('SBOM + vulnerability reports ready', 'ok');
     } catch (e) {
       setUploadStatus(`Generation failed: ${e.message}`);
       toast(`Generation failed: ${e.message}`, 'err');
@@ -1808,11 +1824,36 @@ function SBOMPage({ config }) {
   }
 
   useEffect(() => {
-    loadFromApi();
+    loadFromApi({ source: 'auto' });
     loadCapabilities();
-    const id = setInterval(() => { loadFromApi(); }, 20000);
-    return () => clearInterval(id);
   }, [config?.projectId, config?.provider, config?.token]);
+
+  useEffect(() => {
+    const onPipelineFinished = (event) => {
+      loadFromApi({ silentError: true, source: 'ci', pipelineEvent: event?.detail || null });
+    };
+    const onStorage = (event) => {
+      if (event.key !== 'sbom_last_pipeline_event' || !event.newValue) return;
+      try {
+        const payload = JSON.parse(event.newValue);
+        loadFromApi({ silentError: true, source: 'ci', pipelineEvent: payload });
+      } catch {}
+    };
+    window.addEventListener('sbom:pipeline-finished', onPipelineFinished);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('sbom:pipeline-finished', onPipelineFinished);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [config?.projectId, config?.provider, config?.token]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const source = (dataSource === 'upload' || dataSource === 'local') ? 'local' : 'auto';
+      loadFromApi({ silentError: true, source });
+    }, 20000);
+    return () => clearInterval(id);
+  }, [dataSource, config?.projectId, config?.provider, config?.token]);
 
   const types = useMemo(() => sbom ? ['All', ...new Set(sbom.components?.map(c => c.type) || [])] : [], [sbom]);
 
@@ -2188,6 +2229,16 @@ function VulnPage() {
     })();
     return () => { alive = false; };
   }, []);
+
+  useEffect(() => {
+    const reload = () => { loadFromApi(scanner, { silentError: true }); };
+    window.addEventListener('sbom:local-scan-done', reload);
+    window.addEventListener('sbom:pipeline-finished', reload);
+    return () => {
+      window.removeEventListener('sbom:local-scan-done', reload);
+      window.removeEventListener('sbom:pipeline-finished', reload);
+    };
+  }, [scanner]);
 
   useEffect(() => {
     const id = setInterval(() => {
