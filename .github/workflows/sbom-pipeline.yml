@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      app_dir:
+        description: "Application directory inside repo"
+        required: false
+        default: "example-app"
+      app_version:
+        description: "Optional application version label"
+        required: false
+        default: "1.0.0"
 
 jobs:
   build_sbom_scan:
@@ -14,7 +23,8 @@ jobs:
       SBOM_DIR: sbom
       REPORT_DIR: reports
       BUILD_LOG: build-output.log
-      APP_DIR: example-app
+      APP_DIR: ${{ github.event.inputs.app_dir || 'example-app' }}
+      APP_VERSION: ${{ github.event.inputs.app_version || '1.0.0' }}
       TRIVY_IMAGE: aquasec/trivy:0.69.3
       SBOM_PRIVATE_KEY_PEM: ${{ secrets.SBOM_PRIVATE_KEY_PEM }}
 

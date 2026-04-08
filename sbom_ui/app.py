@@ -169,6 +169,38 @@ def extract_report_from_zip_bytes(zip_bytes, scanner):
     return None, None
 
 
+def extract_sbom_from_zip_bytes(zip_bytes):
+    candidates = [
+        "sbom/sbom-source.enriched.json",
+        "sbom-source.enriched.json",
+        "sbom/sbom-build.enriched.json",
+        "sbom-build.enriched.json",
+        "sbom/sbom-source.json",
+        "sbom-source.json",
+        "sbom/sbom-build.json",
+        "sbom-build.json",
+    ]
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+            names = zf.namelist()
+            lowered = {n.lower(): n for n in names}
+            for want in candidates:
+                for lname, original in lowered.items():
+                    if lname.endswith(want.lower()):
+                        payload = parse_json_bytes(zf.read(original))
+                        if payload is not None:
+                            return payload, original
+            # Fallback: any JSON in sbom folder that looks like final SBOM output.
+            for lname, original in lowered.items():
+                if "/sbom/" in f"/{lname}" and lname.endswith(".json"):
+                    payload = parse_json_bytes(zf.read(original))
+                    if payload is not None and isinstance(payload, dict) and payload.get("components") is not None:
+                        return payload, original
+    except Exception:
+        return None, None
+    return None, None
+
+
 def with_report_meta(payload, meta):
     if isinstance(payload, dict):
         out = dict(payload)
@@ -1002,6 +1034,93 @@ def fetch_gitlab_report_from_artifacts(project, scanner, token="", pipeline_id=N
     return None, "No matching vulnerability report found in GitLab artifacts"
 
 
+def fetch_github_sbom_from_artifacts(repo, token="", run_id=None):
+    run_ids = []
+    if run_id:
+        run_ids.append(int(run_id))
+    else:
+        status, out = github_rest_request(f"repos/{repo}/actions/runs?per_page=20", "GET", token)
+        if status >= 300:
+            return None, f"GitHub runs lookup failed ({status})"
+        runs_json = parse_json_text(out) or {}
+        runs = runs_json.get("workflow_runs") or []
+        for run in runs:
+            rid = run.get("id")
+            if rid:
+                run_ids.append(int(rid))
+    if not run_ids:
+        return None, "No GitHub workflow runs found"
+
+    for rid in run_ids[:10]:
+        status, out = github_rest_request(f"repos/{repo}/actions/runs/{rid}/artifacts?per_page=30", "GET", token)
+        if status >= 300:
+            continue
+        payload = parse_json_text(out) or {}
+        artifacts = payload.get("artifacts") or []
+        for artifact in artifacts:
+            if artifact.get("expired"):
+                continue
+            archive_url = artifact.get("archive_download_url")
+            if not archive_url:
+                continue
+            a_status, raw_zip = github_download_bytes(archive_url, token=token)
+            if a_status >= 300:
+                continue
+            sbom_payload, entry = extract_sbom_from_zip_bytes(raw_zip)
+            if sbom_payload is not None:
+                return {
+                    "payload": sbom_payload,
+                    "run_id": rid,
+                    "artifact_name": artifact.get("name") or "",
+                    "zip_entry": entry or "",
+                }, None
+    return None, "No SBOM JSON found in GitHub artifacts"
+
+
+def fetch_gitlab_sbom_from_artifacts(project, token="", pipeline_id=None):
+    encoded_project = quote(project, safe="")
+    pipeline_ids = []
+    if pipeline_id:
+        pipeline_ids.append(int(pipeline_id))
+    else:
+        status, out = gitlab_api(f"projects/{encoded_project}/pipelines?per_page=20", token=token)
+        if status >= 300:
+            return None, f"GitLab pipelines lookup failed ({status})"
+        pipelines = parse_json_text(out) or []
+        for p in pipelines:
+            pid = p.get("id")
+            if pid:
+                pipeline_ids.append(int(pid))
+    if not pipeline_ids:
+        return None, "No GitLab pipelines found"
+
+    for pid in pipeline_ids[:10]:
+        status, out = gitlab_api(f"projects/{encoded_project}/pipelines/{pid}/jobs?per_page=100", token=token)
+        if status >= 300:
+            continue
+        jobs = parse_json_text(out) or []
+        for job in jobs:
+            artifacts_file = (job.get("artifacts_file") or {}).get("filename")
+            if not artifacts_file:
+                continue
+            jid = job.get("id")
+            if not jid:
+                continue
+            z_status, raw_zip = gitlab_api_binary(f"projects/{encoded_project}/jobs/{jid}/artifacts", token=token)
+            if z_status >= 300:
+                continue
+            sbom_payload, entry = extract_sbom_from_zip_bytes(raw_zip)
+            if sbom_payload is not None:
+                return {
+                    "payload": sbom_payload,
+                    "pipeline_id": pid,
+                    "job_id": jid,
+                    "job_name": job.get("name") or "",
+                    "zip_entry": entry or "",
+                }, None
+    return None, "No SBOM JSON found in GitLab artifacts"
+
+
 def get_stage_status_from_steps(steps):
     stage_state = {s: "pending" for s in STAGE_NAMES}
     for step in steps or []:
@@ -1448,6 +1567,89 @@ def get_sbom():
     return send_from_directory(str(path.parent), path.name, mimetype="application/json")
 
 
+@app.route("/api/sbom/unified")
+def get_unified_sbom():
+    source = (request.args.get("source") or "auto").strip().lower()
+    provider = get_requested_provider()
+    repo = get_requested_repo()
+    token = get_requested_token()
+    run_id = (request.args.get("run_id") or "").strip()
+    pipeline_id = (request.args.get("pipeline_id") or "").strip()
+
+    local_path = get_latest_sbom_path()
+
+    # Auto mode prefers CI artifacts when a project/provider is connected, then falls back local.
+    if source in ("auto", "ci"):
+        if provider == "gitlab":
+            ci_token = token or os.getenv("GITLAB_TOKEN", "").strip()
+            ci_result, ci_error = fetch_gitlab_sbom_from_artifacts(
+                project=repo,
+                token=ci_token,
+                pipeline_id=pipeline_id or None,
+            )
+            if ci_result and ci_result.get("payload") is not None:
+                return jsonify(
+                    with_report_meta(
+                        ci_result["payload"],
+                        {
+                            "source": "gitlab-artifact",
+                            "provider": "gitlab",
+                            "project": repo,
+                            "pipeline_id": ci_result.get("pipeline_id"),
+                            "job_id": ci_result.get("job_id"),
+                            "job_name": ci_result.get("job_name"),
+                            "zip_entry": ci_result.get("zip_entry"),
+                        },
+                    )
+                )
+            if source == "ci":
+                return jsonify({"status": "error", "message": ci_error or "No CI SBOM found"}), 404
+        else:
+            ci_token = token or os.getenv("GITHUB_TOKEN", "").strip()
+            ci_result, ci_error = fetch_github_sbom_from_artifacts(
+                repo=repo,
+                token=ci_token,
+                run_id=run_id or None,
+            )
+            if ci_result and ci_result.get("payload") is not None:
+                return jsonify(
+                    with_report_meta(
+                        ci_result["payload"],
+                        {
+                            "source": "github-artifact",
+                            "provider": "github",
+                            "project": repo,
+                            "run_id": ci_result.get("run_id"),
+                            "artifact_name": ci_result.get("artifact_name"),
+                            "zip_entry": ci_result.get("zip_entry"),
+                        },
+                    )
+                )
+            if source == "ci":
+                return jsonify({"status": "error", "message": ci_error or "No CI SBOM found"}), 404
+
+    if source not in ("auto", "local", "ci"):
+        return jsonify({"status": "error", "message": "source must be 'auto', 'local', or 'ci'"}), 400
+
+    if local_path and local_path.exists():
+        payload = parse_json(local_path)
+        if payload is not None:
+            return jsonify(
+                with_report_meta(
+                    payload,
+                    {
+                        "source": "local",
+                        "provider": provider,
+                        "project": repo,
+                        "path": str(local_path.relative_to(REPO_ROOT)),
+                    },
+                )
+            )
+        return jsonify({"status": "error", "message": "Local SBOM exists but is not valid JSON"}), 500
+
+    return jsonify({"status": "error", "message": "No SBOM found in CI artifacts or local workspace"}), 404
+
+
 @app.route("/api/report")
 def get_report():
     scanner = (request.args.get("scanner") or "grype").strip().lower()
@@ -1715,18 +1917,47 @@ def trigger_pipeline():
     ref = body.get("ref") or "main"
     workflow = body.get("workflow") or "sbom-pipeline.yml"
     token = get_requested_token() or os.getenv("GITLAB_TOKEN", "")
+    variables = body.get("variables") or []
+    var_map = {}
+    if isinstance(variables, list):
+        for item in variables:
+            if not isinstance(item, dict):
+                continue
+            k = str(item.get("key") or "").strip()
+            v = str(item.get("value") or "").strip()
+            if k:
+                var_map[k] = v
+    app_dir = str(body.get("app_dir") or var_map.get("APP_DIR") or "example-app").strip() or "example-app"
+    app_version = str(body.get("app_version") or var_map.get("APP_VERSION") or "1.0.0").strip() or "1.0.0"
 
     if provider == "gitlab":
         encoded_project = quote(repo, safe="")
         trigger_token = str(body.get("trigger_token") or "").strip() or os.getenv("GITLAB_TRIGGER_TOKEN", "")
         if trigger_token:
-            query = urlencode({"token": trigger_token, "ref": str(ref)})
+            query = urlencode(
+                {
+                    "token": trigger_token,
+                    "ref": str(ref),
+                    "variables[APP_DIR]": app_dir,
+                    "variables[APP_VERSION]": app_version,
+                }
+            )
             status, out = gitlab_api(f"projects/{encoded_project}/trigger/pipeline?{query}", method="POST")
         else:
             if not token:
                 return jsonify({"message": "GitLab token required to trigger pipeline. Set GITLAB_TOKEN or provide token in Connect."}), 400
-            query = urlencode({"ref": str(ref)})
-            status, out = gitlab_api(f"projects/{encoded_project}/pipeline?{query}", method="POST", token=token)
+            status, out = gitlab_api(
+                f"projects/{encoded_project}/pipeline",
+                method="POST",
+                token=token,
+                data={
+                    "ref": str(ref),
+                    "variables": [
+                        {"key": "APP_DIR", "value": app_dir},
+                        {"key": "APP_VERSION", "value": app_version},
+                    ],
+                },
+            )
         if status >= 300:
             return jsonify({"message": out.strip() or "Failed to trigger GitLab pipeline"}), 500
         try:
@@ -1748,7 +1979,18 @@ def trigger_pipeline():
 
     if token:
         dispatch_path = f"repos/{repo}/actions/workflows/{wf_enc}/dispatches"
-        code, body = github_rest_request(dispatch_path, "POST", token, json_body={"ref": ref_full})
+        code, body = github_rest_request(
+            dispatch_path,
+            "POST",
+            token,
+            json_body={
+                "ref": ref_full,
+                "inputs": {
+                    "app_dir": app_dir,
+                    "app_version": app_version,
+                },
+            },
+        )
         if code not in (200, 201, 204):
             msg = body
             try:
