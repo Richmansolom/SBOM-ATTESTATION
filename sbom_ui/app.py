@@ -449,9 +449,9 @@ def enrich_sbom_with_source_inventory(sbom_path, source_dir):
     if not isinstance(components, list):
         components = []
 
-    # Keep scanner-derived component data when present.
-    # Enrich only when upload scan produced an empty component inventory.
-    if len(components) > 0:
+    # Keep scanner-derived rich inventories intact.
+    # Hosted syft-only scans often return 0-1 components for plain C/C++ uploads.
+    if len(components) > 20:
         return 0
 
     root = Path(source_dir).resolve()
@@ -462,6 +462,10 @@ def enrich_sbom_with_source_inventory(sbom_path, source_dir):
     skip_dir_names = {"__macosx", ".git", ".github", ".svn", ".hg", "__pycache__", "node_modules", "build", "dist"}
     max_components = 1000
     generated = []
+    existing_names = {str((c or {}).get("name") or "").strip().lower() for c in components}
+    existing_refs = {str((c or {}).get("bom-ref") or "").strip() for c in components}
+    include_names = set()
+    include_re = re.compile(r"^\s*#\s*include\s*[<\"]([^\">]+)[\">]")
 
     for f in root.rglob("*"):
         if not f.is_file():
@@ -473,24 +477,65 @@ def enrich_sbom_with_source_inventory(sbom_path, source_dir):
         if f.suffix.lower() not in code_exts:
             continue
         rel_posix = rel.as_posix()
+        if rel_posix.lower() in existing_names:
+            continue
         slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", rel_posix).strip("-").lower() or "source-file"
         file_ref = sha1(rel_posix.encode("utf-8")).hexdigest()[:12]
+        bom_ref = f"source-file-{file_ref}"
+        if bom_ref in existing_refs:
+            continue
         generated.append(
             {
                 "type": "file",
                 "name": rel_posix,
                 "version": "0",
-                "bom-ref": f"source-file-{file_ref}",
+                "bom-ref": bom_ref,
                 "purl": f"pkg:generic/{slug}@0",
             }
         )
+        existing_names.add(rel_posix.lower())
+        existing_refs.add(bom_ref)
+
+        # Add light-weight pseudo components for declared C/C++ include dependencies.
+        try:
+            for line in f.read_text(encoding="utf-8", errors="ignore").splitlines():
+                m = include_re.match(line)
+                if m:
+                    include_names.add(m.group(1).strip())
+        except Exception:
+            pass
+
+        if len(generated) >= max_components:
+            break
+
+    for inc in sorted(include_names):
+        if not inc:
+            continue
+        inc_name = f"include:{inc}"
+        if inc_name.lower() in existing_names:
+            continue
+        slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", inc).strip("-").lower() or "header"
+        inc_ref = f"cpp-include-{sha1(inc.encode('utf-8')).hexdigest()[:12]}"
+        if inc_ref in existing_refs:
+            continue
+        generated.append(
+            {
+                "type": "library",
+                "name": inc_name,
+                "version": "0",
+                "bom-ref": inc_ref,
+                "purl": f"pkg:generic/cpp-include/{slug}@0",
+            }
+        )
+        existing_names.add(inc_name.lower())
+        existing_refs.add(inc_ref)
         if len(generated) >= max_components:
             break
 
     if not generated:
         return 0
 
-    payload["components"] = generated
+    payload["components"] = components + generated
     payload.setdefault("metadata", {})
     payload["metadata"]["timestamp"] = datetime.now(timezone.utc).isoformat()
     sbom_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
