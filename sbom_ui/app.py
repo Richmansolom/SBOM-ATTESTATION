@@ -709,10 +709,48 @@ def save_uploaded_project_files(files, target_dir):
 
 
 def pick_source_root(extract_root):
-    children = [p for p in extract_root.iterdir() if p.is_dir()]
+    code_exts = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".cmake", ".txt", ".md"}
+    skip_dir_names = {"__macosx", ".git", ".github", ".svn", ".hg", "__pycache__", "node_modules"}
+
+    def _eligible_dirs(root):
+        out = []
+        for p in root.iterdir():
+            if not p.is_dir():
+                continue
+            n = p.name.lower()
+            if n in skip_dir_names or n.startswith("."):
+                continue
+            out.append(p)
+        return out
+
+    def _score_dir(root):
+        code_files = 0
+        all_files = 0
+        try:
+            for f in root.rglob("*"):
+                if not f.is_file():
+                    continue
+                all_files += 1
+                if f.suffix.lower() in code_exts:
+                    code_files += 1
+        except Exception:
+            return (0, 0)
+        return (code_files, all_files)
+
+    # Prefer a single non-noise top-level folder (common zip layout).
+    children = _eligible_dirs(extract_root)
     if len(children) == 1:
         return children[0]
-    return extract_root
+
+    # Otherwise choose the best candidate by "has code files" and then file count.
+    candidates = children[:] if children else [extract_root]
+    best = max(candidates, key=_score_dir)
+    best_score = _score_dir(best)
+
+    # If every candidate appears empty, keep the extract root.
+    if best_score == (0, 0):
+        return extract_root
+    return best
 
 
 def rel_to_repo(path_obj):
