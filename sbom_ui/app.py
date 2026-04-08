@@ -460,89 +460,82 @@ def run_generate_pipeline(body, log_callback=None):
                 "exit_code": 1
             }
 
-        sbom_path = SBOM_DIR / "sbom-source.enriched.json"
-        signed_sbom_path = SBOM_DIR / "sbom-source.signed.json"
-
-        # Generate SBOM:
-        # - prefer local syft binary when available
-        # - otherwise fall back to containerized Syft via Docker
-        syft_bin, syft_source = resolve_syft_binary(log_callback=log_callback, auto_install=True)
-        docker_bin = shutil.which("docker")
-        if syft_bin:
-            if log_callback and syft_source:
-                log_callback(f"==> Using syft ({syft_source})\n")
-            gen_cmd = [
-                syft_bin,
-                str(source_dir),
-                "-o",
-                f"cyclonedx-json={sbom_path}",
-            ]
-        elif docker_bin:
-            source_rel = os.path.relpath(str(source_dir), str(REPO_ROOT)).replace("\\", "/")
-            gen_cmd = [
-                docker_bin,
-                "run",
-                "--rm",
-                "-v",
-                f"{REPO_ROOT}:/work",
-                "anchore/syft:latest",
-                f"dir:/work/{source_rel}",
-                "-o",
-                "cyclonedx-json=/work/sbom/sbom-source.enriched.json",
-            ]
-        else:
+        # Use the full pipeline script so uploaded apps produce:
+        # merged/enriched SBOM + validation + vulnerability reports, matching local/CI behavior.
+        generate_script = REPO_ROOT / "generate-sbom.ps1"
+        if not generate_script.exists():
             return {
                 "status": "error",
-                "message": "SBOM generation requires either syft binary or Docker runtime on this host",
-                "log": "Missing dependency: syft and docker are not available on server.",
+                "message": f"Missing generate script: {generate_script}",
                 "exit_code": 1,
             }
+
+        source_rel = os.path.relpath(str(source_dir), str(REPO_ROOT)).replace("\\", "/")
+        requested_meta = body.get("app_metadata_path")
+        app_meta_path = None
+        if requested_meta:
+            candidate = (REPO_ROOT / str(requested_meta)).resolve()
+            if candidate.exists():
+                app_meta_path = candidate
+        if app_meta_path is None:
+            candidate = source_dir / "app-metadata.json"
+            if candidate.exists():
+                app_meta_path = candidate
+        cleanup_meta = None
+        if app_meta_path is None:
+            cleanup_meta = build_temp_metadata(body.get("app_name") or source_dir.name, source_rel)
+            app_meta_path = cleanup_meta
+        app_meta_rel = os.path.relpath(str(app_meta_path), str(REPO_ROOT)).replace("\\", "/")
+
+        mode = str(body.get("mode") or "native").strip().lower()
+        if mode not in ("native", "container"):
+            mode = "native"
+        runtime = str(body.get("container_runtime") or "auto").strip().lower()
+        if runtime not in ("auto", "docker", "podman"):
+            runtime = "auto"
+
+        gen_cmd = [
+            "pwsh",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(generate_script),
+            "-Mode",
+            mode,
+            "-ContainerRuntime",
+            runtime,
+            "-SourcePath",
+            source_rel,
+            "-AppMetadataPath",
+            app_meta_rel,
+        ]
 
         if log_callback:
             code, output = run_cmd_stream(gen_cmd, on_output=log_callback)
         else:
             code, output = run_cmd(gen_cmd)
 
+        if cleanup_meta is not None and cleanup_meta.exists():
+            try:
+                cleanup_meta.unlink()
+            except Exception:
+                pass
+
         if code != 0:
             return {
                 "status": "error",
-                "message": "SBOM generation failed",
+                "message": "SBOM pipeline run failed",
                 "log": output,
                 "exit_code": code
             }
 
-        # Sign SBOM
-        sign_cmd = [
-            "bash",
-            str(REPO_ROOT / "scripts" / "sign-sbom.sh"),
-            str(sbom_path),
-            str(signed_sbom_path),
-            str(SBOM_DIR / "pki")
-        ]
-
-        if log_callback:
-            sign_code, sign_output = run_cmd_stream(sign_cmd, on_output=log_callback)
-        else:
-            sign_code, sign_output = run_cmd(sign_cmd)
-
-        if sign_code != 0:
-            return {
-                "status": "error",
-                "message": "SBOM signing failed",
-                "log": output + "\n" + sign_output,
-                "exit_code": sign_code
-            }
-
-        # Replace original with signed version
-        if signed_sbom_path.exists():
-            shutil.move(str(signed_sbom_path), str(sbom_path))
-
         return {
             "status": "ok",
-            "message": "SBOM generated and signed successfully",
-            "log": output + "\n" + sign_output,
+            "message": "SBOM generated, validated, and scanned successfully",
+            "log": output,
             "exit_code": 0,
-            "source_path": source_path
+            "source_path": source_path,
+            "app_metadata_path": app_meta_rel,
         }
 
     except Exception as e:
@@ -1550,10 +1543,27 @@ def sign():
 
 @app.route("/api/scan", methods=["POST"])
 def scan():
-    # lots of docker code
-    # lots of grype stuff
-    # lots of trivy stuff
-    return jsonify(...)
+    body = request.get_json(silent=True) or {}
+    source_path = (body.get("source_path") or "").strip()
+    if source_path:
+        result = run_generate_pipeline(body)
+        status = 200 if result.get("status") == "ok" else 500
+        return jsonify(result), status
+
+    grype = REPORT_DIR / "grype-report.json"
+    trivy = REPORT_DIR / "trivy-sbom-report.json"
+    if grype.exists() or trivy.exists():
+        return jsonify(
+            {
+                "status": "ok",
+                "message": "Using existing local vulnerability reports",
+                "reports": {
+                    "grype": grype.exists(),
+                    "trivy": trivy.exists(),
+                },
+            }
+        )
+    return jsonify({"status": "error", "message": "No source_path provided and no local reports found"}), 404
 
 @app.route("/api/something_else")   
 def something_else():

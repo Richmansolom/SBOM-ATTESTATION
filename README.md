@@ -109,12 +109,6 @@ Container mode:
 pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode container
 ```
 
-Container mode (explicit Docker runtime):
-
-```powershell
-pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode container -ContainerRuntime docker
-```
-
 Podman mode:
 
 ```powershell
@@ -195,9 +189,6 @@ Mission Control behavior implemented:
 - GitHub job log view with backend token fallback
 - GitLab single-job pipelines mapped to logical stage strip (`Build -> Generate -> Sign -> Scan -> Report`) by parsing trace markers
 - Saved API base override via `?api=...` and Connect modal `API Base URL`
-- Vulnerability page auto-pulls reports from local files or CI artifacts via `GET /api/report/unified?scanner=<grype|trivy>&source=auto`
-- SBOM Viewer/Components now auto-refresh when a pipeline finishes and can pull SBOM JSON from local files or CI artifacts via `GET /api/sbom/unified?source=auto`
-- SBOM Viewer shows the SBOM source metadata (local, GitHub artifact, or GitLab artifact) with run/pipeline reference when available
 
 Recommended backend env vars (Render/API host):
 
