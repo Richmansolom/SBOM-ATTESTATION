@@ -2113,6 +2113,9 @@ function SBOMPage({ config }) {
               ['Code Files', sourceDiag.code_files ?? '-'],
               ['C/C++ Sources', sourceDiag.cpp_files ?? '-'],
               ['Header Files', sourceDiag.header_files ?? '-'],
+              ['Vuln Scan Mode', sourceDiag.vuln_scan_mode || '-'],
+              ['Vuln Queried Components', sourceDiag.vuln_queried_components ?? '-'],
+              ['Vuln Matches', sourceDiag.vuln_matches ?? '-'],
               ['Has __MACOSX', sourceDiag.has_macosx_dir ? 'yes' : 'no'],
             ].map(([k,v]) => (
               <div className="info-row" key={k}>

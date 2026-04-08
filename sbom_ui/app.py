@@ -635,6 +635,163 @@ def write_placeholder_vuln_reports():
     (REPORT_DIR / "trivy-sbom-report.json").write_text(json.dumps(trivy_stub, indent=2), encoding="utf-8")
 
 
+def _normalize_severity(raw):
+    s = str(raw or "").strip().upper()
+    if s in {"CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"}:
+        return s
+    return "UNKNOWN"
+
+
+def _build_osv_queries_from_sbom(sbom_payload, max_queries=250):
+    queries = []
+    component_meta = []
+    for comp in (sbom_payload or {}).get("components", []) or []:
+        if not isinstance(comp, dict):
+            continue
+        purl = str(comp.get("purl") or "").strip()
+        version = str(comp.get("version") or "").strip()
+        name = str(comp.get("name") or "").strip() or "(unknown)"
+        if not purl:
+            continue
+        q = {"package": {"purl": purl}}
+        if version:
+            q["version"] = version
+        queries.append(q)
+        component_meta.append({"name": name, "version": version or "-", "purl": purl})
+        if len(queries) >= max_queries:
+            break
+    return queries, component_meta
+
+
+def write_osv_vuln_reports_from_sbom(sbom_path):
+    sbom_payload = parse_json(sbom_path)
+    if not isinstance(sbom_payload, dict):
+        return {"ok": False, "reason": "invalid-sbom"}
+
+    queries, component_meta = _build_osv_queries_from_sbom(sbom_payload)
+    if not queries:
+        write_placeholder_vuln_reports()
+        return {"ok": True, "mode": "osv-online", "queried_components": 0, "matches": 0}
+
+    req = Request(
+        url="https://api.osv.dev/v1/querybatch",
+        data=json.dumps({"queries": queries}).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "sbom-mission-control",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(req, timeout=60) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        payload = parse_json_text(raw) or {}
+    except Exception:
+        write_placeholder_vuln_reports()
+        return {"ok": False, "reason": "osv-request-failed"}
+
+    results = payload.get("results") if isinstance(payload, dict) else None
+    if not isinstance(results, list):
+        results = []
+
+    grype_matches = []
+    trivy_results = []
+    total_matches = 0
+
+    for i, item in enumerate(results):
+        if i >= len(component_meta):
+            break
+        meta = component_meta[i]
+        vulns = []
+        if isinstance(item, dict):
+            vulns = item.get("vulns") or []
+        if not isinstance(vulns, list) or not vulns:
+            continue
+
+        tri_vulns = []
+        for v in vulns:
+            if not isinstance(v, dict):
+                continue
+            vuln_id = str(v.get("id") or "").strip() or "UNKNOWN"
+            db_sev = ((v.get("database_specific") or {}).get("severity") if isinstance(v.get("database_specific"), dict) else None)
+            sev = _normalize_severity(db_sev)
+            fixed = []
+            for aff in (v.get("affected") or []):
+                if not isinstance(aff, dict):
+                    continue
+                for r in (aff.get("ranges") or []):
+                    if not isinstance(r, dict):
+                        continue
+                    for ev in (r.get("events") or []):
+                        if isinstance(ev, dict) and ev.get("fixed"):
+                            fixed.append(str(ev.get("fixed")))
+            fix_ver = fixed[0] if fixed else "-"
+            summary = str(v.get("summary") or "")
+            url = f"https://osv.dev/vulnerability/{vuln_id}"
+
+            grype_matches.append(
+                {
+                    "vulnerability": {
+                        "id": vuln_id,
+                        "severity": sev,
+                        "description": summary,
+                        "fix": {"versions": [] if fix_ver == "-" else [fix_ver]},
+                    },
+                    "artifact": {
+                        "name": meta["name"],
+                        "version": meta["version"],
+                        "purl": meta["purl"],
+                    },
+                }
+            )
+            tri_vulns.append(
+                {
+                    "VulnerabilityID": vuln_id,
+                    "PkgName": meta["name"],
+                    "InstalledVersion": meta["version"],
+                    "FixedVersion": "" if fix_ver == "-" else fix_ver,
+                    "Severity": sev,
+                    "Title": summary,
+                    "PrimaryURL": url,
+                }
+            )
+            total_matches += 1
+
+        if tri_vulns:
+            trivy_results.append(
+                {
+                    "Target": meta["name"],
+                    "Type": "library",
+                    "Vulnerabilities": tri_vulns,
+                }
+            )
+
+    now = datetime.now(timezone.utc).isoformat()
+    grype_payload = {
+        "matches": grype_matches,
+        "source": {"type": "sbom"},
+        "distro": {"name": "unknown", "version": ""},
+        "descriptor": {"name": "osv-online-fallback", "version": "1"},
+        "generated": now,
+    }
+    trivy_payload = {
+        "ArtifactName": str(sbom_path.name),
+        "ArtifactType": "cyclonedx",
+        "SchemaVersion": 2,
+        "Results": trivy_results,
+        "GeneratedAt": now,
+    }
+    (REPORT_DIR / "grype-report.json").write_text(json.dumps(grype_payload, indent=2), encoding="utf-8")
+    (REPORT_DIR / "trivy-sbom-report.json").write_text(json.dumps(trivy_payload, indent=2), encoding="utf-8")
+    return {
+        "ok": True,
+        "mode": "osv-online",
+        "queried_components": len(queries),
+        "matches": total_matches,
+    }
+
+
 def run_generate_pipeline(body, log_callback=None):
     ensure_dirs()
     body = body or {}
@@ -841,10 +998,22 @@ def run_generate_pipeline(body, log_callback=None):
             shutil.move(str(signed_sbom_path), str(sbom_path))
 
         # Hosted fallback may not have scanner runtimes available.
-        # Emit local zero-result reports so Vulnerability UI can still load deterministically.
-        write_placeholder_vuln_reports()
+        # Use OSV online lookup against SBOM purls so Vulnerability UI still shows known issues.
+        vuln_scan = write_osv_vuln_reports_from_sbom(sbom_path)
+        if log_callback:
+            mode = vuln_scan.get("mode") or "fallback"
+            qn = vuln_scan.get("queried_components", 0)
+            mn = vuln_scan.get("matches", 0)
+            log_callback(f"==> Vulnerability lookup ({mode}): queried={qn}, matches={mn}\n")
 
         source_diag.update({"execution_path": "hosted-fallback", "status": "ok"})
+        source_diag.update(
+            {
+                "vuln_scan_mode": vuln_scan.get("mode") if isinstance(vuln_scan, dict) else "fallback",
+                "vuln_queried_components": (vuln_scan or {}).get("queried_components", 0) if isinstance(vuln_scan, dict) else 0,
+                "vuln_matches": (vuln_scan or {}).get("matches", 0) if isinstance(vuln_scan, dict) else 0,
+            }
+        )
         write_source_diagnostics(source_diag)
         return {
             "status": "ok",
