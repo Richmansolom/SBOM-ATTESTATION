@@ -29,6 +29,7 @@ REPORT_DIR = REPO_ROOT / "reports"
 STATIC_DIR = REPO_ROOT / "sbom_ui" / "static"
 UPLOAD_DIR = REPO_ROOT / ".ui_uploads"
 TOOLS_BIN_DIR = REPO_ROOT / ".tools" / "bin"
+SOURCE_DIAG_PATH = REPORT_DIR / "source-diagnostics.json"
 STAGE_NAMES = ["Build", "Generate", "Sign", "Scan", "Report"]
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
@@ -300,6 +301,78 @@ def ensure_dirs():
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     TOOLS_BIN_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def collect_source_diagnostics(source_dir):
+    root = Path(source_dir).resolve()
+    diag = {
+        "exists": root.exists(),
+        "source_path": str(root),
+        "source_path_repo": None,
+        "total_files": 0,
+        "code_files": 0,
+        "cpp_files": 0,
+        "header_files": 0,
+        "top_level_dirs": [],
+        "has_macosx_dir": False,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        if str(root).startswith(str(REPO_ROOT)):
+            diag["source_path_repo"] = os.path.relpath(str(root), str(REPO_ROOT)).replace("\\", "/")
+    except Exception:
+        pass
+    if not root.exists():
+        return diag
+
+    code_exts = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".cmake", ".mk", ".txt", ".md"}
+    cpp_exts = {".c", ".cc", ".cpp", ".cxx"}
+    header_exts = {".h", ".hh", ".hpp", ".hxx"}
+    skip_dir_names = {"__macosx", ".git", ".github", ".svn", ".hg", "__pycache__", "node_modules", "build", "dist"}
+    max_walk = 50000
+    walked = 0
+    top_dirs = set()
+    has_macosx = False
+
+    for p in root.rglob("*"):
+        walked += 1
+        if walked > max_walk:
+            break
+        try:
+            rel = p.relative_to(root)
+        except Exception:
+            continue
+        rel_parts = [part.lower() for part in rel.parts]
+        if "__macosx" in rel_parts:
+            has_macosx = True
+        if any(part in skip_dir_names for part in rel_parts):
+            continue
+        if p.is_dir():
+            if rel.parts:
+                top_dirs.add(rel.parts[0])
+            continue
+        if not p.is_file():
+            continue
+        diag["total_files"] += 1
+        ext = p.suffix.lower()
+        if ext in code_exts:
+            diag["code_files"] += 1
+        if ext in cpp_exts:
+            diag["cpp_files"] += 1
+        if ext in header_exts:
+            diag["header_files"] += 1
+
+    diag["top_level_dirs"] = sorted(top_dirs)[:20]
+    diag["has_macosx_dir"] = has_macosx
+    return diag
+
+
+def write_source_diagnostics(diag):
+    ensure_dirs()
+    try:
+        SOURCE_DIAG_PATH.write_text(json.dumps(diag, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def resolve_syft_binary(log_callback=None, auto_install=True):
@@ -582,6 +655,16 @@ def run_generate_pipeline(body, log_callback=None):
                 "message": f"Source path does not exist: {source_path}",
                 "exit_code": 1
             }
+        source_rel = os.path.relpath(str(source_dir), str(REPO_ROOT)).replace("\\", "/")
+        source_diag = collect_source_diagnostics(source_dir)
+        source_diag.update(
+            {
+                "context": "generate",
+                "requested_mode": str(body.get("mode") or "native").strip().lower() or "native",
+                "requested_runtime": str(body.get("container_runtime") or "auto").strip().lower() or "auto",
+            }
+        )
+        write_source_diagnostics(source_diag)
 
         # Use the full pipeline script so uploaded apps produce:
         # merged/enriched SBOM + validation + vulnerability reports, matching local/CI behavior.
@@ -593,7 +676,6 @@ def run_generate_pipeline(body, log_callback=None):
                 "exit_code": 1,
             }
 
-        source_rel = os.path.relpath(str(source_dir), str(REPO_ROOT)).replace("\\", "/")
         requested_meta = body.get("app_metadata_path")
         app_meta_path = None
         if requested_meta:
@@ -649,13 +731,18 @@ def run_generate_pipeline(body, log_callback=None):
             _cleanup_temp_metadata()
 
             if code != 0:
+                source_diag.update({"execution_path": "powershell-pipeline", "status": "error"})
+                write_source_diagnostics(source_diag)
                 return {
                     "status": "error",
                     "message": "SBOM pipeline run failed",
                     "log": output,
-                    "exit_code": code
+                    "exit_code": code,
+                    "source_diagnostics": source_diag,
                 }
 
+            source_diag.update({"execution_path": "powershell-pipeline", "status": "ok"})
+            write_source_diagnostics(source_diag)
             return {
                 "status": "ok",
                 "message": "SBOM generated, validated, and scanned successfully",
@@ -663,6 +750,7 @@ def run_generate_pipeline(body, log_callback=None):
                 "exit_code": 0,
                 "source_path": source_path,
                 "app_metadata_path": app_meta_rel,
+                "source_diagnostics": source_diag,
             }
 
         # Hosted fallback (Render/Linux without PowerShell):
@@ -695,11 +783,14 @@ def run_generate_pipeline(body, log_callback=None):
             ]
         else:
             _cleanup_temp_metadata()
+            source_diag.update({"execution_path": "hosted-fallback", "status": "error"})
+            write_source_diagnostics(source_diag)
             return {
                 "status": "error",
                 "message": "SBOM generation requires either syft or docker on hosted backend",
                 "log": "Missing dependencies: syft, docker, and pwsh/powershell are not available.",
                 "exit_code": 1,
+                "source_diagnostics": source_diag,
             }
 
         if log_callback:
@@ -708,11 +799,14 @@ def run_generate_pipeline(body, log_callback=None):
             code, output = run_cmd(gen_cmd)
         if code != 0:
             _cleanup_temp_metadata()
+            source_diag.update({"execution_path": "hosted-fallback", "status": "error"})
+            write_source_diagnostics(source_diag)
             return {
                 "status": "error",
                 "message": "SBOM generation failed",
                 "log": output,
                 "exit_code": code,
+                "source_diagnostics": source_diag,
             }
 
         added_components = enrich_sbom_with_source_inventory(sbom_path, source_dir)
@@ -734,11 +828,14 @@ def run_generate_pipeline(body, log_callback=None):
         _cleanup_temp_metadata()
 
         if sign_code != 0:
+            source_diag.update({"execution_path": "hosted-fallback", "status": "error"})
+            write_source_diagnostics(source_diag)
             return {
                 "status": "error",
                 "message": "SBOM signing failed",
                 "log": f"{output}\n{sign_output}",
                 "exit_code": sign_code,
+                "source_diagnostics": source_diag,
             }
         if signed_sbom_path.exists():
             shutil.move(str(signed_sbom_path), str(sbom_path))
@@ -747,6 +844,8 @@ def run_generate_pipeline(body, log_callback=None):
         # Emit local zero-result reports so Vulnerability UI can still load deterministically.
         write_placeholder_vuln_reports()
 
+        source_diag.update({"execution_path": "hosted-fallback", "status": "ok"})
+        write_source_diagnostics(source_diag)
         return {
             "status": "ok",
             "message": "SBOM generated successfully (hosted fallback mode)",
@@ -754,6 +853,7 @@ def run_generate_pipeline(body, log_callback=None):
             "exit_code": 0,
             "source_path": source_path,
             "app_metadata_path": app_meta_rel,
+            "source_diagnostics": source_diag,
         }
 
     except Exception as e:
@@ -1655,6 +1755,16 @@ def upload_source():
     source_root = pick_source_root(extract_root)
     app_meta = source_root / "app-metadata.json"
     detected_name = source_root.name
+    source_diag = collect_source_diagnostics(source_root)
+    source_diag.update(
+        {
+            "context": "upload",
+            "extract_root": rel_to_repo(extract_root),
+            "selected_root": rel_to_repo(source_root),
+            "uploaded_file_count": count,
+        }
+    )
+    write_source_diagnostics(source_diag)
     return jsonify(
         {
             "status": "ok",
@@ -1662,8 +1772,17 @@ def upload_source():
             "app_metadata_path": rel_to_repo(app_meta) if app_meta.exists() else "",
             "detected_app_name": detected_name,
             "message": "Project uploaded successfully",
+            "source_diagnostics": source_diag,
         }
     )
+
+
+@app.route("/api/source-diagnostics")
+def source_diagnostics():
+    payload = parse_json(SOURCE_DIAG_PATH)
+    if payload is None:
+        return jsonify({"status": "error", "message": "No source diagnostics available yet"}), 404
+    return jsonify(payload)
 
 
 @app.route("/api/upload-metadata", methods=["POST"])
