@@ -1617,6 +1617,7 @@ function SBOMPage({ config }) {
   const [history, setHistory] = useState([]);
   const [dataSource, setDataSource] = useState('');
   const [sbomMeta, setSbomMeta] = useState(null);
+  const [sourceDiag, setSourceDiag] = useState(null);
   const [capabilities, setCapabilities] = useState({ can_generate: true, has_syft: false, has_docker: false, message: '' });
 
   useEffect(() => {
@@ -1714,6 +1715,7 @@ function SBOMPage({ config }) {
       setSbom(j);
       setDataSource(source === 'local' ? 'local' : 'api');
       setSbomMeta(j?._meta || null);
+      await loadSourceDiagnostics({ silentError: true });
       setErr('');
       const now = new Date().toISOString();
       setLastLoadedAt(now);
@@ -1728,6 +1730,25 @@ function SBOMPage({ config }) {
       if (!silentError) setErr(`No SBOM available yet: ${e.message}`);
     } finally {
       setLoadingApi(false);
+    }
+  }
+
+  async function loadSourceDiagnostics(opts = {}) {
+    const { silentError = false } = opts;
+    try {
+      const cfg = readConnectConfig();
+      const r = await fetch(apiUrl('/api/source-diagnostics'), {
+        headers: { ...(cfg.token ? { 'X-SBOM-TOKEN': cfg.token } : {}) }
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
+      setSourceDiag(j);
+      return true;
+    } catch (e) {
+      if (!silentError) {
+        setUploadStatus(`Diagnostics unavailable: ${e.message}`);
+      }
+      return false;
     }
   }
 
@@ -1775,6 +1796,7 @@ function SBOMPage({ config }) {
       }
 
       setUploadedSourcePath(data.source_path || '');
+      if (data.source_diagnostics) setSourceDiag(data.source_diagnostics);
       setUploadStatus(`Upload successful: ${data.source_path || 'source uploaded'}`);
       toast('Source uploaded successfully', 'ok');
     } catch (e) {
@@ -1812,6 +1834,7 @@ function SBOMPage({ config }) {
         throw new Error(data.log || data.message || 'SBOM generation failed');
       }
 
+      if (data.source_diagnostics) setSourceDiag(data.source_diagnostics);
       setUploadStatus('SBOM and reports generated successfully. Loading viewer...');
       await loadFromApi({ source: 'local' });
       try { sessionStorage.setItem('sbom_local_scan_done', String(Date.now())); } catch {}
@@ -1825,6 +1848,7 @@ function SBOMPage({ config }) {
 
   useEffect(() => {
     loadFromApi({ source: 'auto' });
+    loadSourceDiagnostics({ silentError: true });
     loadCapabilities();
   }, [config?.projectId, config?.provider, config?.token]);
 
@@ -2076,6 +2100,35 @@ function SBOMPage({ config }) {
           </div>
         </div>
       </div>
+
+      {sourceDiag && (
+        <div className="card" style={{marginBottom:12}}>
+          <div className="card-hd"><div className="card-title"><span className="card-icon">🧭</span>Source Scan Diagnostics</div></div>
+          <div className="card-body" style={{padding:'8px 16px'}}>
+            {[
+              ['Context', sourceDiag.context || '-'],
+              ['Execution Path', sourceDiag.execution_path || '-'],
+              ['Source Path', sourceDiag.source_path_repo || sourceDiag.source_path || '-'],
+              ['Total Files Seen', sourceDiag.total_files ?? '-'],
+              ['Code Files', sourceDiag.code_files ?? '-'],
+              ['C/C++ Sources', sourceDiag.cpp_files ?? '-'],
+              ['Header Files', sourceDiag.header_files ?? '-'],
+              ['Has __MACOSX', sourceDiag.has_macosx_dir ? 'yes' : 'no'],
+            ].map(([k,v]) => (
+              <div className="info-row" key={k}>
+                <span className="info-key">{k}</span>
+                <span className="info-val text-mono" style={{fontSize:11,color:'var(--gold)'}}>{String(v)}</span>
+              </div>
+            ))}
+            {Array.isArray(sourceDiag.top_level_dirs) && sourceDiag.top_level_dirs.length > 0 && (
+              <div className="info-row">
+                <span className="info-key">Top-level Dirs</span>
+                <span className="info-val text-mono" style={{fontSize:11,color:'var(--gold)'}}>{sourceDiag.top_level_dirs.join(', ')}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {history.length > 0 && (
         <div className="card" style={{marginBottom:12}}>
