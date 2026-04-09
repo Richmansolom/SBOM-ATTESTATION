@@ -1843,8 +1843,8 @@ function SBOMPage({ config }) {
     }
 
     try {
-      setUploadStatus('Generating SBOM...');
-      const res = await fetch(apiUrl('/api/generate'), {
+      setUploadStatus('Queueing SBOM generation...');
+      const res = await fetch(apiUrl('/api/local-run/start'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1856,10 +1856,45 @@ function SBOMPage({ config }) {
       const data = await parseApiResponse(res);
 
       if (!res.ok || data.status !== 'ok') {
-        throw new Error(apiErrorMessage(data, 'SBOM generation failed'));
+        throw new Error(apiErrorMessage(data, 'Failed to start SBOM generation'));
       }
 
-      if (data.source_diagnostics) setSourceDiag(data.source_diagnostics);
+      const runId = data.id;
+      if (!runId) throw new Error('Generate run id missing from server response');
+      setUploadStatus(`Generation started (${runId}). Waiting for completion...`);
+
+      const startedAt = Date.now();
+      const timeoutMs = 15 * 60 * 1000; // 15 minutes
+      let finalRun = null;
+      while (Date.now() - startedAt < timeoutMs) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const runsRes = await fetch(apiUrl('/api/local-runs'));
+        const runsPayload = await parseApiResponse(runsRes);
+        if (!runsRes.ok || !Array.isArray(runsPayload)) {
+          throw new Error(apiErrorMessage(runsPayload, 'Failed to read generation status'));
+        }
+        const current = runsPayload.find((r) => r.id === runId);
+        if (!current) continue;
+        const st = String(current.status || '').toLowerCase();
+        if (st === 'pending' || st === 'running') {
+          const secs = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+          setUploadStatus(`Generating SBOM... (${secs}s elapsed)`);
+          continue;
+        }
+        finalRun = current;
+        break;
+      }
+
+      if (!finalRun) {
+        throw new Error('SBOM generation timed out. Check server logs and retry.');
+      }
+      if (String(finalRun.status || '').toLowerCase() !== 'success') {
+        const logText = String(finalRun.log || '').replace(/\s+/g, ' ').trim();
+        const tail = logText ? ` | ${logText.slice(-260)}` : '';
+        throw new Error(`SBOM generation failed.${tail}`);
+      }
+
+      await loadSourceDiagnostics({ silentError: true });
       setUploadStatus('SBOM and reports generated successfully. Loading viewer...');
       await loadFromApi({ source: 'local', userInitiated: true });
       try { sessionStorage.setItem('sbom_local_scan_done', String(Date.now())); } catch {}
