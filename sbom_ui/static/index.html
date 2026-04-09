@@ -1605,6 +1605,7 @@ function SBOMPage({ config }) {
   const [sbom, setSbom] = useState(null);
   const [projectZip, setProjectZip] = useState(null);
   const [projectFiles, setProjectFiles] = useState([]);
+  const [singleSourceFile, setSingleSourceFile] = useState(null);
   const [uploadStatus, setUploadStatus] = useState('');
   const [uploadedSourcePath, setUploadedSourcePath] = useState('');
   const [search, setSearch] = useState('');
@@ -1615,10 +1616,10 @@ function SBOMPage({ config }) {
   const [loadingApi, setLoadingApi] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState('');
   const [history, setHistory] = useState([]);
-  const [dataSource, setDataSource] = useState('');
   const [sbomMeta, setSbomMeta] = useState(null);
   const [sourceDiag, setSourceDiag] = useState(null);
   const [capabilities, setCapabilities] = useState({ can_generate: true, has_syft: false, has_docker: false, message: '' });
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
 
   useEffect(() => {
     try {
@@ -1660,7 +1661,6 @@ function SBOMPage({ config }) {
       try {
         const parsed = JSON.parse(e.target.result);
         setSbom(parsed);
-        setDataSource('upload');
         setSbomMeta({ source: 'uploaded-file' });
         setErr('');
         const now = new Date().toISOString();
@@ -1696,7 +1696,7 @@ function SBOMPage({ config }) {
   }
 
   async function loadFromApi(opts = {}) {
-    const { source = 'auto', silentError = false, pipelineEvent = null } = opts;
+    const { source = 'auto', silentError = false, pipelineEvent = null, userInitiated = false } = opts;
     setLoadingApi(true);
     try {
       const cfg = readConnectConfig();
@@ -1713,7 +1713,7 @@ function SBOMPage({ config }) {
         `/sbom/unified?${q.toString()}`
       );
       setSbom(j);
-      setDataSource(source === 'local' ? 'local' : 'api');
+      if (userInitiated) setAutoSyncEnabled(true);
       setSbomMeta(j?._meta || null);
       await loadSourceDiagnostics({ silentError: true });
       setErr('');
@@ -1754,7 +1754,7 @@ function SBOMPage({ config }) {
 
   function resetViewer() {
     setSbom(null);
-    setDataSource('');
+    setAutoSyncEnabled(false);
     setSbomMeta(null);
     setErr('');
     setSearch('');
@@ -1767,8 +1767,8 @@ function SBOMPage({ config }) {
     setUploadStatus('');
     setErr('');
 
-    if (!projectZip && projectFiles.length === 0) {
-      setUploadStatus('Please choose a ZIP file or a project folder.');
+    if (!projectZip && projectFiles.length === 0 && !singleSourceFile) {
+      setUploadStatus('Please choose a ZIP, folder, or single source file.');
       return;
     }
 
@@ -1776,6 +1776,8 @@ function SBOMPage({ config }) {
 
     if (projectZip) {
       formData.append('project_zip', projectZip);
+    } else if (singleSourceFile) {
+      formData.append('project_files', singleSourceFile, singleSourceFile.name);
     } else {
       for (const file of projectFiles) {
         formData.append('project_files', file, file.webkitRelativePath || file.name);
@@ -1836,7 +1838,7 @@ function SBOMPage({ config }) {
 
       if (data.source_diagnostics) setSourceDiag(data.source_diagnostics);
       setUploadStatus('SBOM and reports generated successfully. Loading viewer...');
-      await loadFromApi({ source: 'local' });
+      await loadFromApi({ source: 'local', userInitiated: true });
       try { sessionStorage.setItem('sbom_local_scan_done', String(Date.now())); } catch {}
       window.dispatchEvent(new Event('sbom:local-scan-done'));
       toast('SBOM + vulnerability reports ready', 'ok');
@@ -1847,12 +1849,12 @@ function SBOMPage({ config }) {
   }
 
   useEffect(() => {
-    loadFromApi({ source: 'auto' });
-    loadSourceDiagnostics({ silentError: true });
+    // Intentionally do not auto-load previous SBOM on page open.
     loadCapabilities();
   }, [config?.projectId, config?.provider, config?.token]);
 
   useEffect(() => {
+    if (!autoSyncEnabled) return;
     const onPipelineFinished = (event) => {
       loadFromApi({ silentError: true, source: 'ci', pipelineEvent: event?.detail || null });
     };
@@ -1869,15 +1871,7 @@ function SBOMPage({ config }) {
       window.removeEventListener('sbom:pipeline-finished', onPipelineFinished);
       window.removeEventListener('storage', onStorage);
     };
-  }, [config?.projectId, config?.provider, config?.token]);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      const source = (dataSource === 'upload' || dataSource === 'local') ? 'local' : 'auto';
-      loadFromApi({ silentError: true, source });
-    }, 20000);
-    return () => clearInterval(id);
-  }, [dataSource, config?.projectId, config?.provider, config?.token]);
+  }, [autoSyncEnabled, config?.projectId, config?.provider, config?.token]);
 
   const types = useMemo(() => sbom ? ['All', ...new Set(sbom.components?.map(c => c.type) || [])] : [], [sbom]);
 
@@ -1933,7 +1927,7 @@ function SBOMPage({ config }) {
             <div className="page-sub">CycloneDX 1.4 · Component Intelligence</div>
           </div>
           <div className="flex gap-6">
-            <button className="btn btn-xs" onClick={loadFromApi} disabled={loadingApi}>
+            <button className="btn btn-xs" onClick={() => loadFromApi({ source: 'auto', userInitiated: true })} disabled={loadingApi}>
               {loadingApi ? 'Refreshing...' : '↻ Refresh Latest'}
             </button>
             <button className="btn btn-outline-red btn-xs" onClick={resetViewer}>Reset View</button>
@@ -1943,7 +1937,7 @@ function SBOMPage({ config }) {
         <div className="card">
           <div className="card-body">
             <div className="flex gap-6" style={{marginBottom:12,flexWrap:'wrap'}}>
-              <button className="btn btn-outline-gold" onClick={loadFromApi} disabled={loadingApi}>
+              <button className="btn btn-outline-gold" onClick={() => loadFromApi({ source: 'auto', userInitiated: true })} disabled={loadingApi}>
                 {loadingApi ? 'Loading...' : 'Load Latest SBOM'}
               </button>
             </div>
@@ -1956,7 +1950,16 @@ function SBOMPage({ config }) {
 
                 <div className="field" style={{marginBottom:12}}>
                   <span className="field-label">ZIP Upload</span>
-                  <input type="file" accept=".zip" onChange={(e) => setProjectZip(e.target.files[0] || null)} />
+                  <input type="file" accept=".zip" onChange={(e) => { setProjectZip(e.target.files[0] || null); setProjectFiles([]); setSingleSourceFile(null); }} />
+                </div>
+
+                <div className="field" style={{marginBottom:12}}>
+                  <span className="field-label">Single Source File</span>
+                  <input
+                    type="file"
+                    accept=".c,.cc,.cpp,.cxx,.h,.hh,.hpp,.hxx,.txt"
+                    onChange={(e) => { setSingleSourceFile(e.target.files[0] || null); setProjectZip(null); setProjectFiles([]); }}
+                  />
                 </div>
 
                 <div className="field" style={{marginBottom:12}}>
@@ -1966,7 +1969,7 @@ function SBOMPage({ config }) {
                     webkitdirectory="true"
                     directory=""
                     multiple
-                    onChange={(e) => setProjectFiles(Array.from(e.target.files || []))}
+                    onChange={(e) => { setProjectFiles(Array.from(e.target.files || [])); setProjectZip(null); setSingleSourceFile(null); }}
                   />
                 </div>
 
@@ -2030,11 +2033,11 @@ function SBOMPage({ config }) {
           <div className="page-sub">{sbom.metadata?.component?.name || 'Holistic SBOM'}</div>
         </div>
         <div className="flex gap-6">
-          <button className="btn btn-xs" onClick={loadFromApi} disabled={loadingApi}>
+          <button className="btn btn-xs" onClick={() => loadFromApi({ source: 'auto', userInitiated: true })} disabled={loadingApi}>
             {loadingApi ? 'Refreshing...' : '↻ Refresh Latest'}
           </button>
           <button className="btn btn-outline-red btn-xs" onClick={resetViewer}>Reset View</button>
-          <button className="btn btn-outline-red btn-sm" onClick={() => setSbom(null)}>✕ Clear</button>
+          <button className="btn btn-outline-red btn-sm" onClick={() => { setSbom(null); setAutoSyncEnabled(false); }}>✕ Clear</button>
         </div>
       </div>
 
