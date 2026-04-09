@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from flask import Flask, has_request_context, jsonify, request, send_from_directory
-from werkzeug.exceptions import RequestEntityTooLarge
+from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -775,12 +775,18 @@ def write_grype_vuln_reports_from_sbom(sbom_path, log_callback=None):
     if not grype_bin:
         return {"ok": False, "reason": "grype-unavailable"}
     cmd = [grype_bin, f"sbom:{sbom_path}", "-o", "json"]
-    if log_callback:
-        code, output = run_cmd_stream(cmd, on_output=log_callback)
-    else:
-        code, output = run_cmd(cmd)
+    try:
+        if log_callback:
+            code, output = run_cmd_stream(cmd, on_output=log_callback)
+        else:
+            code, output = run_cmd(cmd)
+    except Exception as exc:
+        if log_callback:
+            log_callback(f"==> grype execution error: {exc}\n")
+        return {"ok": False, "reason": f"grype-exec-error:{exc}"}
     if code != 0:
-        return {"ok": False, "reason": "grype-scan-failed"}
+        snippet = (output or "").strip().replace("\n", " ")[:240]
+        return {"ok": False, "reason": f"grype-scan-failed:{snippet}"}
     payload = parse_json_text(output)
     if not isinstance(payload, dict):
         return {"ok": False, "reason": "grype-invalid-json"}
@@ -1130,14 +1136,23 @@ def run_generate_pipeline(body, log_callback=None):
             shutil.move(str(signed_sbom_path), str(sbom_path))
 
         # Hosted fallback: prefer strong Grype DB scan; fallback to OSV lookup when unavailable.
-        vuln_scan = write_grype_vuln_reports_from_sbom(sbom_path, log_callback=log_callback)
-        if not vuln_scan.get("ok"):
-            vuln_scan = write_osv_vuln_reports_from_sbom(sbom_path)
+        try:
+            vuln_scan = write_grype_vuln_reports_from_sbom(sbom_path, log_callback=log_callback)
+            if not vuln_scan.get("ok"):
+                vuln_scan = write_osv_vuln_reports_from_sbom(sbom_path)
+        except Exception as exc:
+            # Never let hosted fallback vulnerability step crash /api/generate.
+            vuln_scan = {"ok": False, "mode": "fallback-error", "reason": str(exc), "queried_components": 0, "matches": 0}
+            write_placeholder_vuln_reports()
         if log_callback:
             mode = vuln_scan.get("mode") or "fallback"
             qn = vuln_scan.get("queried_components", 0)
             mn = vuln_scan.get("matches", 0)
-            log_callback(f"==> Vulnerability lookup ({mode}): queried={qn}, matches={mn}\n")
+            rs = vuln_scan.get("reason")
+            if rs:
+                log_callback(f"==> Vulnerability lookup ({mode}): queried={qn}, matches={mn}, reason={rs}\n")
+            else:
+                log_callback(f"==> Vulnerability lookup ({mode}): queried={qn}, matches={mn}\n")
 
         source_diag.update({"execution_path": "hosted-fallback", "status": "ok"})
         source_diag.update(
@@ -1145,6 +1160,7 @@ def run_generate_pipeline(body, log_callback=None):
                 "vuln_scan_mode": vuln_scan.get("mode") if isinstance(vuln_scan, dict) else "fallback",
                 "vuln_queried_components": (vuln_scan or {}).get("queried_components", 0) if isinstance(vuln_scan, dict) else 0,
                 "vuln_matches": (vuln_scan or {}).get("matches", 0) if isinstance(vuln_scan, dict) else 0,
+                "vuln_reason": (vuln_scan or {}).get("reason", "") if isinstance(vuln_scan, dict) else "",
             }
         )
         write_source_diagnostics(source_diag)
@@ -1312,6 +1328,16 @@ def handle_large_upload(_err):
 @app.route("/api/<path:_unused>", methods=["OPTIONS"])
 def api_preflight(_unused):
     return ("", 204)
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(err):
+    # Ensure API callers always receive JSON, even on unexpected server faults.
+    if has_request_context() and (request.path or "").startswith("/api/"):
+        if isinstance(err, HTTPException):
+            return jsonify({"status": "error", "message": err.description or str(err)}), int(err.code or 500)
+        return jsonify({"status": "error", "message": f"Internal server error: {err}"}), 500
+    raise err
 
 
 def get_local_snapshot():
