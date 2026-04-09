@@ -1640,8 +1640,8 @@ function SBOMPage({ config }) {
   async function loadCapabilities() {
     try {
       const r = await fetch(apiUrl('/api/capabilities'));
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
+      const j = await parseApiResponse(r);
+      if (!r.ok) throw new Error(apiErrorMessage(j, `HTTP ${r.status}`));
       setCapabilities({
         can_generate: !!j.can_generate,
         has_syft: !!j.has_syft,
@@ -1695,6 +1695,29 @@ function SBOMPage({ config }) {
     }
   }
 
+  async function parseApiResponse(res) {
+    const raw = await res.text();
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return { _non_json: true, _raw: raw };
+    }
+  }
+
+  function apiErrorMessage(payload, fallback) {
+    if (payload?.message) return payload.message;
+    if (payload?.log) return payload.log;
+    if (payload?._non_json) {
+      const compact = String(payload._raw || '').replace(/\s+/g, ' ').trim();
+      if (compact.toLowerCase().startsWith('<!doctype') || compact.toLowerCase().startsWith('<html')) {
+        return `${fallback} (server returned HTML error page)`;
+      }
+      if (compact) return `${fallback}: ${compact.slice(0, 240)}`;
+    }
+    return fallback;
+  }
+
   async function loadFromApi(opts = {}) {
     const { source = 'auto', silentError = false, pipelineEvent = null, userInitiated = false } = opts;
     setLoadingApi(true);
@@ -1740,8 +1763,8 @@ function SBOMPage({ config }) {
       const r = await fetch(apiUrl('/api/source-diagnostics'), {
         headers: { ...(cfg.token ? { 'X-SBOM-TOKEN': cfg.token } : {}) }
       });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
+      const j = await parseApiResponse(r);
+      if (!r.ok) throw new Error(apiErrorMessage(j, `HTTP ${r.status}`));
       setSourceDiag(j);
       return true;
     } catch (e) {
@@ -1791,10 +1814,10 @@ function SBOMPage({ config }) {
         body: formData
       });
 
-      const data = await res.json();
+      const data = await parseApiResponse(res);
 
       if (!res.ok || data.status !== 'ok') {
-        throw new Error(data.message || 'Upload failed');
+        throw new Error(apiErrorMessage(data, 'Upload failed'));
       }
 
       setUploadedSourcePath(data.source_path || '');
@@ -1830,10 +1853,10 @@ function SBOMPage({ config }) {
         })
       });
 
-      const data = await res.json();
+      const data = await parseApiResponse(res);
 
       if (!res.ok || data.status !== 'ok') {
-        throw new Error(data.log || data.message || 'SBOM generation failed');
+        throw new Error(apiErrorMessage(data, 'SBOM generation failed'));
       }
 
       if (data.source_diagnostics) setSourceDiag(data.source_diagnostics);
