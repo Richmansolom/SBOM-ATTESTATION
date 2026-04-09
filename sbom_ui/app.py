@@ -453,6 +453,79 @@ def resolve_syft_binary(log_callback=None, auto_install=True):
         return None, f"download-failed:{exc}"
 
 
+def resolve_grype_binary(log_callback=None, auto_install=True):
+    grype_path = shutil.which("grype")
+    if grype_path:
+        return grype_path, "system"
+
+    local_name = "grype.exe" if os.name == "nt" else "grype"
+    local_path = TOOLS_BIN_DIR / local_name
+    if local_path.exists():
+        return str(local_path), "local-cache"
+
+    if not auto_install:
+        return None, "missing"
+
+    auto_flag = (os.getenv("SBOM_AUTO_INSTALL_GRYPE", "1") or "1").strip().lower()
+    if auto_flag in ("0", "false", "no", "off"):
+        return None, "auto-install-disabled"
+
+    sys_name = platform.system().lower()
+    arch = platform.machine().lower()
+    os_map = {"linux": "linux", "darwin": "darwin", "windows": "windows"}
+    arch_map = {
+        "x86_64": "amd64",
+        "amd64": "amd64",
+        "aarch64": "arm64",
+        "arm64": "arm64",
+    }
+    os_token = os_map.get(sys_name)
+    arch_token = arch_map.get(arch)
+    if not os_token or not arch_token:
+        return None, f"unsupported-platform:{sys_name}/{arch}"
+
+    version = os.getenv("GRYPE_VERSION", "v0.110.0").strip() or "v0.110.0"
+    version_num = version[1:] if version.startswith("v") else version
+    ext = "zip" if os_token == "windows" else "tar.gz"
+    filename = f"grype_{version_num}_{os_token}_{arch_token}.{ext}"
+    url = f"https://github.com/anchore/grype/releases/download/{version}/{filename}"
+    try:
+        if log_callback:
+            log_callback(f"==> grype missing; downloading {filename}\n")
+        req = Request(url=url, headers={"User-Agent": "sbom-mission-control"})
+        with urlopen(req, timeout=120) as resp:
+            archive_bytes = resp.read()
+
+        TOOLS_BIN_DIR.mkdir(parents=True, exist_ok=True)
+        if ext == "zip":
+            with zipfile.ZipFile(io.BytesIO(archive_bytes), "r") as zf:
+                target_name = "grype.exe" if os_token == "windows" else "grype"
+                target_member = next((n for n in zf.namelist() if Path(n).name == target_name), None)
+                if not target_member:
+                    return None, "download-invalid-archive"
+                local_path.write_bytes(zf.read(target_member))
+        else:
+            with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as tf:
+                target_member = next((m for m in tf.getmembers() if Path(m.name).name == "grype"), None)
+                if not target_member:
+                    return None, "download-invalid-archive"
+                extracted = tf.extractfile(target_member)
+                if extracted is None:
+                    return None, "download-invalid-archive"
+                local_path.write_bytes(extracted.read())
+
+        if os.name != "nt":
+            try:
+                local_path.chmod(0o755)
+            except Exception:
+                pass
+        if log_callback:
+            log_callback(f"==> grype bootstrapped at {local_path}\n")
+        return str(local_path), "bootstrap"
+    except Exception as exc:
+        return None, f"download-failed:{exc}"
+
+
 def get_generate_capabilities():
     # Probe with auto-install enabled so hosted backends can self-heal
     # and immediately expose generate capability in the UI.
@@ -467,6 +540,7 @@ def get_generate_capabilities():
         "can_generate": can_generate,
         "has_syft": has_syft,
         "has_docker": has_docker,
+        "has_grype": bool(resolve_grype_binary(auto_install=False)[0]),
         "syft_source": syft_source,
         "message": msg,
     }
@@ -635,6 +709,39 @@ def write_placeholder_vuln_reports():
     (REPORT_DIR / "trivy-sbom-report.json").write_text(json.dumps(trivy_stub, indent=2), encoding="utf-8")
 
 
+def write_trivy_report_from_grype(grype_payload, sbom_name):
+    results = []
+    per_target = {}
+    for m in (grype_payload or {}).get("matches", []) or []:
+        if not isinstance(m, dict):
+            continue
+        art = m.get("artifact") or {}
+        vul = m.get("vulnerability") or {}
+        name = str(art.get("name") or "-")
+        ent = per_target.setdefault(name, [])
+        ent.append(
+            {
+                "VulnerabilityID": str(vul.get("id") or "UNKNOWN"),
+                "PkgName": name,
+                "InstalledVersion": str(art.get("version") or "-"),
+                "FixedVersion": str(((vul.get("fix") or {}).get("versions") or [""])[0] or ""),
+                "Severity": _normalize_severity(vul.get("severity")),
+                "Title": str(vul.get("description") or ""),
+                "PrimaryURL": f"https://osv.dev/vulnerability/{vul.get('id')}" if vul.get("id") else "",
+            }
+        )
+    for target, vulns in per_target.items():
+        results.append({"Target": target, "Type": "library", "Vulnerabilities": vulns})
+    payload = {
+        "ArtifactName": str(sbom_name),
+        "ArtifactType": "cyclonedx",
+        "SchemaVersion": 2,
+        "Results": results,
+        "GeneratedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    (REPORT_DIR / "trivy-sbom-report.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def _normalize_severity(raw):
     s = str(raw or "").strip().upper()
     if s in {"CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"}:
@@ -661,6 +768,31 @@ def _build_osv_queries_from_sbom(sbom_payload, max_queries=250):
         if len(queries) >= max_queries:
             break
     return queries, component_meta
+
+
+def write_grype_vuln_reports_from_sbom(sbom_path, log_callback=None):
+    grype_bin, grype_src = resolve_grype_binary(log_callback=log_callback, auto_install=True)
+    if not grype_bin:
+        return {"ok": False, "reason": "grype-unavailable"}
+    cmd = [grype_bin, f"sbom:{sbom_path}", "-o", "json"]
+    if log_callback:
+        code, output = run_cmd_stream(cmd, on_output=log_callback)
+    else:
+        code, output = run_cmd(cmd)
+    if code != 0:
+        return {"ok": False, "reason": "grype-scan-failed"}
+    payload = parse_json_text(output)
+    if not isinstance(payload, dict):
+        return {"ok": False, "reason": "grype-invalid-json"}
+    (REPORT_DIR / "grype-report.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    write_trivy_report_from_grype(payload, Path(sbom_path).name)
+    return {
+        "ok": True,
+        "mode": "grype-db",
+        "queried_components": len((parse_json(sbom_path) or {}).get("components", []) or []),
+        "matches": len(payload.get("matches", []) or []),
+        "scanner_source": grype_src,
+    }
 
 
 def write_osv_vuln_reports_from_sbom(sbom_path):
@@ -997,9 +1129,10 @@ def run_generate_pipeline(body, log_callback=None):
         if signed_sbom_path.exists():
             shutil.move(str(signed_sbom_path), str(sbom_path))
 
-        # Hosted fallback may not have scanner runtimes available.
-        # Use OSV online lookup against SBOM purls so Vulnerability UI still shows known issues.
-        vuln_scan = write_osv_vuln_reports_from_sbom(sbom_path)
+        # Hosted fallback: prefer strong Grype DB scan; fallback to OSV lookup when unavailable.
+        vuln_scan = write_grype_vuln_reports_from_sbom(sbom_path, log_callback=log_callback)
+        if not vuln_scan.get("ok"):
+            vuln_scan = write_osv_vuln_reports_from_sbom(sbom_path)
         if log_callback:
             mode = vuln_scan.get("mode") or "fallback"
             qn = vuln_scan.get("queried_components", 0)
