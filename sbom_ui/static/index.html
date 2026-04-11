@@ -2036,7 +2036,10 @@ function SBOMPage({ config }) {
           </div>
           <div className="flex gap-6">
             <button className="btn btn-xs" onClick={() => loadFromApi({ source: 'auto' })} disabled={loadingApi}>
-              {loadingApi ? 'Refreshing...' : '↻ Refresh Latest'}
+              {loadingApi ? 'Refreshing...' : '↻ Refresh CI'}
+            </button>
+            <button className="btn btn-xs btn-outline-teal" onClick={() => loadFromApi({ source: 'local' })} disabled={loadingApi} title="Last generate on this server">
+              ↻ Server local
             </button>
             <button className="btn btn-outline-red btn-xs" onClick={resetViewer}>Reset View</button>
           </div>
@@ -2046,7 +2049,10 @@ function SBOMPage({ config }) {
           <div className="card-body">
             <div className="flex gap-6" style={{marginBottom:12,flexWrap:'wrap'}}>
               <button className="btn btn-outline-gold" onClick={() => loadFromApi({ source: 'auto' })} disabled={loadingApi}>
-                {loadingApi ? 'Loading...' : 'Load Latest SBOM'}
+                {loadingApi ? 'Loading...' : 'Load from CI artifacts'}
+              </button>
+              <button className="btn btn-outline-teal" onClick={() => loadFromApi({ source: 'local' })} disabled={loadingApi} title="Last SBOM on this server after upload + Generate (not mixed with CI)">
+                {loadingApi ? 'Loading...' : 'Load server SBOM (local)'}
               </button>
             </div>
 
@@ -2176,7 +2182,10 @@ function SBOMPage({ config }) {
         </div>
         <div className="flex gap-6">
           <button className="btn btn-xs" onClick={() => loadFromApi({ source: 'auto' })} disabled={loadingApi}>
-            {loadingApi ? 'Refreshing...' : '↻ Refresh Latest'}
+            {loadingApi ? 'Refreshing...' : '↻ Refresh CI'}
+          </button>
+          <button className="btn btn-xs btn-outline-teal" onClick={() => loadFromApi({ source: 'local' })} disabled={loadingApi} title="Last generate on this server">
+            ↻ Server local
           </button>
           <button className="btn btn-outline-red btn-xs" onClick={resetViewer}>Reset View</button>
           <button className="btn btn-outline-red btn-sm" onClick={() => { setSbom(null); }}>✕ Clear</button>
@@ -2583,7 +2592,6 @@ function VulnPage() {
           <div className="page-title">Vulnerability Scanner</div>
           <div className="page-sub">
             {scanner === 'trivy' ? 'Trivy SBOM' : 'Grype SBOM'} · {normalized.length} findings · {meta?.source || 'unknown source'}
-            {meta?.fallback ? <span style={{color:'var(--amber)', marginLeft:8}}>(fallback: server-local scan)</span> : null}
             {meta?.source === 'uploaded-file' ? (
               <div style={{fontSize:11,color:'var(--teal)',marginTop:6,maxWidth:720}}>
                 Viewing uploaded JSON — CI refresh, pipeline events, and auto-poll are paused. Use Reload or Clear to sync with the server.
