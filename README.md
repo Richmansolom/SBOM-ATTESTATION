@@ -33,15 +33,16 @@ sbom-attestation/
 |   |-- include/                         # Headers
 |   |-- Dockerfile                       # Container build path
 |   |-- Makefile                         # Native build path
-|   `-- app-metadata.json                # Custom component metadata
+|   `-- app-metadata.json                # Custom component metadata (JSON; CSV/XML also supported — see below)
 |-- scripts/
 |   `-- sign-sbom.sh                     # Canonicalize + sign + embed signature
 |-- sbom/                                # Generated SBOM outputs and PKI artifacts
 |-- reports/                             # Validation, scan, and DB evidence outputs
 |-- sbom_ui/
 |   |-- app.py                           # Flask API (generate/sign/scan + pipeline APIs)
+|   |-- metadata_parser.py               # JSON/CSV/XML → canonical app metadata (API + merge parity)
 |   |-- requirements.txt
-|   `-- static/index.html                # Mission Control UI frontend
+|   `-- static/index.html                # Mission Control UI (static; deployed separately from API)
 |-- generate-sbom.ps1                    # Local orchestrator (native/container mode)
 |-- merge-sbom.ps1                       # Inject custom app metadata into SBOM
 |-- check-ntia.ps1                       # NTIA minimum-elements check
@@ -151,7 +152,7 @@ Current local UI capabilities:
 - Connect modal supports `github` and `gitlab` providers
 - Pipeline launch/monitor with stage strip (`Build -> Generate -> Sign -> Scan -> Report`)
 - Live job log retrieval (`/api/jobs/<job_id>/trace`) with periodic refresh while running
-- SBOM Viewer supports file upload, latest local fetch (`/api/sbom`), and source upload + generate flow
+- SBOM Viewer supports file upload, latest local fetch (`/api/sbom`), and source upload + optional metadata (JSON/CSV/XML) + generate flow
 - Vulnerability Viewer supports unified report loading from local files or CI artifacts (`/api/report/unified`)
 - DB freshness panel consumes `/api/db-status`
 
@@ -159,8 +160,10 @@ Current local UI capabilities:
 
 This repo supports hosted operation with:
 
-- Frontend: `sbom_ui/static` published by `.github/workflows/pages-ui.yml`
-- API backend: `sbom_ui/app.py` deployed from `render.yaml`
+- Frontend: `sbom_ui/static` published by `.github/workflows/pages-ui.yml` (static HTML/JS/CSS — **not** served by Flask)
+- API backend: `sbom_ui/app.py` deployed from `render.yaml` (gunicorn/Flask on Render)
+
+App metadata for enrichment may be maintained as **JSON, CSV, or XML**; `merge-sbom.ps1` and the API normalize to canonical JSON before merging. CI examples still use `app-metadata.json` by convention.
 
 Hosted behavior currently implemented:
 
@@ -221,7 +224,7 @@ Implements the same logical stages and artifacts as GitHub.
 The following is implemented and validated in this repository:
 
 - **SBOM generation:** Syft + Trivy + Distro2SBOM are merged via CycloneDX for source/build targets.
-- **Metadata enrichment:** Custom C/C++ application component metadata is merged into generated SBOMs.
+- **Metadata enrichment:** Custom application metadata (JSON, CSV, or XML) is merged into generated SBOMs via `merge-sbom.ps1` / API (`metadata_parser.py`).
 - **Validation:** CycloneDX schema checks, local NTIA checks, and Hoppr NTIA validation are in place.
 - **Attestation:** Embedded SBOM signature generation + verification is implemented via OpenSSL-based flow.
 - **Vulnerability analysis:** Grype and Trivy scans produce JSON/table outputs and combined summary evidence.
@@ -268,7 +271,7 @@ If another team wants to claim "same implementation class", they should produce 
 ## How to Adapt This for Another C/C++ Project
 
 1. Replace `example-app/` with your project path
-2. Update metadata source (`app-metadata.json`) with your:
+2. Update metadata (`app-metadata.json`, or **CSV/XML** passed to `-AppMetadataPath` / Mission Control uploads — stored as canonical JSON) with your:
    - supplier
    - component names
    - versions

@@ -144,6 +144,118 @@ function Normalize-ComponentLicenses($component) {
   $component.licenses = $normalized
 }
 
+function Normalize-AppMetadataFlat([hashtable]$lc) {
+  $name = SafeStr ($lc['name'])
+  if ([string]::IsNullOrWhiteSpace($name) -or $name -eq 'unknown') {
+    $cn = [string]$lc['component_name']
+    if (-not [string]::IsNullOrWhiteSpace($cn)) { $name = $cn.Trim() }
+  }
+  if ([string]::IsNullOrWhiteSpace($name)) { $name = 'custom-cpp-app' }
+
+  $ver = SafeStr ($lc['version'])
+  if ($ver -eq 'unknown') { $ver = '1.0.0' }
+
+  $desc = [string]$lc['description']
+  if ([string]::IsNullOrWhiteSpace($desc)) { $desc = "$name (app metadata)" }
+
+  $supplierName = SafeStr ($lc['supplier_name'])
+  if ($supplierName -eq 'unknown' -or [string]::IsNullOrWhiteSpace($supplierName)) {
+    $supplierName = SafeStr ($lc['supplier'])
+  }
+  if ($supplierName -eq 'unknown' -or [string]::IsNullOrWhiteSpace($supplierName)) { $supplierName = 'Unknown' }
+
+  $urlCell = [string]($lc['supplier_url'])
+  if ([string]::IsNullOrWhiteSpace($urlCell)) { $urlCell = [string]$lc['supplier_urls'] }
+  $urls = @()
+  if (-not [string]::IsNullOrWhiteSpace($urlCell)) {
+    foreach ($p in ($urlCell -split '[|;,\n]+')) {
+      $t = $p.Trim()
+      if ($t) { $urls += $t }
+    }
+  }
+
+  $repoVal = [string]$lc['repository']
+  if ([string]::IsNullOrWhiteSpace($repoVal)) { $repoVal = [string]$lc['repo'] }
+  if ($null -eq $repoVal) { $repoVal = '' }
+
+  $out = [ordered]@{
+    name = $name
+    component_type = SafeStr ($lc['component_type'])
+    version = $ver
+    description = $desc
+    language = if ([string]::IsNullOrWhiteSpace([string]$lc['language'])) { 'C++' } else { [string]$lc['language'].Trim() }
+    author = if ([string]::IsNullOrWhiteSpace([string]$lc['author'])) { 'Unknown' } else { [string]$lc['author'].Trim() }
+    license = if ([string]::IsNullOrWhiteSpace([string]$lc['license'])) { 'MIT' } else { [string]$lc['license'].Trim() }
+    build_system = $({
+        $bs = [string]$lc['build_system']
+        if ([string]::IsNullOrWhiteSpace($bs)) { $bs = [string]$lc['build'] }
+        if ([string]::IsNullOrWhiteSpace($bs)) { 'unknown' } else { $bs.Trim() }
+      })
+    entry_point = if ([string]::IsNullOrWhiteSpace([string]$lc['entry_point'])) { 'main' } else { [string]$lc['entry_point'].Trim() }
+    source_file = if ([string]::IsNullOrWhiteSpace([string]$lc['source_file'])) { 'src/main.cpp' } else { [string]$lc['source_file'].Trim() }
+    repository = $repoVal
+    supplier = [pscustomobject]@{ name = $supplierName; url = [object[]]$urls }
+  }
+  if ($out['component_type'] -eq 'unknown' -or [string]::IsNullOrWhiteSpace($out['component_type'])) {
+    $out['component_type'] = 'application'
+  }
+  $purl = [string]$lc['purl']
+  if (-not [string]::IsNullOrWhiteSpace($purl)) { $out['purl'] = $purl.Trim() }
+  $cpe = [string]$lc['cpe']
+  if (-not [string]::IsNullOrWhiteSpace($cpe)) { $out['cpe'] = $cpe.Trim() }
+  return [pscustomobject]$out
+}
+
+function Read-AppMetadataFromFile([string]$MetaPath) {
+  $ext = [System.IO.Path]::GetExtension($MetaPath).ToLowerInvariant()
+  if ($ext -eq '.json') {
+    return Get-Content $MetaPath -Raw | ConvertFrom-Json
+  }
+  if ($ext -eq '.csv') {
+    $rows = Import-Csv -LiteralPath $MetaPath
+    if (-not $rows -or $rows.Count -eq 0) { throw "CSV metadata has no data rows: $MetaPath" }
+    $r = $rows[0]
+    $lc = @{}
+    foreach ($p in $r.PSObject.Properties) {
+      $lc[$p.Name.Trim().ToLowerInvariant()] = [string]$p.Value
+    }
+    return Normalize-AppMetadataFlat $lc
+  }
+  if ($ext -eq '.xml') {
+    [xml]$x = Get-Content $MetaPath -Raw
+    $root = $x.DocumentElement
+    $lc = @{}
+    foreach ($n in $root.ChildNodes) {
+      if ($n.NodeType -ne 'Element') { continue }
+      $tag = $n.LocalName.ToLowerInvariant()
+      if ($tag -eq 'supplier') {
+        $sn = ''
+        $urlParts = @()
+        foreach ($c in $n.ChildNodes) {
+          if ($c.NodeType -ne 'Element') { continue }
+          $ct = $c.LocalName.ToLowerInvariant()
+          if ($ct -eq 'name') { $sn = [string]$c.InnerText.Trim() }
+          elseif ($ct -eq 'url') { $urlParts += [string]$c.InnerText.Trim() }
+        }
+        if ($n.HasAttribute('name')) { $sn = [string]$n.GetAttribute('name') }
+        if ($n.HasAttribute('url')) { $urlParts += [string]$n.GetAttribute('url') }
+        $lc['supplier_name'] = $sn
+        if ($urlParts.Count -gt 0) { $lc['supplier_url'] = ($urlParts -join '|') }
+        continue
+      }
+      $txt = [string]$n.InnerText.Trim()
+      if ($txt) { $lc[$tag.Replace('-', '_')] = $txt }
+    }
+    if ($root.HasAttribute('name')) { $lc['name'] = [string]$root.GetAttribute('name') }
+    if ($root.HasAttribute('version')) { $lc['version'] = [string]$root.GetAttribute('version') }
+    if ($root.HasAttribute('license')) { $lc['license'] = [string]$root.GetAttribute('license') }
+    if ($root.HasAttribute('language')) { $lc['language'] = [string]$root.GetAttribute('language') }
+    if ($root.HasAttribute('author')) { $lc['author'] = [string]$root.GetAttribute('author') }
+    return Normalize-AppMetadataFlat $lc
+  }
+  throw "Unsupported app metadata extension '$ext' (use .json, .csv, or .xml): $MetaPath"
+}
+
 if (-not (Test-Path $InputSbom)) { throw "Input SBOM not found: $InputSbom" }
 
 $sbomRaw = Get-Content $InputSbom -Raw
@@ -155,9 +267,9 @@ catch { throw "Input SBOM is not valid JSON." }
 $app = $null
 if (-not [string]::IsNullOrWhiteSpace($AppMetadata) -and (Test-Path $AppMetadata)) {
   try {
-    $app = Get-Content $AppMetadata -Raw | ConvertFrom-Json
+    $app = Read-AppMetadataFromFile $AppMetadata
   } catch {
-    throw "App metadata is not valid JSON: $AppMetadata"
+    throw "App metadata could not be read ($AppMetadata): $($_.Exception.Message)"
   }
 }
 
