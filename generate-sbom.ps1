@@ -70,7 +70,7 @@ $ntiaScript = Join-Path $repoRoot "check-ntia.ps1"
 foreach ($dir in $sbomPath, $reportPath) {
   if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
 }
-if (-not (Test-Path $appMeta)) { throw "Missing app-metadata.json at $appMeta" }
+if (-not (Test-Path $appMeta)) { throw "Missing app metadata file at $appMeta (JSON, CSV, or XML — see merge-sbom.ps1)" }
 if (-not (Test-Path $mergeScript)) { throw "Missing merge-sbom.ps1" }
 
 # SBOM file names

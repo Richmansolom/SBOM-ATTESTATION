@@ -13,8 +13,15 @@ sbom-signing/
 *.pem
 *.sig
 
-# Reports (CI generates; optional to ignore if you want local reports)
-# reports/
+# Reports (CI generates locally; do not commit)
+reports/
+
+# IDE / language-server caches (do not zip for SBOM uploads)
+.ccls-cache/
+.clangd/
+
+# Local ad-hoc test extracts
+_test_litert/
 
 # Local UI / tooling
 .cache/

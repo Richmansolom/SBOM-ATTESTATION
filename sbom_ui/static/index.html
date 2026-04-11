@@ -822,6 +822,7 @@ tr:hover td { background: var(--bg2); }
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
+// Static UI (e.g. GitHub Pages): no Flask here — this file is deployed as-is; API calls go to Render (or local) below.
 let API_BASE = (() => {
   const DEFAULT_PUBLIC_API = 'https://sbom-control-api.onrender.com';
   const params = new URLSearchParams(window.location.search);
@@ -1608,6 +1609,8 @@ function SBOMPage({ config }) {
   const [singleSourceFile, setSingleSourceFile] = useState(null);
   const [uploadStatus, setUploadStatus] = useState('');
   const [uploadedSourcePath, setUploadedSourcePath] = useState('');
+  const [metadataFile, setMetadataFile] = useState(null);
+  const [uploadedMetadataPath, setUploadedMetadataPath] = useState('');
   const [search, setSearch] = useState('');
   const [typeF, setTypeF] = useState('All');
   const [view, setView] = useState('table');
@@ -1619,8 +1622,6 @@ function SBOMPage({ config }) {
   const [sbomMeta, setSbomMeta] = useState(null);
   const [sourceDiag, setSourceDiag] = useState(null);
   const [capabilities, setCapabilities] = useState({ can_generate: true, has_syft: false, has_docker: false, message: '' });
-  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
-
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem('sbom_view_history');
@@ -1719,7 +1720,7 @@ function SBOMPage({ config }) {
   }
 
   async function loadFromApi(opts = {}) {
-    const { source = 'auto', silentError = false, pipelineEvent = null, userInitiated = false } = opts;
+    const { source = 'auto', silentError = false, pipelineEvent = null } = opts;
     setLoadingApi(true);
     try {
       const cfg = readConnectConfig();
@@ -1736,7 +1737,6 @@ function SBOMPage({ config }) {
         `/sbom/unified?${q.toString()}`
       );
       setSbom(j);
-      if (userInitiated) setAutoSyncEnabled(true);
       setSbomMeta(j?._meta || null);
       await loadSourceDiagnostics({ silentError: true });
       setErr('');
@@ -1777,7 +1777,6 @@ function SBOMPage({ config }) {
 
   function resetViewer() {
     setSbom(null);
-    setAutoSyncEnabled(false);
     setSbomMeta(null);
     setErr('');
     setSearch('');
@@ -1806,6 +1805,9 @@ function SBOMPage({ config }) {
         formData.append('project_files', file, file.webkitRelativePath || file.name);
       }
     }
+    if (metadataFile) {
+      formData.append('app_metadata', metadataFile, metadataFile.name);
+    }
 
     try {
       setUploadStatus('Uploading source...');
@@ -1821,12 +1823,40 @@ function SBOMPage({ config }) {
       }
 
       setUploadedSourcePath(data.source_path || '');
+      setUploadedMetadataPath(data.app_metadata_path || '');
       if (data.source_diagnostics) setSourceDiag(data.source_diagnostics);
       setUploadStatus(`Upload successful: ${data.source_path || 'source uploaded'}`);
       toast('Source uploaded successfully', 'ok');
     } catch (e) {
       setUploadStatus(`Upload failed: ${e.message}`);
       toast(`Upload failed: ${e.message}`, 'err');
+    }
+  }
+
+  async function handleUploadMetadataOnly() {
+    setUploadStatus('');
+    setErr('');
+    if (!metadataFile) {
+      setUploadStatus('Choose an app metadata file (JSON, CSV, or XML) first.');
+      return;
+    }
+    const formData = new FormData();
+    formData.append('metadata_file', metadataFile, metadataFile.name);
+    try {
+      setUploadStatus('Uploading metadata...');
+      const res = await fetch(apiUrl('/api/upload-metadata'), { method: 'POST', body: formData });
+      const data = await parseApiResponse(res);
+      if (!res.ok || data.status !== 'ok') {
+        throw new Error(apiErrorMessage(data, 'Metadata upload failed'));
+      }
+      setUploadedMetadataPath(data.app_metadata_path || '');
+      setUploadStatus(
+        `Metadata uploaded (${data.metadata_format || 'json'} → JSON). Use with Generate SBOM after source is uploaded.`
+      );
+      toast('App metadata uploaded', 'ok');
+    } catch (e) {
+      setUploadStatus(`Metadata upload failed: ${e.message}`);
+      toast(`Metadata upload failed: ${e.message}`, 'err');
     }
   }
 
@@ -1849,7 +1879,8 @@ function SBOMPage({ config }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           source_path: uploadedSourcePath,
-          mode: 'native'
+          mode: 'native',
+          ...(uploadedMetadataPath ? { app_metadata_path: uploadedMetadataPath } : {})
         })
       });
 
@@ -1896,7 +1927,7 @@ function SBOMPage({ config }) {
 
       await loadSourceDiagnostics({ silentError: true });
       setUploadStatus('SBOM and reports generated successfully. Loading viewer...');
-      await loadFromApi({ source: 'local', userInitiated: true });
+      await loadFromApi({ source: 'local' });
       try { sessionStorage.setItem('sbom_local_scan_done', String(Date.now())); } catch {}
       window.dispatchEvent(new Event('sbom:local-scan-done'));
       toast('SBOM + vulnerability reports ready', 'ok');
@@ -1912,15 +1943,14 @@ function SBOMPage({ config }) {
   }, [config?.projectId, config?.provider, config?.token]);
 
   useEffect(() => {
-    if (!autoSyncEnabled) return;
     const onPipelineFinished = (event) => {
-      loadFromApi({ silentError: true, source: 'ci', pipelineEvent: event?.detail || null });
+      loadFromApi({ silentError: true, source: 'auto', pipelineEvent: event?.detail || null });
     };
     const onStorage = (event) => {
       if (event.key !== 'sbom_last_pipeline_event' || !event.newValue) return;
       try {
         const payload = JSON.parse(event.newValue);
-        loadFromApi({ silentError: true, source: 'ci', pipelineEvent: payload });
+        loadFromApi({ silentError: true, source: 'auto', pipelineEvent: payload });
       } catch {}
     };
     window.addEventListener('sbom:pipeline-finished', onPipelineFinished);
@@ -1929,21 +1959,40 @@ function SBOMPage({ config }) {
       window.removeEventListener('sbom:pipeline-finished', onPipelineFinished);
       window.removeEventListener('storage', onStorage);
     };
-  }, [autoSyncEnabled, config?.projectId, config?.provider, config?.token]);
+  }, [config?.projectId, config?.provider, config?.token]);
 
   const types = useMemo(() => sbom ? ['All', ...new Set(sbom.components?.map(c => c.type) || [])] : [], [sbom]);
 
   const metadataAudit = useMemo(() => {
-    if (!sbom?.components?.length) return { missingCount: 0, totalChecks: 0, byField: [], topMissing: [] };
+    if (!sbom?.components?.length) {
+      return { missingCount: 0, totalChecks: 0, byField: [], topMissing: [], auditedRows: 0 };
+    }
     const counters = { version: 0, supplier: 0, license: 0, purl: 0 };
     const topMissing = [];
     let totalChecks = 0;
     let missingCount = 0;
+    let auditedRows = 0;
+    const hasLicense = (c) => {
+      const x = c?.licenses?.[0];
+      if (!x) return false;
+      if (x.expression && String(x.expression).trim()) return true;
+      const l = x.license;
+      if (!l) return false;
+      return !!(String(l.id || '').trim() || String(l.name || '').trim());
+    };
+    const auditProps = (c) => (Array.isArray(c?.properties) ? c.properties : []);
+    const isLegacyIncludeFake = (c) => {
+      const n = String(c?.name || '');
+      if (n.startsWith('include:')) return true;
+      return auditProps(c).some((p) => p?.name === 'sbom-attestation:enrichment' && p?.value === 'include-hint');
+    };
     for (const c of sbom.components) {
+      if (isLegacyIncludeFake(c)) continue;
+      auditedRows += 1;
       const checks = [
         ['version', !!String(c?.version || '').trim()],
         ['supplier', !!String(c?.supplier?.name || '').trim()],
-        ['license', !!String(c?.licenses?.[0]?.license?.id || '').trim()],
+        ['license', hasLicense(c)],
         ['purl', !!String(c?.purl || '').trim()],
       ];
       const missing = checks.filter(([, ok]) => !ok).map(([k]) => k);
@@ -1957,6 +2006,7 @@ function SBOMPage({ config }) {
     return {
       missingCount,
       totalChecks,
+      auditedRows,
       byField: [
         ['Missing version', counters.version],
         ['Missing supplier', counters.supplier],
@@ -1985,7 +2035,7 @@ function SBOMPage({ config }) {
             <div className="page-sub">CycloneDX 1.4 · Component Intelligence</div>
           </div>
           <div className="flex gap-6">
-            <button className="btn btn-xs" onClick={() => loadFromApi({ source: 'auto', userInitiated: true })} disabled={loadingApi}>
+            <button className="btn btn-xs" onClick={() => loadFromApi({ source: 'auto' })} disabled={loadingApi}>
               {loadingApi ? 'Refreshing...' : '↻ Refresh Latest'}
             </button>
             <button className="btn btn-outline-red btn-xs" onClick={resetViewer}>Reset View</button>
@@ -1995,7 +2045,7 @@ function SBOMPage({ config }) {
         <div className="card">
           <div className="card-body">
             <div className="flex gap-6" style={{marginBottom:12,flexWrap:'wrap'}}>
-              <button className="btn btn-outline-gold" onClick={() => loadFromApi({ source: 'auto', userInitiated: true })} disabled={loadingApi}>
+              <button className="btn btn-outline-gold" onClick={() => loadFromApi({ source: 'auto' })} disabled={loadingApi}>
                 {loadingApi ? 'Loading...' : 'Load Latest SBOM'}
               </button>
             </div>
@@ -2009,6 +2059,9 @@ function SBOMPage({ config }) {
                 <div className="field" style={{marginBottom:12}}>
                   <span className="field-label">ZIP Upload</span>
                   <input type="file" accept=".zip" onChange={(e) => { setProjectZip(e.target.files[0] || null); setProjectFiles([]); setSingleSourceFile(null); }} />
+                  <div style={{ marginTop: 6, fontSize: 11, fontFamily: 'var(--mono)', color: projectZip ? 'var(--gold)' : 'var(--text2)' }}>
+                    {projectZip ? `Selected: ${projectZip.name}` : 'No file selected'}
+                  </div>
                 </div>
 
                 <div className="field" style={{marginBottom:12}}>
@@ -2018,6 +2071,9 @@ function SBOMPage({ config }) {
                     accept=".c,.cc,.cpp,.cxx,.h,.hh,.hpp,.hxx,.txt"
                     onChange={(e) => { setSingleSourceFile(e.target.files[0] || null); setProjectZip(null); setProjectFiles([]); }}
                   />
+                  <div style={{ marginTop: 6, fontSize: 11, fontFamily: 'var(--mono)', color: singleSourceFile ? 'var(--gold)' : 'var(--text2)' }}>
+                    {singleSourceFile ? `Selected: ${singleSourceFile.name}` : 'No file selected'}
+                  </div>
                 </div>
 
                 <div className="field" style={{marginBottom:12}}>
@@ -2029,6 +2085,34 @@ function SBOMPage({ config }) {
                     multiple
                     onChange={(e) => { setProjectFiles(Array.from(e.target.files || [])); setProjectZip(null); setSingleSourceFile(null); }}
                   />
+                  <div style={{ marginTop: 6, fontSize: 11, fontFamily: 'var(--mono)', color: projectFiles.length ? 'var(--gold)' : 'var(--text2)' }}>
+                    {projectFiles.length
+                      ? `Selected: ${projectFiles.length} file(s) from folder (e.g. ${(projectFiles[0]?.webkitRelativePath || projectFiles[0]?.name || '').split('/')[0] || '…'})`
+                      : 'No folder selected'}
+                  </div>
+                </div>
+
+                <div className="field" style={{marginBottom:12}}>
+                  <span className="field-label">App metadata (optional)</span>
+                  <input
+                    type="file"
+                    accept=".json,.csv,.xml,application/json,text/csv,text/xml,application/xml"
+                    onChange={(e) => { setMetadataFile(e.target.files[0] || null); }}
+                  />
+                  <div style={{ marginTop: 6, fontSize: 11, fontFamily: 'var(--mono)', color: metadataFile ? 'var(--gold)' : 'var(--text2)' }}>
+                    {metadataFile ? `Selected: ${metadataFile.name}` : 'JSON, CSV, or XML — merged into app-metadata.json on upload; or ship app-metadata.json inside the project'}
+                  </div>
+                  {uploadedMetadataPath ? (
+                    <div style={{ marginTop: 4, fontSize: 10, color: 'var(--teal)', fontFamily: 'var(--mono)', wordBreak: 'break-all' }}>
+                      Using for Generate SBOM: {uploadedMetadataPath}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="flex gap-6" style={{flexWrap:'wrap', marginBottom: 8}}>
+                  <button type="button" className="btn btn-outline-gold" onClick={handleUploadMetadataOnly} disabled={!metadataFile} title={!metadataFile ? 'Choose a metadata file first' : ''}>
+                    Upload metadata only
+                  </button>
                 </div>
 
                 <div className="flex gap-6" style={{flexWrap:'wrap'}}>
@@ -2091,11 +2175,11 @@ function SBOMPage({ config }) {
           <div className="page-sub">{sbom.metadata?.component?.name || 'Holistic SBOM'}</div>
         </div>
         <div className="flex gap-6">
-          <button className="btn btn-xs" onClick={() => loadFromApi({ source: 'auto', userInitiated: true })} disabled={loadingApi}>
+          <button className="btn btn-xs" onClick={() => loadFromApi({ source: 'auto' })} disabled={loadingApi}>
             {loadingApi ? 'Refreshing...' : '↻ Refresh Latest'}
           </button>
           <button className="btn btn-outline-red btn-xs" onClick={resetViewer}>Reset View</button>
-          <button className="btn btn-outline-red btn-sm" onClick={() => { setSbom(null); setAutoSyncEnabled(false); }}>✕ Clear</button>
+          <button className="btn btn-outline-red btn-sm" onClick={() => { setSbom(null); }}>✕ Clear</button>
         </div>
       </div>
 
@@ -2130,6 +2214,16 @@ function SBOMPage({ config }) {
                 <span className="info-val text-mono" style={{fontSize:11,color:'var(--gold)'}}>{v}</span>
               </div>
             ))}
+            {(sbomMeta?.artifacts_url || sbomMeta?.pipeline_url) ? (
+              <div className="info-row" style={{marginTop:6}}>
+                <span className="info-key">CI artifacts</span>
+                <span className="info-val">
+                  <a href={sbomMeta.artifacts_url || sbomMeta.pipeline_url} target="_blank" rel="noreferrer" style={{color:'var(--teal)', fontSize:11}}>
+                    Open run / download artifacts
+                  </a>
+                </span>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -2137,9 +2231,10 @@ function SBOMPage({ config }) {
           <div className="card-hd"><div className="card-title"><span className="card-icon">🧪</span>Metadata Completeness Audit</div></div>
           <div className="card-body" style={{padding:'8px 16px'}}>
             <div className="info-row">
-              <span className="info-key">Missing Fields (All Components)</span>
+              <span className="info-key">Missing Fields (audited components)</span>
               <span className="info-val text-mono" style={{fontSize:11,color: metadataAudit.missingCount ? 'var(--amber)' : 'var(--green)'}}>
                 {metadataAudit.missingCount} / {metadataAudit.totalChecks}
+                <span style={{color:'var(--text2)', marginLeft:6}}>({metadataAudit.auditedRows} components · legacy include:* rows excluded)</span>
               </span>
             </div>
             {metadataAudit.byField.map(([k,v]) => (
@@ -2309,15 +2404,29 @@ function VulnPage() {
   }
 
   async function loadFromApi(nextScanner, opts = {}) {
-    const { silentError = false } = opts;
+    const { silentError = false, pipelineEvent = null, forceLocal = false } = opts;
     setLoading(true);
     try {
       const cfg = readConnectConfig();
+      const q = new URLSearchParams();
+      q.set('scanner', nextScanner);
+      q.set('source', forceLocal ? 'local' : 'auto');
+      let ev = pipelineEvent;
+      if (!ev?.id) {
+        try {
+          const raw = sessionStorage.getItem('sbom_last_pipeline_event');
+          if (raw) ev = JSON.parse(raw);
+        } catch {}
+      }
+      if (ev?.id) {
+        if ((ev.provider || cfg.provider) === 'gitlab') q.set('pipeline_id', String(ev.id));
+        else q.set('run_id', String(ev.id));
+      }
       const j = await GL(
         cfg.token,
         cfg.projectId,
         cfg.provider,
-        `/report/unified?scanner=${encodeURIComponent(nextScanner)}&source=auto`
+        `/report/unified?${q.toString()}`
       );
       setData(j);
       setScanner(nextScanner);
@@ -2349,19 +2458,22 @@ function VulnPage() {
   }, []);
 
   useEffect(() => {
-    const reload = () => { loadFromApi(scanner, { silentError: true }); };
-    window.addEventListener('sbom:local-scan-done', reload);
-    window.addEventListener('sbom:pipeline-finished', reload);
+    const onLocalScan = () => { loadFromApi(scanner, { silentError: true, forceLocal: true }); };
+    const onPipeline = (event) => {
+      loadFromApi(scanner, { silentError: true, pipelineEvent: event?.detail || null });
+    };
+    window.addEventListener('sbom:local-scan-done', onLocalScan);
+    window.addEventListener('sbom:pipeline-finished', onPipeline);
     return () => {
-      window.removeEventListener('sbom:local-scan-done', reload);
-      window.removeEventListener('sbom:pipeline-finished', reload);
+      window.removeEventListener('sbom:local-scan-done', onLocalScan);
+      window.removeEventListener('sbom:pipeline-finished', onPipeline);
     };
   }, [scanner]);
 
   useEffect(() => {
     const id = setInterval(() => {
       loadFromApi(scanner, { silentError: true });
-    }, 20000);
+    }, 45000);
     return () => clearInterval(id);
   }, [scanner]);
 
@@ -2455,11 +2567,15 @@ function VulnPage() {
       <div className="page-hd">
         <div>
           <div className="page-title">Vulnerability Scanner</div>
-          <div className="page-sub">{scanner === 'trivy' ? 'Trivy SBOM' : 'Grype SBOM'} · {normalized.length} findings · {meta?.source || 'unknown source'}</div>
+          <div className="page-sub">
+            {scanner === 'trivy' ? 'Trivy SBOM' : 'Grype SBOM'} · {normalized.length} findings · {meta?.source || 'unknown source'}
+            {meta?.fallback ? <span style={{color:'var(--amber)', marginLeft:8}}>(fallback: server-local scan)</span> : null}
+          </div>
         </div>
-        <div className="flex gap-6">
-          <button className="btn btn-xs" onClick={() => loadFromApi('grype')}>Reload Grype</button>
-          <button className="btn btn-xs" onClick={() => loadFromApi('trivy')}>Reload Trivy</button>
+        <div className="flex gap-6" style={{flexWrap:'wrap'}}>
+          <button className="btn btn-xs" onClick={() => loadFromApi('grype')}>Reload Grype (CI first)</button>
+          <button className="btn btn-xs" onClick={() => loadFromApi('trivy')}>Reload Trivy (CI first)</button>
+          <button className="btn btn-xs btn-outline-gold" onClick={() => loadFromApi(scanner, { forceLocal: true })} title="Use reports on the API server only (last upload/generate)">Server local only</button>
           <button className="btn btn-outline-red btn-sm" onClick={() => setData(null)}>Clear</button>
         </div>
       </div>
@@ -2504,6 +2620,22 @@ function VulnPage() {
                 <span className="info-val" style={{color:'var(--gold)'}}>{v}</span>
               </div>
             ))}
+            {meta?.note ? (
+              <div className="info-row" style={{marginTop:8}}>
+                <span className="info-key">Note</span>
+                <span className="info-val" style={{color:'var(--amber)', fontSize:10}}>{meta.note}</span>
+              </div>
+            ) : null}
+            {(meta?.artifacts_url || meta?.pipeline_url) ? (
+              <div className="info-row" style={{marginTop:8}}>
+                <span className="info-key">CI download</span>
+                <span className="info-val">
+                  <a href={meta.artifacts_url || meta.pipeline_url} target="_blank" rel="noreferrer" style={{color:'var(--teal)', fontSize:11}}>
+                    Open workflow run / artifacts
+                  </a>
+                </span>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
