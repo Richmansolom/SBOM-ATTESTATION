@@ -306,6 +306,31 @@ def ensure_dirs():
     TOOLS_BIN_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def clear_previous_build_artifacts():
+    """Remove prior SBOM and scan outputs so a new upload or generate cannot mix results across apps."""
+    ensure_dirs()
+    for name in (
+        "sbom-source.enriched.json",
+        "sbom-build.enriched.json",
+        "sbom-image.enriched.json",
+        "sbom-source.json",
+        "sbom-source.signed.json",
+    ):
+        p = SBOM_DIR / name
+        if p.exists():
+            try:
+                p.unlink()
+            except Exception:
+                pass
+    if REPORT_DIR.exists():
+        for p in REPORT_DIR.iterdir():
+            if p.is_file():
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+
+
 def collect_source_diagnostics(source_dir):
     root = Path(source_dir).resolve()
     diag = {
@@ -1036,6 +1061,7 @@ def write_osv_vuln_reports_from_sbom(sbom_path):
 
 def run_generate_pipeline(body, log_callback=None):
     ensure_dirs()
+    clear_previous_build_artifacts()
     body = body or {}
 
     source_path = body.get("source_path")
@@ -2192,6 +2218,8 @@ def upload_source():
     if count == 0:
         return jsonify({"status": "error", "message": "No valid project files were uploaded"}), 400
 
+    clear_previous_build_artifacts()
+
     source_root = pick_source_root(extract_root)
     app_meta = source_root / "app-metadata.json"
     meta_upload = request.files.get("app_metadata")
@@ -2434,7 +2462,7 @@ def get_unified_sbom():
 
     local_path = get_latest_sbom_path()
 
-    # Auto mode prefers CI artifacts when a project/provider is connected, then falls back local.
+    # Auto / CI: only CI artifacts — never fall back to server-local SBOM (avoids mixing apps).
     if source in ("auto", "ci"):
         if provider == "gitlab":
             ci_token = token or os.getenv("GITLAB_TOKEN", "").strip()
@@ -2484,26 +2512,36 @@ def get_unified_sbom():
             if source == "ci":
                 return jsonify({"status": "error", "message": ci_error or "No CI SBOM found"}), 404
 
+    if source == "auto":
+        return jsonify(
+            {
+                "status": "error",
+                "message": "No CI SBOM found. Use source=local for the last server-side generate after upload.",
+            }
+        ), 404
+
     if source not in ("auto", "local", "ci"):
         return jsonify({"status": "error", "message": "source must be 'auto', 'local', or 'ci'"}), 400
 
-    if local_path and local_path.exists():
-        payload = parse_json(local_path)
-        if payload is not None:
-            return jsonify(
-                with_report_meta(
-                    payload,
-                    {
-                        "source": "local",
-                        "provider": provider,
-                        "project": repo,
-                        "path": str(local_path.relative_to(REPO_ROOT)),
-                    },
+    if source == "local":
+        if local_path and local_path.exists():
+            payload = parse_json(local_path)
+            if payload is not None:
+                return jsonify(
+                    with_report_meta(
+                        payload,
+                        {
+                            "source": "local",
+                            "provider": provider,
+                            "project": repo,
+                            "path": str(local_path.relative_to(REPO_ROOT)),
+                        },
+                    )
                 )
-            )
-        return jsonify({"status": "error", "message": "Local SBOM exists but is not valid JSON"}), 500
+            return jsonify({"status": "error", "message": "Local SBOM exists but is not valid JSON"}), 500
+        return jsonify({"status": "error", "message": "No local SBOM file found"}), 404
 
-    return jsonify({"status": "error", "message": "No SBOM found in CI artifacts or local workspace"}), 404
+    return jsonify({"status": "error", "message": "No SBOM available"}), 404
 
 
 @app.route("/api/report")
@@ -2613,25 +2651,10 @@ def get_unified_report():
             return jsonify({"status": "error", "message": ci_error or "No CI report found"}), 404
 
     if source == "auto":
-        if local_path.exists():
-            payload = parse_json(local_path)
-            if payload is not None:
-                return jsonify(
-                    with_report_meta(
-                        payload,
-                        {
-                            "source": "local",
-                            "scanner": scanner,
-                            "path": str(local_path.relative_to(REPO_ROOT)),
-                            "fallback": True,
-                            "note": "No CI vulnerability report matched; showing server-local report from last upload/generate.",
-                        },
-                    )
-                )
         return jsonify(
             {
                 "status": "error",
-                "message": "No vulnerability report in CI artifacts or local reports/",
+                "message": "No CI vulnerability report found. Use source=local for the last server-side scan (after upload/generate).",
             }
         ), 404
 
