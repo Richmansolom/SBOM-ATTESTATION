@@ -6,6 +6,7 @@ variables:
   REPORT_DIR: "reports"
   BUILD_LOG: "build-output.log"
   APP_DIR: "example-app"
+  APP_VERSION: "1.0.0"
 
 build_sbom_scan:
   stage: build
