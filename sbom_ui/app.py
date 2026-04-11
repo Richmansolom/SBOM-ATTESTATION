@@ -1,3 +1,4 @@
+import copy
 import json
 import io
 import os
@@ -18,6 +19,8 @@ from urllib.request import Request, urlopen
 
 from flask import Flask, has_request_context, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
+
+from metadata_parser import app_metadata_to_json_bytes, parse_app_metadata_bytes
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -587,7 +590,115 @@ def build_temp_metadata(app_name, source_path):
     return path
 
 
-def enrich_sbom_with_source_inventory(sbom_path, source_dir):
+def _license_entries_from_spdx_or_name(lic: str):
+    """Minimal CycloneDX 1.4+ license list entry for enrichment rows."""
+    if not lic or str(lic).strip().lower() in ("unknown", ""):
+        return []
+    lid = str(lic).strip()
+    if " " not in lid and re.match(r"^[A-Za-z0-9.+\-]+$", lid):
+        return [{"license": {"id": lid}}]
+    return [{"license": {"name": lid}}]
+
+
+def _enrichment_supplier_license(payload, source_dir: Path, metadata_file=None):
+    """
+    Prefer explicit app metadata path (e.g. temp JSON in reports/ or uploaded canonical JSON),
+    then app-metadata.json beside the source tree, then Syft root metadata.
+    Used to populate supplier/license on hosted-fallback file inventory rows.
+    """
+    paths_to_try = []
+    if metadata_file is not None:
+        try:
+            mf = Path(metadata_file)
+            if mf.is_file():
+                paths_to_try.append(mf)
+        except Exception:
+            pass
+    paths_to_try.append(source_dir / "app-metadata.json")
+    for meta_path in paths_to_try:
+        if not meta_path.exists():
+            continue
+        try:
+            app = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(app, dict):
+            continue
+        sup = app.get("supplier") or {}
+        name = str(sup.get("name") or "").strip()
+        urls = sup.get("url") if isinstance(sup.get("url"), list) else []
+        lic = str(app.get("license") or "").strip()
+        if name:
+            supplier = {"name": name, "url": urls}
+            licenses = _license_entries_from_spdx_or_name(lic)
+            return supplier, licenses
+    meta = payload.get("metadata") or {}
+    comp = meta.get("component") or {}
+    sup = comp.get("supplier") or {}
+    name = str(sup.get("name") or "").strip()
+    if name:
+        supplier = {"name": name, "url": sup.get("url") or []}
+        licenses = comp.get("licenses")
+        if isinstance(licenses, list) and len(licenses) > 0:
+            return supplier, copy.deepcopy(licenses)
+        return supplier, []
+    return None, []
+
+
+def _should_drop_hosted_noise_component(comp) -> bool:
+    """Strip ccls-cache / Nix-store mirror paths and legacy include:* pseudo-libraries from SBOM lists."""
+    if not isinstance(comp, dict):
+        return False
+    name = str(comp.get("name") or "")
+    n = name.replace("\\", "/")
+    nl = n.lower()
+    if name.startswith("include:"):
+        return True
+    if ".ccls-cache/" in nl or nl.startswith(".ccls-cache/"):
+        return True
+    if "/ccls-cache/" in nl or nl.startswith("ccls-cache/"):
+        return True
+    # ccls mirrors use @@ segments; drop if it looks like a cache mirror, not project source.
+    if "@@" in name and (".ccls-cache" in nl or "@nix@" in name or "/nix/store/" in nl):
+        return True
+    if "@nix@" in name or "/nix/store/" in nl:
+        return True
+    return False
+
+
+def prune_hosted_sbom_noise(sbom_path: Path) -> int:
+    """Remove junk components from Syft output before enrichment (defensive; works on old SBOMs too)."""
+    payload = parse_json(sbom_path)
+    if not isinstance(payload, dict):
+        return 0
+    comps = payload.get("components")
+    if not isinstance(comps, list):
+        return 0
+    kept = [c for c in comps if not _should_drop_hosted_noise_component(c)]
+    removed = len(comps) - len(kept)
+    if removed <= 0:
+        return 0
+    payload["components"] = kept
+    payload.setdefault("metadata", {})
+    payload["metadata"]["timestamp"] = datetime.now(timezone.utc).isoformat()
+    sbom_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return removed
+
+
+def _is_junk_inventory_path(rel_posix: str) -> bool:
+    """Skip ccls Nix mirror paths even if directory heuristics miss a variant."""
+    r = rel_posix.replace("\\", "/")
+    rl = r.lower()
+    if "@@" in r:
+        return True
+    if "@nix@" in r or "/nix/store/" in rl:
+        return True
+    if ".ccls-cache" in rl or "/ccls-cache/" in rl:
+        return True
+    return False
+
+
+def enrich_sbom_with_source_inventory(sbom_path, source_dir, app_metadata_path=None):
     payload = parse_json(sbom_path)
     if payload is None or not isinstance(payload, dict):
         return 0
@@ -605,14 +716,32 @@ def enrich_sbom_with_source_inventory(sbom_path, source_dir):
     if not root.exists():
         return 0
 
+    sup_inherit, lic_inherit = _enrichment_supplier_license(payload, root, app_metadata_path)
+
     code_exts = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".cmake", ".mk", ".txt", ".md"}
-    skip_dir_names = {"__macosx", ".git", ".github", ".svn", ".hg", "__pycache__", "node_modules", "build", "dist"}
+    skip_dir_names = {
+        "__macosx",
+        ".git",
+        ".github",
+        ".svn",
+        ".hg",
+        "__pycache__",
+        "node_modules",
+        "build",
+        "dist",
+        ".ccls-cache",
+        ".clangd",
+        ".vscode",
+        ".idea",
+        ".cursor",
+        ".vs",
+        ".venv",
+        "venv",
+    }
     max_components = 1000
     generated = []
     existing_names = {str((c or {}).get("name") or "").strip().lower() for c in components}
     existing_refs = {str((c or {}).get("bom-ref") or "").strip() for c in components}
-    include_names = set()
-    include_re = re.compile(r"^\s*#\s*include\s*[<\"]([^\">]+)[\">]")
 
     for f in root.rglob("*"):
         if not f.is_file():
@@ -624,6 +753,8 @@ def enrich_sbom_with_source_inventory(sbom_path, source_dir):
         if f.suffix.lower() not in code_exts:
             continue
         rel_posix = rel.as_posix()
+        if _is_junk_inventory_path(rel_posix):
+            continue
         if rel_posix.lower() in existing_names:
             continue
         slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", rel_posix).strip("-").lower() or "source-file"
@@ -631,51 +762,24 @@ def enrich_sbom_with_source_inventory(sbom_path, source_dir):
         bom_ref = f"source-file-{file_ref}"
         if bom_ref in existing_refs:
             continue
-        generated.append(
-            {
-                "type": "file",
-                "name": rel_posix,
-                "version": "0",
-                "bom-ref": bom_ref,
-                "purl": f"pkg:generic/{slug}@0",
-            }
-        )
+        row = {
+            "type": "file",
+            "name": rel_posix,
+            "version": "0",
+            "bom-ref": bom_ref,
+            "purl": f"pkg:generic/{slug}@0",
+            "properties": [
+                {"name": "sbom-attestation:enrichment", "value": "source-file"},
+            ],
+        }
+        if sup_inherit:
+            row["supplier"] = copy.deepcopy(sup_inherit)
+        if lic_inherit:
+            row["licenses"] = copy.deepcopy(lic_inherit)
+        generated.append(row)
         existing_names.add(rel_posix.lower())
         existing_refs.add(bom_ref)
 
-        # Add light-weight pseudo components for declared C/C++ include dependencies.
-        try:
-            for line in f.read_text(encoding="utf-8", errors="ignore").splitlines():
-                m = include_re.match(line)
-                if m:
-                    include_names.add(m.group(1).strip())
-        except Exception:
-            pass
-
-        if len(generated) >= max_components:
-            break
-
-    for inc in sorted(include_names):
-        if not inc:
-            continue
-        inc_name = f"include:{inc}"
-        if inc_name.lower() in existing_names:
-            continue
-        slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", inc).strip("-").lower() or "header"
-        inc_ref = f"cpp-include-{sha1(inc.encode('utf-8')).hexdigest()[:12]}"
-        if inc_ref in existing_refs:
-            continue
-        generated.append(
-            {
-                "type": "library",
-                "name": inc_name,
-                "version": "0",
-                "bom-ref": inc_ref,
-                "purl": f"pkg:generic/cpp-include/{slug}@0",
-            }
-        )
-        existing_names.add(inc_name.lower())
-        existing_refs.add(inc_ref)
         if len(generated) >= max_components:
             break
 
@@ -1104,9 +1208,17 @@ def run_generate_pipeline(body, log_callback=None):
                 "source_diagnostics": source_diag,
             }
 
-        added_components = enrich_sbom_with_source_inventory(sbom_path, source_dir)
+        noise_removed = prune_hosted_sbom_noise(sbom_path)
+        if log_callback and noise_removed > 0:
+            log_callback(
+                f"==> Removed {noise_removed} junk/synthetic component(s) (e.g. .ccls-cache, nix-store mirrors, legacy include:*)\n"
+            )
+
+        added_components = enrich_sbom_with_source_inventory(sbom_path, source_dir, app_meta_path)
         if log_callback and added_components > 0:
-            log_callback(f"==> Added {added_components} source-file components (hosted fallback inventory)\n")
+            log_callback(
+                f"==> Added {added_components} source-file inventory row(s) (supplier/license from app metadata when available; no #include pseudo-libraries)\n"
+            )
 
         sign_cmd = [
             "bash",
@@ -2082,6 +2194,20 @@ def upload_source():
 
     source_root = pick_source_root(extract_root)
     app_meta = source_root / "app-metadata.json"
+    meta_upload = request.files.get("app_metadata")
+    if meta_upload and meta_upload.filename:
+        ext = Path(meta_upload.filename).suffix.lower()
+        if ext not in (".json", ".csv", ".xml"):
+            return jsonify(
+                {"status": "error", "message": "app_metadata must be a .json, .csv, or .xml file"}
+            ), 400
+        try:
+            raw_b = meta_upload.read()
+            data = parse_app_metadata_bytes(raw_b, meta_upload.filename)
+            app_meta = source_root / "app-metadata.json"
+            app_meta.write_bytes(app_metadata_to_json_bytes(data))
+        except Exception as exc:
+            return jsonify({"status": "error", "message": f"Invalid app metadata: {exc}"}), 400
     detected_name = source_root.name
     source_diag = collect_source_diagnostics(source_root)
     source_diag.update(
@@ -2119,17 +2245,28 @@ def upload_metadata():
     f = request.files.get("metadata_file")
     if not f or not f.filename:
         return jsonify({"status": "error", "message": "Missing metadata_file upload"}), 400
-    if not str(f.filename).lower().endswith(".json"):
-        return jsonify({"status": "error", "message": "Metadata upload must be a .json file"}), 400
+    ext = Path(f.filename).suffix.lower()
+    if ext not in (".json", ".csv", ".xml"):
+        return jsonify(
+            {"status": "error", "message": "Metadata upload must be .json, .csv, or .xml"}
+        ), 400
+    try:
+        raw_bytes = f.read()
+        data = parse_app_metadata_bytes(raw_bytes, f.filename)
+    except Exception as exc:
+        return jsonify({"status": "error", "message": f"Invalid metadata file: {exc}"}), 400
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     target = UPLOAD_DIR / f"app-metadata-{ts}.json"
-    f.save(str(target))
-    # Basic validation for UX feedback.
-    try:
-        json.loads(target.read_text(encoding="utf-8"))
-    except Exception:
-        return jsonify({"status": "error", "message": "Uploaded metadata JSON is invalid"}), 400
-    return jsonify({"status": "ok", "app_metadata_path": rel_to_repo(target), "message": "Metadata uploaded successfully"})
+    target.write_bytes(app_metadata_to_json_bytes(data))
+    return jsonify(
+        {
+            "status": "ok",
+            "app_metadata_path": rel_to_repo(target),
+            "metadata_format": ext.lstrip("."),
+            "app_name": data.get("name"),
+            "message": "Metadata uploaded successfully (stored as canonical JSON)",
+        }
+    )
 
 
 @app.route("/api/pick-folder", methods=["POST"])
@@ -2180,8 +2317,14 @@ def pick_metadata():
         root.withdraw()
         root.attributes("-topmost", True)
         selected = filedialog.askopenfilename(
-            title="Select app-metadata.json",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            title="Select app metadata (JSON, CSV, or XML)",
+            filetypes=[
+                ("App metadata", "*.json *.csv *.xml"),
+                ("JSON", "*.json"),
+                ("CSV", "*.csv"),
+                ("XML", "*.xml"),
+                ("All files", "*.*"),
+            ],
         )
         root.destroy()
     except Exception as exc:
@@ -2301,20 +2444,20 @@ def get_unified_sbom():
                 pipeline_id=pipeline_id or None,
             )
             if ci_result and ci_result.get("payload") is not None:
-                return jsonify(
-                    with_report_meta(
-                        ci_result["payload"],
-                        {
-                            "source": "gitlab-artifact",
-                            "provider": "gitlab",
-                            "project": repo,
-                            "pipeline_id": ci_result.get("pipeline_id"),
-                            "job_id": ci_result.get("job_id"),
-                            "job_name": ci_result.get("job_name"),
-                            "zip_entry": ci_result.get("zip_entry"),
-                        },
-                    )
-                )
+                pid = ci_result.get("pipeline_id")
+                gl_sbom = {
+                    "source": "gitlab-artifact",
+                    "provider": "gitlab",
+                    "project": repo,
+                    "pipeline_id": pid,
+                    "job_id": ci_result.get("job_id"),
+                    "job_name": ci_result.get("job_name"),
+                    "zip_entry": ci_result.get("zip_entry"),
+                }
+                if pid:
+                    enc = quote(repo, safe="")
+                    gl_sbom["pipeline_url"] = f"https://gitlab.com/{enc}/-/pipelines/{pid}"
+                return jsonify(with_report_meta(ci_result["payload"], gl_sbom))
             if source == "ci":
                 return jsonify({"status": "error", "message": ci_error or "No CI SBOM found"}), 404
         else:
@@ -2325,19 +2468,19 @@ def get_unified_sbom():
                 run_id=run_id or None,
             )
             if ci_result and ci_result.get("payload") is not None:
-                return jsonify(
-                    with_report_meta(
-                        ci_result["payload"],
-                        {
-                            "source": "github-artifact",
-                            "provider": "github",
-                            "project": repo,
-                            "run_id": ci_result.get("run_id"),
-                            "artifact_name": ci_result.get("artifact_name"),
-                            "zip_entry": ci_result.get("zip_entry"),
-                        },
-                    )
-                )
+                rid = ci_result.get("run_id")
+                sbom_gh = {
+                    "source": "github-artifact",
+                    "provider": "github",
+                    "project": repo,
+                    "run_id": rid,
+                    "artifact_name": ci_result.get("artifact_name"),
+                    "zip_entry": ci_result.get("zip_entry"),
+                }
+                if rid:
+                    sbom_gh["run_url"] = f"https://github.com/{repo}/actions/runs/{rid}"
+                    sbom_gh["artifacts_url"] = f"https://github.com/{repo}/actions/runs/{rid}#artifacts"
+                return jsonify(with_report_meta(ci_result["payload"], sbom_gh))
             if source == "ci":
                 return jsonify({"status": "error", "message": ci_error or "No CI SBOM found"}), 404
 
@@ -2396,9 +2539,80 @@ def get_unified_report():
         "grype": REPORT_DIR / "grype-report.json",
         "trivy": REPORT_DIR / "trivy-sbom-report.json",
     }
+    local_path = local_paths[scanner]
 
-    if source in ("auto", "local"):
-        local_path = local_paths[scanner]
+    if source == "local":
+        if not local_path.exists():
+            return jsonify({"status": "error", "message": f"No local report found for scanner '{scanner}'"}), 404
+        payload = parse_json(local_path)
+        if payload is None:
+            return jsonify({"status": "error", "message": "Local report exists but is not valid JSON"}), 500
+        return jsonify(
+            with_report_meta(
+                payload,
+                {
+                    "source": "local",
+                    "scanner": scanner,
+                    "path": str(local_path.relative_to(REPO_ROOT)),
+                },
+            )
+        )
+
+    if source not in ("auto", "ci"):
+        return jsonify({"status": "error", "message": "source must be 'auto', 'local', or 'ci'"}), 400
+
+    # Match /api/sbom/unified: try CI artifacts first so hosted UI does not always show stale Render-local scans.
+    if provider == "gitlab":
+        ci_token = token or os.getenv("GITLAB_TOKEN", "").strip()
+        ci_result, ci_error = fetch_gitlab_report_from_artifacts(
+            project=repo,
+            scanner=scanner,
+            token=ci_token,
+            pipeline_id=pipeline_id or None,
+        )
+        if ci_result and ci_result.get("payload") is not None:
+            pid = ci_result.get("pipeline_id")
+            gl_meta = {
+                "source": "gitlab-artifact",
+                "scanner": scanner,
+                "project": repo,
+                "pipeline_id": pid,
+                "job_id": ci_result.get("job_id"),
+                "job_name": ci_result.get("job_name"),
+                "zip_entry": ci_result.get("zip_entry"),
+            }
+            if pid:
+                enc = quote(repo, safe="")
+                gl_meta["pipeline_url"] = f"https://gitlab.com/{enc}/-/pipelines/{pid}"
+            return jsonify(with_report_meta(ci_result["payload"], gl_meta))
+        if source == "ci":
+            return jsonify({"status": "error", "message": ci_error or "No CI report found"}), 404
+    else:
+        ci_token = token or os.getenv("GITHUB_TOKEN", "").strip()
+        ci_result, ci_error = fetch_github_report_from_artifacts(
+            repo=repo,
+            scanner=scanner,
+            token=ci_token,
+            run_id=run_id or None,
+        )
+        if ci_result and ci_result.get("payload") is not None:
+            rid = ci_result.get("run_id")
+            gh_meta = {
+                "source": "github-artifact",
+                "scanner": scanner,
+                "project": repo,
+                "run_id": rid,
+                "artifact_name": ci_result.get("artifact_name"),
+                "zip_entry": ci_result.get("zip_entry"),
+            }
+            if rid:
+                gh_meta["run_url"] = f"https://github.com/{repo}/actions/runs/{rid}"
+                gh_meta["artifacts_url"] = f"https://github.com/{repo}/actions/runs/{rid}#artifacts"
+            return jsonify(with_report_meta(ci_result["payload"], gh_meta))
+        if source == "ci":
+            return jsonify({"status": "error", "message": ci_error or "No CI report found"}), 404
+
+    if source == "auto":
         if local_path.exists():
             payload = parse_json(local_path)
             if payload is not None:
@@ -2409,64 +2623,19 @@ def get_unified_report():
                             "source": "local",
                             "scanner": scanner,
                             "path": str(local_path.relative_to(REPO_ROOT)),
+                            "fallback": True,
+                            "note": "No CI vulnerability report matched; showing server-local report from last upload/generate.",
                         },
                     )
                 )
-            if source == "local":
-                return jsonify({"status": "error", "message": "Local report exists but is not valid JSON"}), 500
-        elif source == "local":
-            return jsonify({"status": "error", "message": f"No local report found for scanner '{scanner}'"}), 404
-
-    if source not in ("auto", "ci"):
-        return jsonify({"status": "error", "message": "source must be 'auto', 'local', or 'ci'"}), 400
-
-    if provider == "gitlab":
-        ci_token = token or os.getenv("GITLAB_TOKEN", "").strip()
-        ci_result, ci_error = fetch_gitlab_report_from_artifacts(
-            project=repo,
-            scanner=scanner,
-            token=ci_token,
-            pipeline_id=pipeline_id or None,
-        )
-        if ci_result and ci_result.get("payload") is not None:
-            return jsonify(
-                with_report_meta(
-                    ci_result["payload"],
-                    {
-                        "source": "gitlab-artifact",
-                        "scanner": scanner,
-                        "project": repo,
-                        "pipeline_id": ci_result.get("pipeline_id"),
-                        "job_id": ci_result.get("job_id"),
-                        "job_name": ci_result.get("job_name"),
-                        "zip_entry": ci_result.get("zip_entry"),
-                    },
-                )
-            )
-        return jsonify({"status": "error", "message": ci_error or "No CI report found"}), 404
-
-    ci_token = token or os.getenv("GITHUB_TOKEN", "").strip()
-    ci_result, ci_error = fetch_github_report_from_artifacts(
-        repo=repo,
-        scanner=scanner,
-        token=ci_token,
-        run_id=run_id or None,
-    )
-    if ci_result and ci_result.get("payload") is not None:
         return jsonify(
-            with_report_meta(
-                ci_result["payload"],
-                {
-                    "source": "github-artifact",
-                    "scanner": scanner,
-                    "project": repo,
-                    "run_id": ci_result.get("run_id"),
-                    "artifact_name": ci_result.get("artifact_name"),
-                    "zip_entry": ci_result.get("zip_entry"),
-                },
-            )
-        )
-    return jsonify({"status": "error", "message": ci_error or "No CI report found"}), 404
+            {
+                "status": "error",
+                "message": "No vulnerability report in CI artifacts or local reports/",
+            }
+        ), 404
+
+    return jsonify({"status": "error", "message": "No CI report found"}), 404
 
 
 @app.route("/api/pipelines")
