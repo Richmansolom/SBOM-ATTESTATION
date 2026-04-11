@@ -887,7 +887,10 @@ const GL = (tok, proj, provider, path, opts = {}) => {
     }
   }).then(async r => {
     const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(d.message || `${r.status}`);
+    if (!r.ok) {
+      const msg = d.message || d.error || (typeof d === 'string' ? d : '') || `HTTP ${r.status}`;
+      throw new Error(msg);
+    }
     return d;
   });
 };
@@ -1369,6 +1372,18 @@ function PipelinesPage({ config }) {
   useEffect(() => { load(); }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const info = await GL(config.token, config.projectId, config.provider, '/project');
+        if (cancelled || !info?.default_branch) return;
+        setRef(info.default_branch);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [config?.token, config?.projectId, config?.provider]);
+
+  useEffect(() => {
     if (polling) {
       pollRef.current = setInterval(load, 5000);
     } else {
@@ -1438,6 +1453,11 @@ function PipelinesPage({ config }) {
             </button>
           </div>
           <div style={{marginTop:10,fontSize:10,fontFamily:'var(--mono)',color:'var(--text3)'}}>
+            {config.provider === 'gitlab' ? (
+              <div style={{marginBottom:6,color:'var(--teal)',lineHeight:1.4}}>
+                Branch / Ref must exist on GitLab (common fix for “400”: wrong branch). With Connect + token, the default branch is filled automatically.
+              </div>
+            ) : null}
             build:cpp → sbom:generate → sbom:sign → sbom:scan → report:publish (target path: {appDir || 'example-app'})
           </div>
         </div>
