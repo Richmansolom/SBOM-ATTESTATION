@@ -1408,7 +1408,10 @@ function PipelinesPage({ config }) {
           ]
         })
       });
-      toast(`Pipeline #${p.id} launched`, 'ok');
+      const okMsg = p.message && p.message !== 'Pipeline trigger submitted'
+        ? `Pipeline #${p.id} — ${p.message}`
+        : `Pipeline #${p.id} launched`;
+      toast(okMsg, 'ok');
       setPolling(true);
       setTimeout(load, 1500);
     } catch (e) {
@@ -1453,11 +1456,6 @@ function PipelinesPage({ config }) {
             </button>
           </div>
           <div style={{marginTop:10,fontSize:10,fontFamily:'var(--mono)',color:'var(--text3)'}}>
-            {config.provider === 'gitlab' ? (
-              <div style={{marginBottom:6,color:'var(--teal)',lineHeight:1.4}}>
-                Branch / Ref must exist on GitLab (common fix for “400”: wrong branch). With Connect + token, the default branch is filled automatically.
-              </div>
-            ) : null}
             build:cpp → sbom:generate → sbom:sign → sbom:scan → report:publish (target path: {appDir || 'example-app'})
           </div>
         </div>

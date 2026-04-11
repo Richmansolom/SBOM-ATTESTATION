@@ -2927,6 +2927,7 @@ def trigger_pipeline():
 
     if provider == "gitlab":
         encoded_project = quote(repo, safe="")
+        trigger_note = None
         trigger_token = str(body.get("trigger_token") or "").strip() or os.getenv("GITLAB_TRIGGER_TOKEN", "")
         if trigger_token:
             query = urlencode(
@@ -2953,6 +2954,35 @@ def trigger_pipeline():
                     ],
                 },
             )
+            if status >= 300:
+                msg = gitlab_error_message(out)
+                http_status = status if 300 <= status < 600 else 500
+                # Developer tokens often cannot set pipeline variables; retry ref-only (uses .gitlab-ci.yml defaults).
+                if http_status in (400, 403) and (
+                    "variable" in msg.lower()
+                    and ("permission" in msg.lower() or "insufficient" in msg.lower())
+                ):
+                    status, out = gitlab_api(
+                        f"projects/{encoded_project}/pipeline",
+                        method="POST",
+                        token=token,
+                        data={"ref": str(ref)},
+                    )
+                    if status < 300:
+                        trigger_note = (
+                            "Pipeline started using CI defaults from .gitlab-ci.yml "
+                            "(this token cannot override pipeline variables; Maintainer or a trigger token can)."
+                        )
+                    else:
+                        msg2 = gitlab_error_message(out)
+                        st2 = status if 300 <= status < 600 else 500
+                        if st2 >= 500:
+                            return jsonify({"message": msg2 or msg or "Failed to trigger GitLab pipeline"}), 500
+                        return jsonify({"message": msg2 or msg or "Failed to trigger GitLab pipeline"}), st2
+                else:
+                    if http_status >= 500:
+                        return jsonify({"message": msg or "Failed to trigger GitLab pipeline"}), 500
+                    return jsonify({"message": msg or "Failed to trigger GitLab pipeline"}), http_status
         if status >= 300:
             msg = gitlab_error_message(out)
             http_status = status if 300 <= status < 600 else 500
@@ -2968,7 +2998,7 @@ def trigger_pipeline():
                 "id": created.get("id"),
                 "status": map_gitlab_status(created.get("status") or "pending"),
                 "html_url": created.get("web_url"),
-                "message": "Pipeline trigger submitted",
+                "message": trigger_note or "Pipeline trigger submitted",
             }
         )
 
