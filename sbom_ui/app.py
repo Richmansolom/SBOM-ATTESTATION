@@ -1732,8 +1732,46 @@ def gitlab_api(path, method="GET", token="", data=None):
         with urlopen(req, timeout=30) as resp:
             body = resp.read().decode("utf-8", errors="replace")
             return resp.status, body
+    except HTTPError as e:
+        try:
+            err_body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            err_body = ""
+        if not err_body:
+            err_body = e.reason or str(e)
+        return e.code, err_body
+    except URLError as e:
+        return 599, str(e.reason or e)
     except Exception as exc:
         return 500, str(exc)
+
+
+def gitlab_error_message(text):
+    """Turn GitLab JSON error (or plain text) into a short user-facing string."""
+    if not text or not str(text).strip():
+        return "GitLab request failed"
+    raw = str(text).strip()
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        return raw[:800]
+    msg = obj.get("message")
+    if isinstance(msg, dict):
+        parts = []
+        for k, v in msg.items():
+            if isinstance(v, list):
+                parts.append(f"{k}: {', '.join(str(x) for x in v)}")
+            else:
+                parts.append(f"{k}: {v}")
+        return "; ".join(parts) if parts else raw[:800]
+    if isinstance(msg, list):
+        return "; ".join(str(x) for x in msg)
+    if msg:
+        return str(msg)
+    err = obj.get("error") or obj.get("errors")
+    if err:
+        return str(err)[:800]
+    return raw[:800]
 
 
 def gitlab_api_binary(path, token=""):
@@ -2661,6 +2699,58 @@ def get_unified_report():
     return jsonify({"status": "error", "message": "No CI report found"}), 404
 
 
+@app.route("/api/project")
+def project_info():
+    """Default branch + path for Launch UI (avoids GitLab 400 when ref does not exist)."""
+    provider = get_requested_provider()
+    repo = get_requested_repo()
+    if provider == "gitlab":
+        token = get_requested_token() or os.getenv("GITLAB_TOKEN", "")
+        if not token:
+            return jsonify(
+                {
+                    "default_branch": "main",
+                    "path_with_namespace": repo,
+                    "message": "Connect with a GitLab token to read default branch",
+                }
+            )
+        encoded = quote(repo, safe="")
+        status, out = gitlab_api(f"projects/{encoded}", token=token)
+        if status >= 300:
+            return jsonify(
+                {
+                    "default_branch": "main",
+                    "path_with_namespace": repo,
+                    "message": gitlab_error_message(out),
+                }
+            )
+        try:
+            data = json.loads(out)
+        except Exception:
+            data = {}
+        return jsonify(
+            {
+                "default_branch": data.get("default_branch") or "main",
+                "path_with_namespace": data.get("path_with_namespace") or repo,
+            }
+        )
+
+    token = _github_token_for_request()
+    status, out = github_rest_request(f"repos/{repo}", "GET", token)
+    if status >= 300:
+        return jsonify({"default_branch": "main", "full_name": repo, "message": "Could not read repository metadata"})
+    try:
+        data = json.loads(out)
+    except Exception:
+        data = {}
+    return jsonify(
+        {
+            "default_branch": data.get("default_branch") or "main",
+            "full_name": data.get("full_name") or repo,
+        }
+    )
+
+
 @app.route("/api/pipelines")
 def pipelines():
     provider = get_requested_provider()
@@ -2671,7 +2761,7 @@ def pipelines():
         token = get_requested_token() or os.getenv("GITLAB_TOKEN", "")
         status, out = gitlab_api(f"projects/{encoded_project}/pipelines?per_page={per_page}", token=token)
         if status >= 300:
-            return jsonify({"message": out.strip() or "Failed to fetch GitLab pipelines"}), 500
+            return jsonify({"message": gitlab_error_message(out) or "Failed to fetch GitLab pipelines"}), 500
         try:
             runs = json.loads(out)
         except Exception:
@@ -2864,7 +2954,11 @@ def trigger_pipeline():
                 },
             )
         if status >= 300:
-            return jsonify({"message": out.strip() or "Failed to trigger GitLab pipeline"}), 500
+            msg = gitlab_error_message(out)
+            http_status = status if 300 <= status < 600 else 500
+            if http_status >= 500:
+                return jsonify({"message": msg or "Failed to trigger GitLab pipeline"}), 500
+            return jsonify({"message": msg or "Failed to trigger GitLab pipeline"}), http_status
         try:
             created = json.loads(out)
         except Exception:
