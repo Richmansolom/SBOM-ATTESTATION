@@ -2374,6 +2374,8 @@ function VulnPage() {
   const [meta, setMeta] = useState(null);
   const [drag, setDrag] = useState(false);
   const [loading, setLoading] = useState(false);
+  /** When true, block CI/poll/local-scan from replacing the table with API data until Clear or explicit reload. */
+  const manualUploadRef = useRef(false);
 
   function readConnectConfig() {
     try {
@@ -2393,6 +2395,7 @@ function VulnPage() {
     const r = new FileReader();
     r.onload = e => {
       try {
+        manualUploadRef.current = true;
         setData(JSON.parse(e.target.result));
         setMeta({ source: 'uploaded-file', scanner: 'uploaded' });
         setErr('');
@@ -2405,6 +2408,9 @@ function VulnPage() {
 
   async function loadFromApi(nextScanner, opts = {}) {
     const { silentError = false, pipelineEvent = null, forceLocal = false } = opts;
+    if (manualUploadRef.current) {
+      return true;
+    }
     setLoading(true);
     try {
       const cfg = readConnectConfig();
@@ -2428,6 +2434,9 @@ function VulnPage() {
         cfg.provider,
         `/report/unified?${q.toString()}`
       );
+      if (manualUploadRef.current) {
+        return true;
+      }
       setData(j);
       setScanner(nextScanner);
       setMeta(j?._meta || null);
@@ -2458,8 +2467,12 @@ function VulnPage() {
   }, []);
 
   useEffect(() => {
-    const onLocalScan = () => { loadFromApi(scanner, { silentError: true, forceLocal: true }); };
+    const onLocalScan = () => {
+      if (manualUploadRef.current) return;
+      loadFromApi(scanner, { silentError: true, forceLocal: true });
+    };
     const onPipeline = (event) => {
+      if (manualUploadRef.current) return;
       loadFromApi(scanner, { silentError: true, pipelineEvent: event?.detail || null });
     };
     window.addEventListener('sbom:local-scan-done', onLocalScan);
@@ -2472,6 +2485,7 @@ function VulnPage() {
 
   useEffect(() => {
     const id = setInterval(() => {
+      if (manualUploadRef.current) return;
       loadFromApi(scanner, { silentError: true });
     }, 45000);
     return () => clearInterval(id);
@@ -2534,10 +2548,10 @@ function VulnPage() {
         <div className="card">
           <div className="card-body">
             <div className="flex gap-6" style={{marginBottom:12,flexWrap:'wrap'}}>
-              <button className="btn btn-outline-gold" onClick={() => loadFromApi('grype')} disabled={loading}>
+              <button className="btn btn-outline-gold" onClick={() => { manualUploadRef.current = false; loadFromApi('grype'); }} disabled={loading}>
                 {loading ? 'Loading...' : 'Load Grype (Local/CI)'}
               </button>
-              <button className="btn btn-outline-teal" onClick={() => loadFromApi('trivy')} disabled={loading}>
+              <button className="btn btn-outline-teal" onClick={() => { manualUploadRef.current = false; loadFromApi('trivy'); }} disabled={loading}>
                 {loading ? 'Loading...' : 'Load Trivy (Local/CI)'}
               </button>
             </div>
@@ -2570,13 +2584,18 @@ function VulnPage() {
           <div className="page-sub">
             {scanner === 'trivy' ? 'Trivy SBOM' : 'Grype SBOM'} · {normalized.length} findings · {meta?.source || 'unknown source'}
             {meta?.fallback ? <span style={{color:'var(--amber)', marginLeft:8}}>(fallback: server-local scan)</span> : null}
+            {meta?.source === 'uploaded-file' ? (
+              <div style={{fontSize:11,color:'var(--teal)',marginTop:6,maxWidth:720}}>
+                Viewing uploaded JSON — CI refresh, pipeline events, and auto-poll are paused. Use Reload or Clear to sync with the server.
+              </div>
+            ) : null}
           </div>
         </div>
         <div className="flex gap-6" style={{flexWrap:'wrap'}}>
-          <button className="btn btn-xs" onClick={() => loadFromApi('grype')}>Reload Grype (CI first)</button>
-          <button className="btn btn-xs" onClick={() => loadFromApi('trivy')}>Reload Trivy (CI first)</button>
-          <button className="btn btn-xs btn-outline-gold" onClick={() => loadFromApi(scanner, { forceLocal: true })} title="Use reports on the API server only (last upload/generate)">Server local only</button>
-          <button className="btn btn-outline-red btn-sm" onClick={() => setData(null)}>Clear</button>
+          <button className="btn btn-xs" onClick={() => { manualUploadRef.current = false; loadFromApi('grype'); }}>Reload Grype (CI first)</button>
+          <button className="btn btn-xs" onClick={() => { manualUploadRef.current = false; loadFromApi('trivy'); }}>Reload Trivy (CI first)</button>
+          <button className="btn btn-xs btn-outline-gold" onClick={() => { manualUploadRef.current = false; loadFromApi(scanner, { forceLocal: true }); }} title="Use reports on the API server only (last upload/generate)">Server local only</button>
+          <button className="btn btn-outline-red btn-sm" onClick={() => { manualUploadRef.current = false; setData(null); }}>Clear</button>
         </div>
       </div>
 
