@@ -2753,7 +2753,7 @@ def get_unified_sbom():
 
     local_path = get_latest_sbom_path()
 
-    # Auto / CI: only CI artifacts — never fall back to server-local SBOM (avoids mixing apps).
+    # Try CI first for auto/ci. source=ci requires CI. source=auto falls back to local SBOM if CI has none.
     if source in ("auto", "ci"):
         if provider == "gitlab":
             ci_token = token or os.getenv("GITLAB_TOKEN", "").strip()
@@ -2806,10 +2806,23 @@ def get_unified_sbom():
                 return jsonify({"status": "error", "message": ci_error or "No CI SBOM found"}), 404
 
     if source == "auto":
+        # CI had nothing: show last server-side SBOM so upload+Generate works without manual source=local.
+        if local_path and local_path.exists():
+            payload = parse_json(local_path)
+            if payload is not None:
+                meta = {
+                    "source": "local",
+                    "provider": provider,
+                    "project": repo,
+                    "path": str(local_path.relative_to(REPO_ROOT)),
+                    "note": "No CI SBOM for this query; showing last server-side generate on this host.",
+                }
+                meta.update(build_local_scan_meta())
+                return jsonify(with_report_meta(payload, meta))
         return jsonify(
             {
                 "status": "error",
-                "message": "No CI SBOM found. Use source=local for the last server-side generate after upload.",
+                "message": "No SBOM available. Run CI or upload + Generate on this server.",
             }
         ), 404
 
@@ -2886,7 +2899,7 @@ def get_unified_report():
     if source not in ("auto", "ci"):
         return jsonify({"status": "error", "message": "source must be 'auto', 'local', or 'ci'"}), 400
 
-    # Match /api/sbom/unified: try CI artifacts first so hosted UI does not always show stale Render-local scans.
+    # Try CI first; source=auto falls back to local reports if CI has none (upload+Generate flow).
     if provider == "gitlab":
         ci_token = token or os.getenv("GITLAB_TOKEN", "").strip()
         ci_result, ci_error = fetch_gitlab_report_from_artifacts(
@@ -2940,10 +2953,22 @@ def get_unified_report():
             return jsonify({"status": "error", "message": ci_error or "No CI report found"}), 404
 
     if source == "auto":
+        # CI had nothing: show last server-side scan so upload+Generate works without manual source=local.
+        if local_path.exists():
+            payload = parse_json(local_path)
+            if payload is not None:
+                meta = {
+                    "source": "local",
+                    "scanner": scanner,
+                    "path": str(local_path.relative_to(REPO_ROOT)),
+                    "note": "No CI vulnerability report for this query; showing last server-side scan on this host.",
+                }
+                meta.update(build_local_scan_meta())
+                return jsonify(with_report_meta(payload, meta))
         return jsonify(
             {
                 "status": "error",
-                "message": "No CI vulnerability report found. Use source=local for the last server-side scan (after upload/generate).",
+                "message": "No vulnerability report yet. Run CI or upload + Generate on this server, then refresh.",
             }
         ), 404
 
