@@ -2202,7 +2202,14 @@ function SBOMPage({ config }) {
       <div className="page-hd">
         <div>
           <div className="page-title">SBOM Viewer</div>
-          <div className="page-sub">{sbom.metadata?.component?.name || 'Holistic SBOM'}</div>
+          <div className="page-sub">
+            {sbomMeta?.app_name || sbom.metadata?.component?.name || 'Holistic SBOM'}
+            {sbomMeta?.generated_at ? (
+              <span style={{color:'var(--text2)', fontSize:12, marginLeft:8}}>
+                · generated {new Date(sbomMeta.generated_at).toLocaleString()}
+              </span>
+            ) : null}
+          </div>
         </div>
         <div className="flex gap-6">
           <button className="btn btn-xs" onClick={() => loadFromApi({ source: 'auto' })} disabled={loadingApi}>
@@ -2237,6 +2244,9 @@ function SBOMPage({ config }) {
           <div className="card-body" style={{padding:'8px 16px'}}>
             {[
               ['Loaded From', sbomMeta?.source || 'unknown'],
+              ['Application', sbomMeta?.app_name || sbom?.metadata?.component?.name || '—'],
+              ['Last generate (server)', sbomMeta?.generated_at ? new Date(sbomMeta.generated_at).toLocaleString() : '—'],
+              ['Uploaded source path', sbomMeta?.scan_source_path || '—'],
               ['Provider', sbomMeta?.provider || '-'],
               ['Project', sbomMeta?.project || '-'],
               ['Run / Pipeline', sbomMeta?.run_id || sbomMeta?.pipeline_id || '-'],
@@ -2615,7 +2625,16 @@ function VulnPage() {
         <div>
           <div className="page-title">Vulnerability Scanner</div>
           <div className="page-sub">
-            {scanner === 'trivy' ? 'Trivy SBOM' : 'Grype SBOM'} · {normalized.length} findings · {meta?.source || 'unknown source'}
+            {scanner === 'trivy' ? 'Trivy SBOM' : 'Grype SBOM'} · {normalized.length} findings
+            {(meta?.app_name || meta?.artifact_name) ? (
+              <span> · App: {meta.app_name || meta.artifact_name}</span>
+            ) : null}
+            {(meta?.generated_at || meta?.report_generated_at) ? (
+              <span style={{color:'var(--text2)'}}>
+                {' '}· scanned {new Date(meta.generated_at || meta.report_generated_at).toLocaleString()}
+              </span>
+            ) : null}
+            {' '}· {meta?.source || 'unknown source'}
             {meta?.source === 'uploaded-file' ? (
               <div style={{fontSize:11,color:'var(--teal)',marginTop:6,maxWidth:720}}>
                 Viewing uploaded JSON — CI refresh, pipeline events, and auto-poll are paused. Use Reload or Clear to sync with the server.
@@ -2658,11 +2677,17 @@ function VulnPage() {
           <div className="card-hd"><div className="card-title"><span className="card-icon">🧾</span>Scan Metadata</div></div>
           <div className="card-body" style={{padding:'8px 16px'}}>
             {[
+              ['Application', meta?.app_name || meta?.artifact_name || '—'],
+              ['Scan time', (meta?.generated_at || meta?.report_generated_at)
+                ? new Date(meta.generated_at || meta.report_generated_at).toLocaleString()
+                : '—'],
+              ['Uploaded source', meta?.scan_source_path || (meta?.source === 'local' ? '—' : 'N/A (CI)')],
+              ['Generate mode', meta?.scan_execution_path || (meta?.source?.includes('artifact') ? 'CI artifact' : '—')],
+              ['Scan engine', meta?.scan_engine_label || (scanner === 'trivy' ? 'Trivy' : 'Grype')],
               ['Total Findings', normalized.length],
-              ['Scanner', scanner === 'trivy' ? 'Trivy' : 'Grype'],
               ['Report Source', meta?.source || 'uploaded file'],
-              ['Pipeline Ref', meta?.run_id || meta?.pipeline_id || '-'],
-              ['Source', scanner === 'trivy' ? 'NVD, GHSA, OSV' : 'Grype vulnerability DB'],
+              ['Pipeline / run', meta?.run_id || meta?.pipeline_id || '—'],
+              ['Vuln data sources', scanner === 'trivy' ? 'NVD, GHSA, OSV' : 'Grype DB'],
               ['Active Filter', sev],
               ['Showing', filtered.length],
             ].map(([k,v]) => (

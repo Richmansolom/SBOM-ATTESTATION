@@ -29,6 +29,7 @@ TRIVY_IMAGE = os.environ.get("TRIVY_IMAGE", "aquasec/trivy:0.69.3")
 GRYPE_IMAGE = os.environ.get("GRYPE_IMAGE", "anchore/grype:latest")
 SBOM_DIR = REPO_ROOT / "sbom"
 REPORT_DIR = REPO_ROOT / "reports"
+SCAN_MANIFEST_PATH = REPORT_DIR / "scan-manifest.json"
 STATIC_DIR = REPO_ROOT / "sbom_ui" / "static"
 UPLOAD_DIR = REPO_ROOT / ".ui_uploads"
 TOOLS_BIN_DIR = REPO_ROOT / ".tools" / "bin"
@@ -307,6 +308,127 @@ def get_latest_sbom_path():
         if p.exists():
             return p
     return None
+
+
+def read_root_component_name_from_sbom(sbom_path):
+    """CycloneDX root component name from an SBOM file, if present."""
+    if not sbom_path or not sbom_path.exists():
+        return None
+    data = parse_json(sbom_path)
+    if not isinstance(data, dict):
+        return None
+    mc = data.get("metadata") or {}
+    if not isinstance(mc, dict):
+        return None
+    comp = mc.get("component") or {}
+    if isinstance(comp, dict):
+        n = str(comp.get("name") or "").strip()
+        return n or None
+    return None
+
+
+def _app_metadata_display_name(app_meta_path):
+    if not app_meta_path:
+        return None
+    p = Path(app_meta_path)
+    if not p.is_absolute():
+        p = (REPO_ROOT / p).resolve()
+    if not p.exists():
+        return None
+    try:
+        normalized = parse_app_metadata_bytes(p.read_bytes(), p.name)
+        return str(normalized.get("name") or "").strip() or None
+    except Exception:
+        return None
+
+
+def write_scan_manifest_file(
+    *,
+    source_path_str,
+    app_rel_path,
+    execution_path,
+    app_meta_path=None,
+):
+    """Persist which app was scanned and when (server-side generate)."""
+    ensure_dirs()
+    sbom_path = get_latest_sbom_path()
+    root_name = read_root_component_name_from_sbom(sbom_path) if sbom_path else None
+    app_meta_name = _app_metadata_display_name(app_meta_path)
+    now = datetime.now(timezone.utc).isoformat()
+    payload = {
+        "generated_at": now,
+        "source_path": source_path_str,
+        "app_metadata_path": app_rel_path,
+        "root_component_name": root_name,
+        "app_metadata_name": app_meta_name,
+        "execution_path": execution_path,
+        "sbom_file": str(sbom_path.relative_to(REPO_ROOT)).replace("\\", "/") if sbom_path else None,
+    }
+    try:
+        SCAN_MANIFEST_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def build_local_scan_meta():
+    """Labels for last server-side SBOM/vuln generation (upload + generate)."""
+    manifest = parse_json(SCAN_MANIFEST_PATH)
+    if isinstance(manifest, dict) and manifest.get("execution_path"):
+        return {
+            "app_name": manifest.get("root_component_name") or manifest.get("app_metadata_name"),
+            "generated_at": manifest.get("generated_at"),
+            "scan_source_path": manifest.get("source_path"),
+            "scan_execution_path": manifest.get("execution_path"),
+            "app_metadata_path": manifest.get("app_metadata_path"),
+            "scan_manifest": manifest,
+        }
+    sbom_path = get_latest_sbom_path()
+    sbom = parse_json(sbom_path) if sbom_path else None
+    mc = (sbom or {}).get("metadata") or {}
+    comp = mc.get("component") or {}
+    app_name = comp.get("name") if isinstance(comp, dict) else None
+    out = {
+        "app_name": app_name,
+        "generated_at": None,
+        "scan_source_path": None,
+        "scan_execution_path": "legacy (no scan manifest; run Generate again to label this scan)",
+        "scan_manifest": None,
+    }
+    gpath = REPORT_DIR / "grype-report.json"
+    if gpath.exists():
+        g = parse_json(gpath) or {}
+        out["report_generated_at"] = g.get("generated") or file_mtime_iso(gpath)
+    return out
+
+
+def _hints_from_vuln_payload(payload):
+    """Surface artifact / time hints from Grype or Trivy JSON for CI artifact views."""
+    if not isinstance(payload, dict):
+        return {}
+    h = {}
+    if payload.get("ArtifactName"):
+        h["artifact_name"] = str(payload["ArtifactName"])
+    if payload.get("GeneratedAt"):
+        h["report_generated_at"] = str(payload["GeneratedAt"])
+    elif payload.get("generated"):
+        h["report_generated_at"] = str(payload["generated"])
+    ds = payload.get("descriptor") or {}
+    if isinstance(ds, dict) and ds.get("name"):
+        h["scan_engine_label"] = str(ds["name"])
+    return h
+
+
+def _hints_from_sbom_payload(payload):
+    """CycloneDX root component name from SBOM JSON (CI artifact)."""
+    if not isinstance(payload, dict):
+        return {}
+    mc = payload.get("metadata") or {}
+    if not isinstance(mc, dict):
+        return {}
+    comp = mc.get("component") or {}
+    if isinstance(comp, dict) and comp.get("name"):
+        return {"app_name": str(comp["name"])}
+    return {}
 
 
 def ensure_dirs():
@@ -644,7 +766,7 @@ def _enrichment_supplier_license(payload, source_dir: Path, metadata_file=None):
     """
     Prefer explicit app metadata path (e.g. temp JSON in reports/ or uploaded canonical JSON),
     then app-metadata.json beside the source tree, then Syft root metadata.
-    Used to populate supplier/license on hosted-fallback file inventory rows.
+    Used to populate supplier/license on hosted Syft scan file inventory rows.
     """
     paths_to_try = []
     if metadata_file is not None:
@@ -853,7 +975,7 @@ def write_placeholder_vuln_reports():
         "matches": [],
         "source": {"type": "sbom"},
         "distro": {"name": "unknown", "version": ""},
-        "descriptor": {"name": "sbom-ui-hosted-fallback", "version": "1"},
+        "descriptor": {"name": "mission-control-local-scan", "version": "1"},
         "generated": now,
     }
     trivy_stub = {
@@ -1068,7 +1190,7 @@ def write_osv_vuln_reports_from_sbom(sbom_path):
         "matches": grype_matches,
         "source": {"type": "sbom"},
         "distro": {"name": "unknown", "version": ""},
-        "descriptor": {"name": "osv-online-fallback", "version": "1"},
+        "descriptor": {"name": "osv-online-lookup", "version": "1"},
         "generated": now,
     }
     trivy_payload = {
@@ -1197,6 +1319,12 @@ def run_generate_pipeline(body, log_callback=None):
 
             source_diag.update({"execution_path": "powershell-pipeline", "status": "ok"})
             write_source_diagnostics(source_diag)
+            write_scan_manifest_file(
+                source_path_str=source_path,
+                app_rel_path=app_meta_rel,
+                execution_path="powershell-pipeline",
+                app_meta_path=app_meta_path,
+            )
             return {
                 "status": "ok",
                 "message": "SBOM generated, validated, and scanned successfully",
@@ -1276,6 +1404,12 @@ def run_generate_pipeline(body, log_callback=None):
                     }
                 )
                 write_source_diagnostics(source_diag)
+                write_scan_manifest_file(
+                    source_path_str=source_path,
+                    app_rel_path=app_meta_rel,
+                    execution_path="docker-ci-parity",
+                    app_meta_path=app_meta_path,
+                )
                 return {
                     "status": "ok",
                     "message": "SBOM generated via Docker CI-parity pipeline (Syft+Trivy+Grype; matches GitLab CI scan style)",
@@ -1321,7 +1455,7 @@ def run_generate_pipeline(body, log_callback=None):
             ]
         else:
             _cleanup_temp_metadata()
-            source_diag.update({"execution_path": "hosted-fallback", "status": "error"})
+            source_diag.update({"execution_path": "hosted-syft-scan", "status": "error"})
             write_source_diagnostics(source_diag)
             return {
                 "status": "error",
@@ -1337,7 +1471,7 @@ def run_generate_pipeline(body, log_callback=None):
             code, output = run_cmd(gen_cmd)
         if code != 0:
             _cleanup_temp_metadata()
-            source_diag.update({"execution_path": "hosted-fallback", "status": "error"})
+            source_diag.update({"execution_path": "hosted-syft-scan", "status": "error"})
             write_source_diagnostics(source_diag)
             return {
                 "status": "error",
@@ -1374,7 +1508,7 @@ def run_generate_pipeline(body, log_callback=None):
         _cleanup_temp_metadata()
 
         if sign_code != 0:
-            source_diag.update({"execution_path": "hosted-fallback", "status": "error"})
+            source_diag.update({"execution_path": "hosted-syft-scan", "status": "error"})
             write_source_diagnostics(source_diag)
             return {
                 "status": "error",
@@ -1405,7 +1539,7 @@ def run_generate_pipeline(body, log_callback=None):
             else:
                 log_callback(f"==> Vulnerability lookup ({mode}): queried={qn}, matches={mn}\n")
 
-        source_diag.update({"execution_path": "hosted-fallback", "status": "ok"})
+        source_diag.update({"execution_path": "hosted-syft-scan", "status": "ok"})
         source_diag.update(
             {
                 "vuln_scan_mode": vuln_scan.get("mode") if isinstance(vuln_scan, dict) else "fallback",
@@ -1415,9 +1549,15 @@ def run_generate_pipeline(body, log_callback=None):
             }
         )
         write_source_diagnostics(source_diag)
+        write_scan_manifest_file(
+            source_path_str=source_path,
+            app_rel_path=app_meta_rel,
+            execution_path="hosted-syft-scan",
+            app_meta_path=app_meta_path,
+        )
         return {
             "status": "ok",
-            "message": "SBOM generated successfully (hosted fallback mode)",
+            "message": "SBOM generated successfully (hosted Syft scan)",
             "log": f"{output}\n{sign_output}",
             "exit_code": 0,
             "source_path": source_path,
@@ -2636,6 +2776,7 @@ def get_unified_sbom():
                 if pid:
                     enc = quote(repo, safe="")
                     gl_sbom["pipeline_url"] = f"https://gitlab.com/{enc}/-/pipelines/{pid}"
+                gl_sbom.update(_hints_from_sbom_payload(ci_result["payload"]))
                 return jsonify(with_report_meta(ci_result["payload"], gl_sbom))
             if source == "ci":
                 return jsonify({"status": "error", "message": ci_error or "No CI SBOM found"}), 404
@@ -2659,6 +2800,7 @@ def get_unified_sbom():
                 if rid:
                     sbom_gh["run_url"] = f"https://github.com/{repo}/actions/runs/{rid}"
                     sbom_gh["artifacts_url"] = f"https://github.com/{repo}/actions/runs/{rid}#artifacts"
+                sbom_gh.update(_hints_from_sbom_payload(ci_result["payload"]))
                 return jsonify(with_report_meta(ci_result["payload"], sbom_gh))
             if source == "ci":
                 return jsonify({"status": "error", "message": ci_error or "No CI SBOM found"}), 404
@@ -2678,17 +2820,14 @@ def get_unified_sbom():
         if local_path and local_path.exists():
             payload = parse_json(local_path)
             if payload is not None:
-                return jsonify(
-                    with_report_meta(
-                        payload,
-                        {
-                            "source": "local",
-                            "provider": provider,
-                            "project": repo,
-                            "path": str(local_path.relative_to(REPO_ROOT)),
-                        },
-                    )
-                )
+                meta = {
+                    "source": "local",
+                    "provider": provider,
+                    "project": repo,
+                    "path": str(local_path.relative_to(REPO_ROOT)),
+                }
+                meta.update(build_local_scan_meta())
+                return jsonify(with_report_meta(payload, meta))
             return jsonify({"status": "error", "message": "Local SBOM exists but is not valid JSON"}), 500
         return jsonify({"status": "error", "message": "No local SBOM file found"}), 404
 
@@ -2736,16 +2875,13 @@ def get_unified_report():
         payload = parse_json(local_path)
         if payload is None:
             return jsonify({"status": "error", "message": "Local report exists but is not valid JSON"}), 500
-        return jsonify(
-            with_report_meta(
-                payload,
-                {
-                    "source": "local",
-                    "scanner": scanner,
-                    "path": str(local_path.relative_to(REPO_ROOT)),
-                },
-            )
-        )
+        meta = {
+            "source": "local",
+            "scanner": scanner,
+            "path": str(local_path.relative_to(REPO_ROOT)),
+        }
+        meta.update(build_local_scan_meta())
+        return jsonify(with_report_meta(payload, meta))
 
     if source not in ("auto", "ci"):
         return jsonify({"status": "error", "message": "source must be 'auto', 'local', or 'ci'"}), 400
@@ -2773,6 +2909,7 @@ def get_unified_report():
             if pid:
                 enc = quote(repo, safe="")
                 gl_meta["pipeline_url"] = f"https://gitlab.com/{enc}/-/pipelines/{pid}"
+            gl_meta.update(_hints_from_vuln_payload(ci_result["payload"]))
             return jsonify(with_report_meta(ci_result["payload"], gl_meta))
         if source == "ci":
             return jsonify({"status": "error", "message": ci_error or "No CI report found"}), 404
@@ -2797,6 +2934,7 @@ def get_unified_report():
             if rid:
                 gh_meta["run_url"] = f"https://github.com/{repo}/actions/runs/{rid}"
                 gh_meta["artifacts_url"] = f"https://github.com/{repo}/actions/runs/{rid}#artifacts"
+            gh_meta.update(_hints_from_vuln_payload(ci_result["payload"]))
             return jsonify(with_report_meta(ci_result["payload"], gh_meta))
         if source == "ci":
             return jsonify({"status": "error", "message": ci_error or "No CI report found"}), 404
