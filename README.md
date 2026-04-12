@@ -324,6 +324,12 @@ Use this checklist before accepting a run:
 - DB status files generated and fresh
 - Artifacts uploaded and downloadable
 
+## Mission Control: upload vs generate (server)
+
+After each successful **source upload**, the API records `.ui_uploads/active-source.json` (gitignored). **Generate** must use the **same** `source_path` as that upload; otherwise the request fails with `SOURCE_MISMATCH`. Local SBOM/report APIs return **409 SOURCE_STALE** if `reports/scan-manifest.json` still describes a **previous** upload — run **Generate** again for the current project.
+
+To disable this for local development only, set **`SBOM_RELAX_ACTIVE_SOURCE_LOCK=1`** in the server environment.
+
 ## Security Notes
 
 - Never commit private signing keys
