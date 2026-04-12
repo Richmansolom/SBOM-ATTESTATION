@@ -83,7 +83,20 @@ foreach ($item in Get-ChildItem -LiteralPath $reportPath -Force -ErrorAction Sil
   else { Remove-Item -LiteralPath $item.FullName -Force -ErrorAction SilentlyContinue }
 }
 
-if (-not (Test-Path $appMeta)) { throw "Missing app metadata file at $appMeta (JSON, CSV, or XML — see merge-sbom.ps1)" }
+if (-not (Test-Path $appMeta)) {
+  throw @"
+Missing app metadata file at:
+  $appMeta
+
+Create app-metadata.json (or .csv / .xml) in your project, or pass a valid -AppMetadataPath.
+
+If you pasted paths from the README, replace the placeholders with your real folders — e.g.
+  -AppMetadataPath `"C:\Dev\my-app\app-metadata.json`"
+not the literal text path\to\your-app.
+
+See merge-sbom.ps1 for the expected fields.
+"@
+}
 if (-not (Test-Path $mergeScript)) { throw "Missing merge-sbom.ps1" }
 
 # SBOM file names
