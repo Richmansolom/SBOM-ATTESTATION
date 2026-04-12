@@ -439,23 +439,27 @@ def ensure_dirs():
 
 
 def clear_previous_build_artifacts():
-    """Remove prior SBOM and scan outputs so a new upload or generate cannot mix results across apps."""
+    """Remove prior SBOM and scan outputs so a new upload or generate cannot mix results across apps.
+
+    Wipes *all* generated SBOM JSON and merge intermediates (e.g. sbom-source-syft.json, *.cots-merged.json),
+    not only the enriched filenames — otherwise the next run can still surface the previous app's
+    inventory in merged reports. Preserves sbom/pki/ (signing keys).
+    """
     ensure_dirs()
-    for name in (
-        "sbom-source.enriched.json",
-        "sbom-build.enriched.json",
-        "sbom-image.enriched.json",
-        "sbom-source.json",
-        "sbom-source.signed.json",
-    ):
-        p = SBOM_DIR / name
-        if p.exists():
+    pki_dir = SBOM_DIR / "pki"
+    if SBOM_DIR.exists():
+        for p in SBOM_DIR.iterdir():
+            if p.name == "pki" and p.is_dir():
+                continue
             try:
-                p.unlink()
+                if p.is_file():
+                    p.unlink()
+                elif p.is_dir():
+                    shutil.rmtree(p, ignore_errors=True)
             except Exception:
                 pass
     if REPORT_DIR.exists():
-        for p in REPORT_DIR.iterdir():
+        for p in REPORT_DIR.rglob("*"):
             if p.is_file():
                 try:
                     p.unlink()
