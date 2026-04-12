@@ -98,6 +98,25 @@ $syftLeaf = Split-Path $syftSbom -Leaf
 $trivyLeaf = Split-Path $trivySbom -Leaf
 $distroLeaf = Split-Path $distroSbom -Leaf
 
+Write-Host ""
+Write-Host "======================== SBOM SCAN TARGET ========================" -ForegroundColor Cyan
+Write-Host " Repo root         : $repoRoot"
+Write-Host " -SourcePath       : $SourcePath"
+$srcJoined = Join-Path $repoRoot $SourcePath
+if (Test-Path -LiteralPath $srcJoined) {
+  Write-Host "   -> resolved     : $((Resolve-Path -LiteralPath $srcJoined).Path)"
+} else {
+  Write-Host "   -> resolved     : NOT FOUND ($srcJoined)" -ForegroundColor Red
+}
+Write-Host " -AppMetadataPath  : $AppMetadataPath"
+Write-Host " -Mode             : $runMode"
+Write-Host ""
+Write-Host " Default -SourcePath is example-app. If you do not pass -SourcePath, Syft always scans that folder," -ForegroundColor Yellow
+Write-Host " so component counts and Hoppr summaries match the last run for THAT tree — not a stale copy bug." -ForegroundColor Yellow
+Write-Host " For another project: -SourcePath `"relative\\or\\absolute\\path`" -AppMetadataPath `"...\\app-metadata.json`"" -ForegroundColor Yellow
+Write-Host "===================================================================="
+Write-Host ""
+
 Write-Host "==> Mode: $runMode | Runtime: $containerCmd"
 Write-Host "==> Trivy image: $trivyImage"
 Write-Host "==> Pull COTS SBOM tool images (Syft, Trivy, CycloneDX, Hoppr)"
