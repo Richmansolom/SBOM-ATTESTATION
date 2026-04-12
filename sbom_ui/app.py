@@ -32,7 +32,6 @@ REPORT_DIR = REPO_ROOT / "reports"
 SCAN_MANIFEST_PATH = REPORT_DIR / "scan-manifest.json"
 STATIC_DIR = REPO_ROOT / "sbom_ui" / "static"
 UPLOAD_DIR = REPO_ROOT / ".ui_uploads"
-ACTIVE_SOURCE_PATH = UPLOAD_DIR / "active-source.json"
 TOOLS_BIN_DIR = REPO_ROOT / ".tools" / "bin"
 SOURCE_DIAG_PATH = REPORT_DIR / "source-diagnostics.json"
 STAGE_NAMES = ["Build", "Generate", "Sign", "Scan", "Report"]
@@ -432,109 +431,6 @@ def _hints_from_sbom_payload(payload):
     return {}
 
 
-def normalize_repo_rel_path(s):
-    """Normalize repo-relative path strings for comparison (upload vs generate vs manifest)."""
-    if s is None:
-        return ""
-    t = str(s).strip().replace("\\", "/")
-    while "//" in t:
-        t = t.replace("//", "/")
-    if os.name == "nt":
-        t = t.lower()
-    return t
-
-
-def active_source_lock_enforced():
-    """Set SBOM_RELAX_ACTIVE_SOURCE_LOCK=1 to skip upload/generate path matching (local dev only)."""
-    return os.environ.get("SBOM_RELAX_ACTIVE_SOURCE_LOCK", "").strip().lower() not in (
-        "1",
-        "true",
-        "yes",
-    )
-
-
-def read_active_source():
-    return parse_json(ACTIVE_SOURCE_PATH)
-
-
-def write_active_source_upload(source_path_str, app_metadata_path_str=""):
-    """Record last Mission Control upload so Generate cannot target a different tree by mistake."""
-    uid = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    payload = {
-        "upload_id": uid,
-        "source_path": str(source_path_str or "").strip().replace("\\", "/"),
-        "app_metadata_path": str(app_metadata_path_str or "").strip().replace("\\", "/"),
-        "uploaded_at": now,
-    }
-    ensure_dirs()
-    ACTIVE_SOURCE_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return uid
-
-
-def validate_generate_source_matches_active(body):
-    """After an upload, /api/generate and /api/local-run must use the same source_path as that upload."""
-    if not active_source_lock_enforced():
-        return None
-    active = read_active_source()
-    if not isinstance(active, dict) or not (active.get("source_path") or "").strip():
-        return None
-    req = normalize_repo_rel_path(body.get("source_path"))
-    want = normalize_repo_rel_path(active.get("source_path"))
-    if not req:
-        return {
-            "status": "error",
-            "message": "Missing source_path",
-            "exit_code": 1,
-        }
-    if req != want:
-        return {
-            "status": "error",
-            "message": (
-                "source_path must match the last uploaded project. Upload the new app again, then Generate "
-                f"(expected {active.get('source_path')!r}, got {body.get('source_path')!r})."
-            ),
-            "exit_code": 1,
-            "code": "SOURCE_MISMATCH",
-            "expected_source_path": active.get("source_path"),
-        }
-    return None
-
-
-def stale_local_scan_manifest_vs_active():
-    """Return (message, extra_dict) if reports/sbom describe a different app than the last upload."""
-    if not active_source_lock_enforced():
-        return None
-    active = read_active_source()
-    if not isinstance(active, dict) or not (active.get("source_path") or "").strip():
-        return None
-    manifest = parse_json(SCAN_MANIFEST_PATH)
-    if not isinstance(manifest, dict) or not (manifest.get("source_path") or "").strip():
-        return None
-    a = normalize_repo_rel_path(active.get("source_path"))
-    m = normalize_repo_rel_path(manifest.get("source_path"))
-    if a and m and a != m:
-        return (
-            "SBOM and reports are from a previous upload. Run Generate for the current project.",
-            {
-                "expected_source": active.get("source_path"),
-                "manifest_source": manifest.get("source_path"),
-            },
-        )
-    return None
-
-
-def response_if_stale_local_source():
-    """409 JSON response if local artifacts do not match last upload; else None."""
-    r = stale_local_scan_manifest_vs_active()
-    if not r:
-        return None
-    msg, extra = r
-    out = {"status": "error", "message": msg, "code": "SOURCE_STALE"}
-    out.update(extra)
-    return jsonify(out), 409
-
-
 def ensure_dirs():
     SBOM_DIR.mkdir(parents=True, exist_ok=True)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -543,27 +439,23 @@ def ensure_dirs():
 
 
 def clear_previous_build_artifacts():
-    """Remove prior SBOM and scan outputs so a new upload or generate cannot mix results across apps.
-
-    Wipes *all* generated SBOM JSON and merge intermediates (e.g. sbom-source-syft.json, *.cots-merged.json),
-    not only the enriched filenames — otherwise the next run can still surface the previous app's
-    inventory in merged reports. Preserves sbom/pki/ (signing keys).
-    """
+    """Remove prior SBOM and scan outputs so a new upload or generate cannot mix results across apps."""
     ensure_dirs()
-    pki_dir = SBOM_DIR / "pki"
-    if SBOM_DIR.exists():
-        for p in SBOM_DIR.iterdir():
-            if p.name == "pki" and p.is_dir():
-                continue
+    for name in (
+        "sbom-source.enriched.json",
+        "sbom-build.enriched.json",
+        "sbom-image.enriched.json",
+        "sbom-source.json",
+        "sbom-source.signed.json",
+    ):
+        p = SBOM_DIR / name
+        if p.exists():
             try:
-                if p.is_file():
-                    p.unlink()
-                elif p.is_dir():
-                    shutil.rmtree(p, ignore_errors=True)
+                p.unlink()
             except Exception:
                 pass
     if REPORT_DIR.exists():
-        for p in REPORT_DIR.rglob("*"):
+        for p in REPORT_DIR.iterdir():
             if p.is_file():
                 try:
                     p.unlink()
@@ -1320,11 +1212,8 @@ def write_osv_vuln_reports_from_sbom(sbom_path):
 
 def run_generate_pipeline(body, log_callback=None):
     ensure_dirs()
-    body = body or {}
-    err = validate_generate_source_matches_active(body)
-    if err:
-        return err
     clear_previous_build_artifacts()
+    body = body or {}
 
     source_path = body.get("source_path")
     if not source_path:
@@ -2649,16 +2538,11 @@ def upload_source():
         }
     )
     write_source_diagnostics(source_diag)
-    upload_id = write_active_source_upload(
-        rel_to_repo(source_root),
-        rel_to_repo(app_meta) if app_meta.exists() else "",
-    )
     return jsonify(
         {
             "status": "ok",
             "source_path": rel_to_repo(source_root),
             "app_metadata_path": rel_to_repo(app_meta) if app_meta.exists() else "",
-            "upload_id": upload_id,
             "detected_app_name": detected_name,
             "message": "Project uploaded successfully",
             "source_diagnostics": source_diag,
@@ -2926,9 +2810,6 @@ def get_unified_sbom():
         if local_path and local_path.exists():
             payload = parse_json(local_path)
             if payload is not None:
-                guard = response_if_stale_local_source()
-                if guard:
-                    return guard
                 meta = {
                     "source": "local",
                     "provider": provider,
@@ -2949,9 +2830,6 @@ def get_unified_sbom():
         return jsonify({"status": "error", "message": "source must be 'auto', 'local', or 'ci'"}), 400
 
     if source == "local":
-        guard = response_if_stale_local_source()
-        if guard:
-            return guard
         if local_path and local_path.exists():
             payload = parse_json(local_path)
             if payload is not None:
@@ -3005,9 +2883,6 @@ def get_unified_report():
     local_path = local_paths[scanner]
 
     if source == "local":
-        guard = response_if_stale_local_source()
-        if guard:
-            return guard
         if not local_path.exists():
             return jsonify({"status": "error", "message": f"No local report found for scanner '{scanner}'"}), 404
         payload = parse_json(local_path)
@@ -3082,9 +2957,6 @@ def get_unified_report():
         if local_path.exists():
             payload = parse_json(local_path)
             if payload is not None:
-                guard = response_if_stale_local_source()
-                if guard:
-                    return guard
                 meta = {
                     "source": "local",
                     "scanner": scanner,
