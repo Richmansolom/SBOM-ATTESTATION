@@ -18,10 +18,10 @@ build_sbom_scan:
     DOCKER_HOST: "tcp://docker:2375"
     DOCKER_TLS_CERTDIR: ""
   before_script:
-    - apk add --no-cache bash curl jq python3 openssl build-base cmake ninja zlib-dev
+    - apk add --no-cache bash curl jq python3 openssl build-base
     - mkdir -p "$SBOM_DIR" "$REPORT_DIR" "$APP_DIR/build"
   script:
-    - echo "==> Build example application (libpng via CMake)"
+    - echo "==> Build example C++ application"
     - make -C $APP_DIR 2>&1 | tee "$REPORT_DIR/$BUILD_LOG"
     - echo "==> Generate COTS SBOMs (Syft + Trivy + Distro2SBOM)"
     - docker pull anchore/syft:latest

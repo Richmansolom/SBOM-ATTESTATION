@@ -70,33 +70,7 @@ $ntiaScript = Join-Path $repoRoot "check-ntia.ps1"
 foreach ($dir in $sbomPath, $reportPath) {
   if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
 }
-
-# Remove outputs from a previous application or run so merge intermediates (e.g. sbom-source-syft.json)
-# cannot carry over. Preserves sbom/pki/ only.
-foreach ($item in Get-ChildItem -LiteralPath $sbomPath -Force -ErrorAction SilentlyContinue) {
-  if ($item.Name -eq 'pki' -and $item.PSIsContainer) { continue }
-  if ($item.PSIsContainer) { Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction SilentlyContinue }
-  else { Remove-Item -LiteralPath $item.FullName -Force -ErrorAction SilentlyContinue }
-}
-foreach ($item in Get-ChildItem -LiteralPath $reportPath -Force -ErrorAction SilentlyContinue) {
-  if ($item.PSIsContainer) { Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction SilentlyContinue }
-  else { Remove-Item -LiteralPath $item.FullName -Force -ErrorAction SilentlyContinue }
-}
-
-if (-not (Test-Path $appMeta)) {
-  throw @"
-Missing app metadata file at:
-  $appMeta
-
-Create app-metadata.json (or .csv / .xml) in your project, or pass a valid -AppMetadataPath.
-
-If you pasted paths from the README, replace the placeholders with your real folders — e.g.
-  -AppMetadataPath `"C:\Dev\my-app\app-metadata.json`"
-not the literal text path\to\your-app.
-
-See merge-sbom.ps1 for the expected fields.
-"@
-}
+if (-not (Test-Path $appMeta)) { throw "Missing app metadata file at $appMeta (JSON, CSV, or XML — see merge-sbom.ps1)" }
 if (-not (Test-Path $mergeScript)) { throw "Missing merge-sbom.ps1" }
 
 # SBOM file names
@@ -110,25 +84,6 @@ $enrichedLeaf = Split-Path $enrichedSbom -Leaf
 $syftLeaf = Split-Path $syftSbom -Leaf
 $trivyLeaf = Split-Path $trivySbom -Leaf
 $distroLeaf = Split-Path $distroSbom -Leaf
-
-Write-Host ""
-Write-Host "======================== SBOM SCAN TARGET ========================" -ForegroundColor Cyan
-Write-Host " Repo root         : $repoRoot"
-Write-Host " -SourcePath       : $SourcePath"
-$srcJoined = Join-Path $repoRoot $SourcePath
-if (Test-Path -LiteralPath $srcJoined) {
-  Write-Host "   -> resolved     : $((Resolve-Path -LiteralPath $srcJoined).Path)"
-} else {
-  Write-Host "   -> resolved     : NOT FOUND ($srcJoined)" -ForegroundColor Red
-}
-Write-Host " -AppMetadataPath  : $AppMetadataPath"
-Write-Host " -Mode             : $runMode"
-Write-Host ""
-Write-Host " Default -SourcePath is example-app. If you do not pass -SourcePath, Syft always scans that folder," -ForegroundColor Yellow
-Write-Host " so component counts and Hoppr summaries match the last run for THAT tree — not a stale copy bug." -ForegroundColor Yellow
-Write-Host " For another project: -SourcePath `"relative\\or\\absolute\\path`" -AppMetadataPath `"...\\app-metadata.json`"" -ForegroundColor Yellow
-Write-Host "===================================================================="
-Write-Host ""
 
 Write-Host "==> Mode: $runMode | Runtime: $containerCmd"
 Write-Host "==> Trivy image: $trivyImage"
