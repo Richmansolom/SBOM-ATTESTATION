@@ -1639,7 +1639,7 @@ function SBOMPage({ config }) {
   const [history, setHistory] = useState([]);
   const [sbomMeta, setSbomMeta] = useState(null);
   const [sourceDiag, setSourceDiag] = useState(null);
-  const [capabilities, setCapabilities] = useState({ can_generate: true, has_syft: false, has_docker: false, message: '' });
+  const [capabilities, setCapabilities] = useState({ can_generate: true, has_syft: false, has_docker: false, docker_ci_parity: false, message: '' });
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem('sbom_view_history');
@@ -1665,11 +1665,12 @@ function SBOMPage({ config }) {
         can_generate: !!j.can_generate,
         has_syft: !!j.has_syft,
         has_docker: !!j.has_docker,
+        docker_ci_parity: !!j.docker_ci_parity,
         message: j.message || '',
       });
     } catch {
       // Leave generate enabled when capability probe is unavailable.
-      setCapabilities({ can_generate: true, has_syft: false, has_docker: false, message: '' });
+      setCapabilities({ can_generate: true, has_syft: false, has_docker: false, docker_ci_parity: false, message: '' });
     }
   }
 
@@ -2159,6 +2160,11 @@ function SBOMPage({ config }) {
                     {uploadStatus}
                   </div>
                 )}
+                {capabilities.docker_ci_parity ? (
+                  <div style={{ marginTop: 8, fontSize: 10, color: 'var(--teal)', fontFamily: 'var(--mono)' }}>
+                    This server can run the full Docker pipeline (Syft + Trivy + merge + Grype + Trivy vuln) on upload — same style as GitLab CI.
+                  </div>
+                ) : null}
                 <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text2)', fontFamily:'var(--mono)' }}>
                   Uploaded source runs local backend generation. GitHub/GitLab pipeline launch uses repository paths (Pipeline Control).
                 </div>
