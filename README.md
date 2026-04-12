@@ -108,7 +108,15 @@ cd ..
 
 ### 3) Generate SBOM and evidence
 
-Native mode:
+**Which folder is scanned:** the script defaults to `-SourcePath example-app` and `-AppMetadataPath example-app/app-metadata.json`. If you run it with no arguments, **every run inventories the same tree**, so Syft component counts (e.g. 89 components for the bundled libpng) and Hoppr’s **shape** of warnings can look the same. That is not a stale SBOM copy — it is the same **source path**. To scan **another** project, pass explicit paths (see the cyan “SBOM SCAN TARGET” banner in the log):
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode native `
+  -SourcePath "path\to\your-project" `
+  -AppMetadataPath "path\to\app-metadata.json"
+```
+
+Native mode (default **example-app** only):
 
 ```powershell
 pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode native
@@ -125,6 +133,8 @@ Podman mode:
 ```powershell
 pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode native -ContainerRuntime podman
 ```
+
+**Hoppr** often flags license metadata on many components in any C/C++ SBOM (warnings do not by themselves mean the wrong application). **Grype** may warn that its DB is older than five days; run `grype db update` or refresh in CI — unrelated to `-SourcePath`.
 
 ### 4) Verify expected outputs
 
