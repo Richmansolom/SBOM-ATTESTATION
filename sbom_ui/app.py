@@ -41,7 +41,11 @@ LOCAL_RUNS = {}
 LOCAL_RUNS_LOCK = threading.Lock()
 
 
-def run_cmd(cmd):
+def run_cmd(cmd, env_extra=None):
+    env = None
+    if env_extra:
+        env = os.environ.copy()
+        env.update(env_extra)
     proc = subprocess.run(
         cmd,
         cwd=str(REPO_ROOT),
@@ -50,11 +54,16 @@ def run_cmd(cmd):
         encoding="utf-8",
         errors="replace",
         shell=False,
+        env=env,
     )
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
-def run_cmd_stream(cmd, on_output=None):
+def run_cmd_stream(cmd, on_output=None, env_extra=None):
+    env = None
+    if env_extra:
+        env = os.environ.copy()
+        env.update(env_extra)
     proc = subprocess.Popen(
         cmd,
         cwd=str(REPO_ROOT),
@@ -65,6 +74,7 @@ def run_cmd_stream(cmd, on_output=None):
         errors="replace",
         shell=False,
         bufsize=1,
+        env=env,
     )
     chunks = []
     try:
@@ -559,7 +569,10 @@ def get_generate_capabilities():
     # and immediately expose generate capability in the UI.
     syft_path, syft_source = resolve_syft_binary(auto_install=True)
     has_docker = shutil.which("docker") is not None
+    has_bash = shutil.which("bash") is not None
     has_syft = bool(syft_path)
+    docker_script = (REPO_ROOT / "scripts" / "docker-native-sbom.sh").exists()
+    docker_ci_parity = has_docker and has_bash and docker_script
     can_generate = has_syft or has_docker
     msg = ""
     if not can_generate:
@@ -568,6 +581,8 @@ def get_generate_capabilities():
         "can_generate": can_generate,
         "has_syft": has_syft,
         "has_docker": has_docker,
+        "has_bash": has_bash,
+        "docker_ci_parity": docker_ci_parity,
         "has_grype": bool(resolve_grype_binary(auto_install=False)[0]),
         "syft_source": syft_source,
         "message": msg,
@@ -816,6 +831,20 @@ def enrich_sbom_with_source_inventory(sbom_path, source_dir, app_metadata_path=N
     payload["metadata"]["timestamp"] = datetime.now(timezone.utc).isoformat()
     sbom_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return len(generated)
+
+
+def count_vuln_report_totals():
+    """Return (grype_match_count, trivy_vuln_count) from generated reports/."""
+    g = parse_json(REPORT_DIR / "grype-report.json") or {}
+    g_m = len(g.get("matches") or [])
+    t = parse_json(REPORT_DIR / "trivy-sbom-report.json") or {}
+    t_v = 0
+    for r in t.get("Results") or []:
+        if isinstance(r, dict):
+            tv = r.get("Vulnerabilities") or []
+            if isinstance(tv, list):
+                t_v += len(tv)
+    return g_m, t_v
 
 
 def write_placeholder_vuln_reports():
@@ -1177,6 +1206,90 @@ def run_generate_pipeline(body, log_callback=None):
                 "app_metadata_path": app_meta_rel,
                 "source_diagnostics": source_diag,
             }
+
+        # Docker + bash: same pipeline as GitLab / generate-sbom.ps1 native (Syft+Trivy+merge+Grype+Trivy vuln), no host PowerShell.
+        docker_bin = shutil.which("docker")
+        bash_bin = shutil.which("bash")
+        docker_script = REPO_ROOT / "scripts" / "docker-native-sbom.sh"
+        enable_docker_full = os.getenv("ENABLE_DOCKER_FULL_PIPELINE", "1").strip().lower() not in (
+            "0",
+            "false",
+            "no",
+        )
+        if (
+            docker_bin
+            and bash_bin
+            and docker_script.exists()
+            and enable_docker_full
+        ):
+            env_extra = {
+                "REPO_ROOT": str(REPO_ROOT),
+                "SOURCE_PATH": str(Path(source_rel).as_posix()),
+                "APP_METADATA_PATH": str(Path(app_meta_rel).as_posix()),
+            }
+            if log_callback:
+                log_callback(
+                    "==> Docker CI-parity pipeline (scripts/docker-native-sbom.sh) — same tools as GitLab CI\n"
+                )
+            code, output = run_cmd_stream(
+                [bash_bin, str(docker_script)],
+                on_output=log_callback,
+                env_extra=env_extra,
+            )
+            if code == 0:
+                _cleanup_temp_metadata()
+                sbom_path = SBOM_DIR / "sbom-source.enriched.json"
+                signed_sbom_path = SBOM_DIR / "sbom-source.signed.json"
+                sign_cmd = [
+                    "bash",
+                    str(REPO_ROOT / "scripts" / "sign-sbom.sh"),
+                    str(sbom_path),
+                    str(signed_sbom_path),
+                    str(SBOM_DIR / "pki"),
+                ]
+                if log_callback:
+                    sign_code, sign_output = run_cmd_stream(sign_cmd, on_output=log_callback)
+                else:
+                    sign_code, sign_output = run_cmd(sign_cmd)
+                if sign_code != 0:
+                    source_diag.update({"execution_path": "docker-ci-parity", "status": "error"})
+                    write_source_diagnostics(source_diag)
+                    return {
+                        "status": "error",
+                        "message": "SBOM signing failed after Docker pipeline",
+                        "log": f"{output}\n{sign_output}",
+                        "exit_code": sign_code,
+                        "source_diagnostics": source_diag,
+                    }
+                if signed_sbom_path.exists():
+                    shutil.move(str(signed_sbom_path), str(sbom_path))
+                g_m, t_v = count_vuln_report_totals()
+                source_diag.update({"execution_path": "docker-ci-parity", "status": "ok"})
+                source_diag.update(
+                    {
+                        "vuln_scan_mode": "docker-grype+trivy-sbom",
+                        "vuln_queried_components": len(
+                            (parse_json(sbom_path) or {}).get("components") or []
+                        ),
+                        "vuln_matches": g_m + t_v,
+                        "vuln_reason": "",
+                    }
+                )
+                write_source_diagnostics(source_diag)
+                return {
+                    "status": "ok",
+                    "message": "SBOM generated via Docker CI-parity pipeline (Syft+Trivy+Grype; matches GitLab CI scan style)",
+                    "log": f"{output}\n{sign_output}",
+                    "exit_code": 0,
+                    "source_path": source_path,
+                    "app_metadata_path": app_meta_rel,
+                    "source_diagnostics": source_diag,
+                }
+            if log_callback:
+                log_callback(
+                    f"==> Docker CI-parity pipeline failed (exit {code}); falling back to Syft-only hosted path.\n"
+                )
+            clear_previous_build_artifacts()
 
         # Hosted fallback (Render/Linux without PowerShell):
         # still generate and sign the SBOM so component listing works.
