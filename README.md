@@ -28,11 +28,11 @@ The implementation uses a staged model:
 
 ```text
 sbom-attestation/
-|-- example-app/                         # Reference C++ target app
-|   |-- src/                             # C++ sources
-|   |-- include/                         # Headers
-|   |-- Dockerfile                       # Container build path
-|   |-- Makefile                         # Native build path
+|-- example-app/                         # Reference target: libpng 1.8 (C library, vendored)
+|   |-- png.c, png*.c                    # libpng sources (CMake upstream layout)
+|   |-- CMakeLists.txt                   # Upstream CMake build
+|   |-- Makefile                         # Thin wrapper: cmake configure + build → build/
+|   |-- Dockerfile                       # Container build (Ubuntu + CMake)
 |   `-- app-metadata.json                # Custom component metadata (JSON; CSV/XML also supported — see below)
 |-- scripts/
 |   `-- sign-sbom.sh                     # Canonicalize + sign + embed signature
@@ -71,7 +71,7 @@ Minimum for local reproducibility:
 - PowerShell 7+
 - Docker Desktop (or Podman)
 - Python 3.10+ (for UI backend)
-- GNU Make and a C++ compiler (for `example-app`)
+- GNU Make, CMake, a C compiler, and zlib dev headers (`zlib1g-dev` on Debian/Ubuntu) for `example-app` (libpng)
 
 Optional but recommended:
 
@@ -87,12 +87,22 @@ cd .\SBOM-ATTESTATION
 python -m pip install -r .\sbom_ui\requirements.txt
 ```
 
-### 2) Build the reference C++ app
+### 2) Build the reference app (libpng)
+
+Linux / Git Bash with `make` and `cmake` on `PATH`:
 
 ```powershell
 cd .\example-app
 make
-.\build\sbom_demo_app.exe
+cd ..
+```
+
+Pure Windows (no `make`): use CMake directly:
+
+```powershell
+cd .\example-app
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
 cd ..
 ```
 
