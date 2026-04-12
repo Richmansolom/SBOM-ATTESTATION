@@ -28,11 +28,11 @@ The implementation uses a staged model:
 
 ```text
 sbom-attestation/
-|-- example-app/                         # Reference target: libpng 1.8 (C library, vendored)
-|   |-- png.c, png*.c                    # libpng sources (CMake upstream layout)
-|   |-- CMakeLists.txt                   # Upstream CMake build
-|   |-- Makefile                         # Thin wrapper: cmake configure + build → build/
-|   |-- Dockerfile                       # Container build (Ubuntu + CMake)
+|-- example-app/                         # Reference C++ target app
+|   |-- src/                             # C++ sources
+|   |-- include/                         # Headers
+|   |-- Dockerfile                       # Container build path
+|   |-- Makefile                         # Native build path
 |   `-- app-metadata.json                # Custom component metadata (JSON; CSV/XML also supported — see below)
 |-- scripts/
 |   `-- sign-sbom.sh                     # Canonicalize + sign + embed signature
@@ -71,7 +71,7 @@ Minimum for local reproducibility:
 - PowerShell 7+
 - Docker Desktop (or Podman)
 - Python 3.10+ (for UI backend)
-- GNU Make, CMake, a C compiler, and zlib dev headers (`zlib1g-dev` on Debian/Ubuntu) for `example-app` (libpng)
+- GNU Make and a C++ compiler (for `example-app`)
 
 Optional but recommended:
 
@@ -87,45 +87,18 @@ cd .\SBOM-ATTESTATION
 python -m pip install -r .\sbom_ui\requirements.txt
 ```
 
-### 2) Build the reference app (libpng)
-
-Linux / Git Bash with `make` and `cmake` on `PATH`:
+### 2) Build the reference C++ app
 
 ```powershell
 cd .\example-app
 make
-cd ..
-```
-
-Pure Windows (no `make`): use CMake directly:
-
-```powershell
-cd .\example-app
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
+.\build\sbom_demo_app.exe
 cd ..
 ```
 
 ### 3) Generate SBOM and evidence
 
-**Which folder is scanned:** the script defaults to `-SourcePath example-app` and `-AppMetadataPath example-app/app-metadata.json`. If you run it with no arguments, **every run inventories the same tree**, so Syft component counts (e.g. 89 components for the bundled libpng) and Hoppr’s **shape** of warnings can look the same. That is not a stale SBOM copy — it is the same **source path**. To scan **another** project, pass **your real** Windows paths (not the words `path\to\...` — those were only a pattern):
-
-```powershell
-# Example: your app is at C:\Dev\my-cpp-app and has app-metadata.json there
-pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode native `
-  -SourcePath "C:\Dev\my-cpp-app" `
-  -AppMetadataPath "C:\Dev\my-cpp-app\app-metadata.json"
-```
-
-If the app lives **inside** this repo (e.g. `.\vendor\my-app\`), use that instead:
-
-```powershell
-pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode native `
-  -SourcePath ".\vendor\my-app" `
-  -AppMetadataPath ".\vendor\my-app\app-metadata.json"
-```
-
-Native mode (default **example-app** only):
+Native mode:
 
 ```powershell
 pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode native
@@ -142,8 +115,6 @@ Podman mode:
 ```powershell
 pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode native -ContainerRuntime podman
 ```
-
-**Hoppr** often flags license metadata on many components in any C/C++ SBOM (warnings do not by themselves mean the wrong application). **Grype** may warn that its DB is older than five days; run `grype db update` or refresh in CI — unrelated to `-SourcePath`.
 
 ### 4) Verify expected outputs
 
@@ -323,12 +294,6 @@ Use this checklist before accepting a run:
 - Grype and Trivy reports generated
 - DB status files generated and fresh
 - Artifacts uploaded and downloadable
-
-## Mission Control: upload vs generate (server)
-
-After each successful **source upload**, the API records `.ui_uploads/active-source.json` (gitignored). **Generate** must use the **same** `source_path` as that upload; otherwise the request fails with `SOURCE_MISMATCH`. Local SBOM/report APIs return **409 SOURCE_STALE** if `reports/scan-manifest.json` still describes a **previous** upload — run **Generate** again for the current project.
-
-To disable this for local development only, set **`SBOM_RELAX_ACTIVE_SOURCE_LOCK=1`** in the server environment.
 
 ## Security Notes
 
