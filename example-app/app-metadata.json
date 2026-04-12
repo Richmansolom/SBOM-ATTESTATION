@@ -1,17 +1,17 @@
 {
-  "name": "Software Bill of Materials (SBOM) Attestation",
-  "component_type": "application",
-  "version": "1.0.0",
-  "description": "Example C++ application for SBOM attestation - Lockheed Martin Corporation. Replace with your software; SBOM pipeline works for any C/C++ project.",
-  "language": "C++",
-  "author": "Lockheed Martin Corporation",
-  "license": "MIT",
-  "build_system": "Makefile",
-  "entry_point": "./build/sbom_demo_app",
-  "source_file": "example-app/src/main.cpp",
-  "repository": "https://github.com/Richmansolom/SBOM-ATTESTATION",
+  "name": "libpng",
+  "component_type": "library",
+  "version": "1.8.0",
+  "description": "Portable Network Graphics (PNG) reference library — libpng 1.8.x vendored for SBOM pipeline testing.",
+  "language": "C",
+  "author": "PNG Development Group / libpng contributors",
+  "license": "libpng-2.0",
+  "build_system": "CMake",
+  "entry_point": "build/libpng18.so",
+  "source_file": "example-app/png.c",
+  "repository": "https://github.com/pnggroup/libpng",
   "supplier": {
-    "name": "Lockheed Martin Corporation",
-    "url": ["https://www.lockheedmartin.com"]
+    "name": "PNG Development Group",
+    "url": ["http://www.libpng.org/pub/png/"]
   }
 }

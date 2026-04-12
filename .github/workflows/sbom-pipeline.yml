@@ -32,10 +32,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install CMake, Ninja, zlib (libpng dependency)
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build zlib1g-dev
+
       - name: Prepare directories
         run: mkdir -p "$SBOM_DIR" "$REPORT_DIR" "$APP_DIR/build"
 
-      - name: Build example C++ application
+      - name: Build example application (libpng via CMake)
         run: make -C $APP_DIR 2>&1 | tee "$REPORT_DIR/$BUILD_LOG"
 
       - name: Generate COTS SBOMs (Syft + Trivy + Distro2SBOM)

@@ -1,27 +1,12 @@
-APP_NAME := sbom_demo_app
-BUILD_DIR := build
-SRC_DIR := src
-INCLUDE_DIR := include
+# Thin wrapper for CI: `make -C example-app` builds libpng via CMake.
+# Libpng upstream uses CMakeLists.txt (see project root here).
+.PHONY: all clean
 
-CXX := g++
-CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -I$(INCLUDE_DIR)
+CMAKE_FLAGS ?= -DCMAKE_BUILD_TYPE=Release
 
-SRCS := $(wildcard $(SRC_DIR)/*.cpp) $(wildcard $(SRC_DIR)/*/*.cpp)
-OBJS := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
-
-all: $(BUILD_DIR)/$(APP_NAME)
-
-$(BUILD_DIR):
-	@mkdir -p $(BUILD_DIR)
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp | $(BUILD_DIR)
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/$(APP_NAME): $(OBJS)
-	$(CXX) $(CXXFLAGS) $^ -o $@
+all:
+	cmake -S . -B build $(CMAKE_FLAGS)
+	cmake --build build --parallel
 
 clean:
-	rm -rf $(BUILD_DIR)
-
-.PHONY: all clean
+	rm -rf build
