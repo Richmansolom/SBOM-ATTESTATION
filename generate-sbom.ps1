@@ -70,6 +70,19 @@ $ntiaScript = Join-Path $repoRoot "check-ntia.ps1"
 foreach ($dir in $sbomPath, $reportPath) {
   if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
 }
+
+# Remove outputs from a previous application or run so merge intermediates (e.g. sbom-source-syft.json)
+# cannot carry over. Preserves sbom/pki/ only.
+foreach ($item in Get-ChildItem -LiteralPath $sbomPath -Force -ErrorAction SilentlyContinue) {
+  if ($item.Name -eq 'pki' -and $item.PSIsContainer) { continue }
+  if ($item.PSIsContainer) { Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+  else { Remove-Item -LiteralPath $item.FullName -Force -ErrorAction SilentlyContinue }
+}
+foreach ($item in Get-ChildItem -LiteralPath $reportPath -Force -ErrorAction SilentlyContinue) {
+  if ($item.PSIsContainer) { Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+  else { Remove-Item -LiteralPath $item.FullName -Force -ErrorAction SilentlyContinue }
+}
+
 if (-not (Test-Path $appMeta)) { throw "Missing app metadata file at $appMeta (JSON, CSV, or XML — see merge-sbom.ps1)" }
 if (-not (Test-Path $mergeScript)) { throw "Missing merge-sbom.ps1" }
 
