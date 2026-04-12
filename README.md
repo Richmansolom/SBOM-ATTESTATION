@@ -108,12 +108,21 @@ cd ..
 
 ### 3) Generate SBOM and evidence
 
-**Which folder is scanned:** the script defaults to `-SourcePath example-app` and `-AppMetadataPath example-app/app-metadata.json`. If you run it with no arguments, **every run inventories the same tree**, so Syft component counts (e.g. 89 components for the bundled libpng) and Hoppr’s **shape** of warnings can look the same. That is not a stale SBOM copy — it is the same **source path**. To scan **another** project, pass explicit paths (see the cyan “SBOM SCAN TARGET” banner in the log):
+**Which folder is scanned:** the script defaults to `-SourcePath example-app` and `-AppMetadataPath example-app/app-metadata.json`. If you run it with no arguments, **every run inventories the same tree**, so Syft component counts (e.g. 89 components for the bundled libpng) and Hoppr’s **shape** of warnings can look the same. That is not a stale SBOM copy — it is the same **source path**. To scan **another** project, pass **your real** Windows paths (not the words `path\to\...` — those were only a pattern):
+
+```powershell
+# Example: your app is at C:\Dev\my-cpp-app and has app-metadata.json there
+pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode native `
+  -SourcePath "C:\Dev\my-cpp-app" `
+  -AppMetadataPath "C:\Dev\my-cpp-app\app-metadata.json"
+```
+
+If the app lives **inside** this repo (e.g. `.\vendor\my-app\`), use that instead:
 
 ```powershell
 pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode native `
-  -SourcePath "path\to\your-project" `
-  -AppMetadataPath "path\to\app-metadata.json"
+  -SourcePath ".\vendor\my-app" `
+  -AppMetadataPath ".\vendor\my-app\app-metadata.json"
 ```
 
 Native mode (default **example-app** only):
