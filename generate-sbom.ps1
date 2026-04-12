@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Generate holistic SBOMs for native or containerized C/C++ applications.
 
@@ -10,6 +10,7 @@
 .EXAMPLE
   pwsh ./generate-sbom.ps1 -Mode native
   pwsh ./generate-sbom.ps1 -Mode container
+  pwsh ./generate-sbom.ps1 -Mode native -NoClean
 #>
 param(
   # Accepts native/container; strips accidental concatenation (e.g. -Mode nativehttp://... from a bad paste).
@@ -22,6 +23,8 @@ param(
   [string]$SbomDir = "sbom",
   [string]$ReportDir = "reports",
   [string]$AppMetadataPath = "example-app/app-metadata.json",
+  # By default, remove prior sbom/*.json (root) and reports/* so scans are never read against stale files.
+  [switch]$NoClean,
   [switch]$RunSign
 )
 
@@ -67,10 +70,16 @@ $appMeta = Join-Path $repoRoot $AppMetadataPath
 $mergeScript = Join-Path $repoRoot "merge-sbom.ps1"
 $ntiaScript = Join-Path $repoRoot "check-ntia.ps1"
 
+$cleanScript = Join-Path $repoRoot "scripts\clean-sbom-outputs.ps1"
+if (-not $NoClean) {
+  if (-not (Test-Path $cleanScript)) { throw "Missing clean script: $cleanScript" }
+  Write-Host "==> Clean stale SBOM/report outputs (omit with -NoClean)"
+  & $cleanScript -SbomPath $sbomPath -ReportPath $reportPath
+}
 foreach ($dir in $sbomPath, $reportPath) {
   if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
 }
-if (-not (Test-Path $appMeta)) { throw "Missing app metadata file at $appMeta (JSON, CSV, or XML — see merge-sbom.ps1)" }
+if (-not (Test-Path $appMeta)) { throw "Missing app metadata at $appMeta" }
 if (-not (Test-Path $mergeScript)) { throw "Missing merge-sbom.ps1" }
 
 # SBOM file names
@@ -103,59 +112,28 @@ if ($runMode -eq "container") {
   try {
     & $containerCmd build -t $image . 2>&1 | Out-Host
   } finally { Pop-Location }
-  if ($LASTEXITCODE -ne 0) { throw "Container build failed for image $image" }
-
   Write-Host "==> Generate COTS SBOM from image (Syft)"
-  & $containerCmd save $image -o $imageTar 2>&1 | Out-Host
-  if ($LASTEXITCODE -ne 0) { throw "Failed to export image tar for $image" }
-  & $containerCmd run --rm -v "${sbomPath}:/data" anchore/syft:latest "docker-archive:/data/image.tar" -o "cyclonedx-json=/data/$syftLeaf" 2>&1 | Out-Host
-  if ($LASTEXITCODE -ne 0 -or -not (Test-Path $syftSbom)) {
-    throw "Syft failed to generate image SBOM ($syftSbom) from docker archive."
+  $rawContent = & $containerCmd run --rm -v "/var/run/docker.sock:/var/run/docker.sock" anchore/syft:latest $image -o cyclonedx-json 2>$null
+  if ($containerCmd -eq "podman") {
+    $imageTar = Join-Path $sbomPath "image.tar"
+    & $containerCmd save $image -o $imageTar 2>&1 | Out-Host
+    $rawContent = & $containerCmd run --rm -v "${sbomPath}:/data" anchore/syft:latest "oci-archive:/data/image.tar" -o cyclonedx-json 2>$null
   }
+  [System.IO.File]::WriteAllText($syftSbom, $rawContent, (New-Object System.Text.UTF8Encoding $false))
 
   Write-Host "==> Generate COTS SBOM from image (Trivy)"
-  $trivyOutput = & $containerCmd run --rm -v "${sbomPath}:/data" $trivyImage @trivyQuiet image --input "/data/image.tar" --format cyclonedx --output "/data/$trivyLeaf" 2>&1
-  $trivyOutput | Out-Host
-  if ($LASTEXITCODE -ne 0 -or -not (Test-Path $trivySbom)) {
-    Write-Warning "Trivy image scan via oci-archive failed; falling back to exported rootfs filesystem scan."
-    $rootfsTar = Join-Path $sbomPath "image-rootfs.tar"
-    $rootfsDir = Join-Path $sbomPath "image-rootfs"
-    if (Test-Path $rootfsTar) { Remove-Item $rootfsTar -Force -ErrorAction SilentlyContinue }
-    if (Test-Path $rootfsDir) { Remove-Item $rootfsDir -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $rootfsDir -Force | Out-Null
-
-    $tmpContainerId = ""
-    try {
-      $tmpContainerId = (& $containerCmd create $image).Trim()
-      if (-not $tmpContainerId) { throw "Failed to create temporary container from $image" }
-      & $containerCmd export $tmpContainerId -o $rootfsTar 2>&1 | Out-Host
-      if ($LASTEXITCODE -ne 0 -or -not (Test-Path $rootfsTar)) {
-        throw "Failed to export rootfs tar from container $tmpContainerId"
-      }
-    } finally {
-      if ($tmpContainerId) { & $containerCmd rm $tmpContainerId 2>&1 | Out-Null }
-    }
-
-    & $containerCmd run --rm -v "${sbomPath}:/data" alpine:3.20 sh -lc "mkdir -p /data/image-rootfs && tar -xf /data/image-rootfs.tar -C /data/image-rootfs" 2>&1 | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "Failed to unpack exported rootfs tar for Trivy fallback." }
-
-    & $containerCmd run --rm -v "${rootfsDir}:/scan" -v "${sbomPath}:/data" $trivyImage @trivyQuiet filesystem --format cyclonedx --output "/data/$trivyLeaf" /scan 2>&1 | Out-Host
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $trivySbom)) {
-      throw "Trivy failed in both image and filesystem fallback modes ($trivySbom)."
-    }
-  }
+  & $containerCmd save $image -o $imageTar 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) { throw "Failed to export image tar for $image" }
+& $containerCmd run --rm -v "${sbomPath}:/data" $trivyImage @trivyQuiet image --input "/data/image.tar" --format cyclonedx --output "/data/$trivyLeaf" 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $trivySbom)) { throw "Trivy failed to generate image SBOM ($trivySbom)." }
 } else {
   $resolvedSource = (Resolve-Path (Join-Path $repoRoot $SourcePath)).Path
   Write-Host "==> Generate COTS SBOM from directory (Syft): $resolvedSource"
   $rawContent = & $containerCmd run --rm -v "${resolvedSource}:/src" anchore/syft:latest dir:/src -o cyclonedx-json 2>$null
-  if (-not $rawContent) { throw "Syft failed to generate source SBOM from $resolvedSource" }
   [System.IO.File]::WriteAllText($syftSbom, $rawContent, (New-Object System.Text.UTF8Encoding $false))
 
   Write-Host "==> Generate COTS SBOM from directory (Trivy): $resolvedSource"
   & $containerCmd run --rm -v "${resolvedSource}:/src" -v "${repoRoot}:/work" $trivyImage @trivyQuiet filesystem --format cyclonedx --output "/work/$SbomDir/$trivyLeaf" /src 2>&1 | Out-Host
-  if ($LASTEXITCODE -ne 0 -or -not (Test-Path $trivySbom)) {
-    throw "Trivy failed to generate filesystem SBOM ($trivySbom)."
-  }
 }
 
 Write-Host "==> Generate distro package SBOM (Distro2SBOM)"
@@ -245,3 +223,4 @@ if ($RunSign -and (Test-Path (Join-Path $repoRoot "scripts/sign-sbom.sh"))) {
   Write-Host "==> Sign SBOM (requires bash - run in Git Bash or WSL)"
   Write-Host "    bash scripts/sign-sbom.sh `"$enrichedSbom`" `"$sbomPath/sbom-signed.json`" `"$sbomPath/pki`""
 }
+

@@ -6,15 +6,6 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:
-    inputs:
-      app_dir:
-        description: "Application directory inside repo"
-        required: false
-        default: "example-app"
-      app_version:
-        description: "Optional application version label"
-        required: false
-        default: "1.0.0"
 
 jobs:
   build_sbom_scan:
@@ -23,8 +14,10 @@ jobs:
       SBOM_DIR: sbom
       REPORT_DIR: reports
       BUILD_LOG: build-output.log
-      APP_DIR: ${{ github.event.inputs.app_dir || 'example-app' }}
-      APP_VERSION: ${{ github.event.inputs.app_version || '1.0.0' }}
+      # Point at your C/C++ project root (contains Makefile or your build; holds app-metadata.*).
+      APP_DIR: example-app
+      # merge-sbom.ps1 accepts .json, .csv, or .xml — keep path in sync with APP_DIR when retargeting.
+      APP_METADATA: example-app/app-metadata.json
       TRIVY_IMAGE: aquasec/trivy:0.69.3
       SBOM_PRIVATE_KEY_PEM: ${{ secrets.SBOM_PRIVATE_KEY_PEM }}
 
@@ -32,10 +25,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Clean stale SBOM and report outputs
+        run: bash scripts/clean-sbom-outputs.sh "$SBOM_DIR" "$REPORT_DIR"
+
       - name: Prepare directories
         run: mkdir -p "$SBOM_DIR" "$REPORT_DIR" "$APP_DIR/build"
 
-      - name: Build example C++ application
+      - name: Build C++ application
         run: make -C $APP_DIR 2>&1 | tee "$REPORT_DIR/$BUILD_LOG"
 
       - name: Generate COTS SBOMs (Syft + Trivy + Distro2SBOM)
@@ -59,9 +55,9 @@ jobs:
       - name: Enrich SBOMs with custom metadata
         run: |
           docker run --rm -v "$GITHUB_WORKSPACE:/work" -w /work mcr.microsoft.com/powershell:7.4-ubuntu-22.04 \
-            pwsh -File merge-sbom.ps1 -InputSbom "$SBOM_DIR/sbom-source.json" -AppMetadata "$APP_DIR/app-metadata.json" -OutputSbom "$SBOM_DIR/sbom-source.enriched.json"
+            pwsh -File merge-sbom.ps1 -InputSbom "$SBOM_DIR/sbom-source.json" -AppMetadata "$APP_METADATA" -OutputSbom "$SBOM_DIR/sbom-source.enriched.json"
           docker run --rm -v "$GITHUB_WORKSPACE:/work" -w /work mcr.microsoft.com/powershell:7.4-ubuntu-22.04 \
-            pwsh -File merge-sbom.ps1 -InputSbom "$SBOM_DIR/sbom-build.json" -AppMetadata "$APP_DIR/app-metadata.json" -OutputSbom "$SBOM_DIR/sbom-build.enriched.json"
+            pwsh -File merge-sbom.ps1 -InputSbom "$SBOM_DIR/sbom-build.json" -AppMetadata "$APP_METADATA" -OutputSbom "$SBOM_DIR/sbom-build.enriched.json"
 
       - name: Validate SBOM (CycloneDX + NTIA) - before signing
         run: |
@@ -200,7 +196,7 @@ jobs:
         with:
           name: sbom-pipeline-artifacts
           path: |
-            example-app/build/
+            ${{ env.APP_DIR }}/build/
             sbom/
             reports/
             !sbom/pki/sbom_private_key.pem

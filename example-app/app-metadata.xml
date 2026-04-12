@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Same logical content as app-metadata.json — use either file with merge-sbom.ps1 -AppMetadata -->
+<AppMetadata>
+  <Supplier Name="Lockheed Martin Corporation">
+    <Url>https://www.lockheedmartin.com</Url>
+  </Supplier>
+  <Application Name="Software Bill of Materials (SBOM) Attestation" Version="1.0.0"
+    Description="Example C++ application for SBOM attestation - Lockheed Martin Corporation."
+    License="MIT" Language="C++" Author="Lockheed Martin Corporation" BuildSystem="Makefile"
+    EntryPoint="./build/sbom_demo_app" SourceFile="example-app/src/main.cpp"
+    Repository="https://github.com/Richmansolom/SBOM-ATTESTATION"
+    Purl="pkg:github/Richmansolom/SBOM-ATTESTATION@1.0.0" />
+  <CustomComponents>
+    <Component Ref="pkg:generic/scheduler-process@1.0.0" Name="Scheduler Process" Type="library" Version="1.0.0"
+      Description="Synthetic process models and random workload generation for scheduling experiments."
+      License="MIT" SourceFile="example-app/src/scheduler/process.cpp" />
+    <Component Ref="pkg:generic/scheduler-algorithms@1.0.0" Name="Scheduler Algorithms" Type="library" Version="1.0.0"
+      Description="FIFO, SJF, and SRT scheduling algorithms over process sets."
+      License="MIT" SourceFile="example-app/src/scheduler/algorithms.cpp">
+      <DependsOn Ref="pkg:generic/scheduler-process@1.0.0" />
+    </Component>
+    <Component Ref="pkg:generic/scheduler-display@1.0.0" Name="Scheduler Display" Type="library" Version="1.0.0"
+      Description="Console tables and comparative metrics output."
+      License="MIT" SourceFile="example-app/src/scheduler/display.cpp">
+      <DependsOn Ref="pkg:generic/scheduler-process@1.0.0" />
+    </Component>
+  </CustomComponents>
+</AppMetadata>
