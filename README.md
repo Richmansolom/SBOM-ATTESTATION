@@ -12,6 +12,14 @@ Enable another engineer or team to clone this repo, point it at their own C/C++ 
 - Vulnerability evidence from Grype and Trivy (with DB freshness artifacts)
 - CI/CD pipeline artifacts from both GitHub and GitLab
 
+## Project description
+
+This work supports **trusted SBOM** practice for **C/C++** software: combine **Syft, Trivy, Distro2SBOM, CycloneDX-CLI, Hoppr, Grype**, and **repository-maintained application metadata** (JSON, CSV, or XML via `merge-sbom.ps1`) into **holistic CycloneDX** documents. **NTIA minimum elements** are checked with `check-ntia.ps1` and **Hoppr**. **Embedded signing** uses `scripts/sign-sbom.sh` (OpenSSL; key handling unchanged here). **GitHub Actions** and **GitLab CI** run the **same pipeline shape**: clean outputs → build → generate → enrich → validate → sign → scan → report → upload artifacts.
+
+**Using your own C/C++ tree:** point the **local** script at `-SourcePath` and `-AppMetadataPath`, and set **CI** variables **`APP_DIR`** and **`APP_METADATA`** (see [CI/CD parity](#ci-cd-parity)). Replace the **build** step (`make -C $APP_DIR`) with your generator if you do not use Make.
+
+**Avoiding stale reports:** every **CI** job and every **local** `generate-sbom.ps1` run (by default) **deletes prior root `sbom/*.json` and all `reports/*`** before regenerating, so you do not read yesterday’s Grype/Trivy output after a `git pull`. Use **`-NoClean`** only when you intentionally need to keep prior files. `sbom/pki/` is not removed by the clean step.
+
 ## Reference Architecture
 
 The implementation uses a staged model:
@@ -33,22 +41,31 @@ sbom-attestation/
 |   |-- include/                         # Headers
 |   |-- Dockerfile                       # Container build path
 |   |-- Makefile                         # Native build path
-|   `-- app-metadata.json                # Custom component metadata (JSON; CSV/XML also supported — see below)
+|   |-- app-metadata.json                # Custom component metadata (see also .csv / .xml)
 |-- scripts/
-|   `-- sign-sbom.sh                     # Canonicalize + sign + embed signature
+|   |-- sign-sbom.sh                     # Canonicalize + sign + embed signature
+|   |-- clean-sbom-outputs.sh            # CI/Linux: wipe generated sbom root JSON/tar + reports
+|   `-- clean-sbom-outputs.ps1           # Windows: same (used by generate-sbom.ps1)
 |-- sbom/                                # Generated SBOM outputs and PKI artifacts
 |-- reports/                             # Validation, scan, and DB evidence outputs
 |-- sbom_ui/
-|   |-- app.py                           # Flask API (generate/sign/scan + pipeline APIs)
-|   |-- metadata_parser.py               # JSON/CSV/XML → canonical app metadata (API + merge parity)
+|   |-- app.py                           # Flask app: static Mission Control + REST APIs
 |   |-- requirements.txt
-|   `-- static/index.html                # Mission Control UI (static; deployed separately from API)
+|   `-- static/
+|       `-- index.html                   # Mission Control UI (React via Babel in-page)
+|-- viewer/                              # Standalone SBOM + Grype JSON viewer (static HTML/JS)
 |-- generate-sbom.ps1                    # Local orchestrator (native/container mode)
 |-- merge-sbom.ps1                       # Inject custom app metadata into SBOM
 |-- check-ntia.ps1                       # NTIA minimum-elements check
+|-- run-mission-control.ps1              # Quick start: Flask UI on $env:PORT (default 5000)
+|-- start-ui-local.ps1                   # Picks a free port, prints URL, starts Flask
+|-- Dockerfile                           # Container image for the UI/API (see also Procfile)
+|-- Procfile                             # Process entry for compatible PaaS hosts
+|-- render.yaml                          # Example Render service definition
 |-- .github/workflows/sbom-pipeline.yml  # GitHub Actions pipeline
+|-- .github/workflows/pages-ui.yml       # Optional: publish static UI to GitHub Pages
 |-- .gitlab-ci.yml                       # GitLab CI pipeline
-|-- start-ui-local.ps1                   # Local UI starter (auto-selects open port)
+|-- FREE_HOSTING_SETUP.md                # Optional: Pages + remote API wiring (not required for local use)
 `-- README.md
 ```
 
@@ -79,13 +96,16 @@ Optional but recommended:
 
 ## Quick Start (Local)
 
-### 1) Clone and install UI dependencies
+### 1) Repo root and install UI dependencies
+
+Use your local checkout as the working directory (this machine: `C:\Users\Soloman\sbom-attestation`):
 
 ```powershell
-git clone https://github.com/Richmansolom/SBOM-ATTESTATION.git
-cd .\SBOM-ATTESTATION
+cd C:\Users\Soloman\sbom-attestation
 python -m pip install -r .\sbom_ui\requirements.txt
 ```
+
+If you do not have the repo yet, clone it and then `cd` to that folder (rename or clone into `C:\Users\Soloman\sbom-attestation` if you want the same layout).
 
 ### 2) Build the reference C++ app
 
@@ -116,6 +136,14 @@ Podman mode:
 pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode native -ContainerRuntime podman
 ```
 
+By default, `generate-sbom.ps1` **cleans** existing pipeline outputs first (see [Project description](#project-description)). To keep previous `sbom/` JSON at the repo root and `reports/`, add **`-NoClean`**.
+
+Example for a **non-default** app directory and metadata file:
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File .\generate-sbom.ps1 -Mode native -SourcePath my-cpp-app -AppMetadataPath my-cpp-app/app-metadata.json
+```
+
 ### 4) Verify expected outputs
 
 After a successful run, confirm these key files exist:
@@ -131,46 +159,42 @@ After a successful run, confirm these key files exist:
 
 ## Mission Control UI
 
-### Run locally (recommended for development)
+The primary UI lives in `sbom_ui/static/index.html` (React loaded in-page). It talks to the Flask backend in `sbom_ui/app.py` for local generate/sign/scan, uploads, and GitHub/GitLab pipeline triggers.
 
-Start the UI backend with automatic open-port selection:
+**Start the app (recommended on Windows):**
 
 ```powershell
 pwsh -ExecutionPolicy Bypass -File .\start-ui-local.ps1
 ```
 
-Or run directly:
+The script chooses a free port (or `5000`/`$env:PORT` when set), binds `0.0.0.0`, and prints the URL. Alternatives:
 
 ```powershell
+pwsh -ExecutionPolicy Bypass -File .\run-mission-control.ps1
+# or
 python .\sbom_ui\app.py
 ```
 
-The starter script prints the exact URL (for example `http://127.0.0.1:5000/`).
+Open the URL shown in the terminal (typically `http://127.0.0.1:<port>/`).
 
-Current local UI capabilities:
+**API base resolution (how the browser picks the backend):**
 
-- Connect modal supports `github` and `gitlab` providers
-- Pipeline launch/monitor with stage strip (`Build -> Generate -> Sign -> Scan -> Report`)
-- Live job log retrieval (`/api/jobs/<job_id>/trace`) with periodic refresh while running
-- SBOM Viewer supports file upload, latest local fetch (`/api/sbom`), and source upload + optional metadata (JSON/CSV/XML) + generate flow
-- Vulnerability Viewer supports unified report loading from local files or CI artifacts (`/api/report/unified`)
-- DB freshness panel consumes `/api/db-status`
+| Situation | Behavior |
+|-----------|----------|
+| `localhost` / `127.0.0.1` with the app origin | Uses **same origin** (no separate API URL). |
+| Local hosts alias `www.sbomcontrol.com` or `sbomcontrol.com` **with a non-80/443 port** | Treated as local; uses **same origin**. |
+| Query `?api=https://host` | Normalizes, saves to `localStorage` key `sbom_api_base`, uses that base. |
+| `?reset_api=1` | Clears `sbom_api_base` (then reload). |
+| GitHub Pages (`*.github.io`) or `sbomcontrol.com` **without** a saved override | Falls back to a **default public API** URL embedded in the page (change in Connect modal or `?api=`). |
+| `file://` or missing origin | Defaults to `http://127.0.0.1:5000`. |
 
-### Hosted frontend/API mode
+Use the **Connect** modal’s **API Base URL** field to point at any reachable backend; that value is persisted with the other connection settings.
 
-This repo supports hosted operation with:
+**Optional local hostname:** add `127.0.0.1 www.sbomcontrol.com` to your hosts file, then open `http://www.sbomcontrol.com:<port>/` (match the port Flask prints). Remove or comment that line when you are not running the local server to avoid confusing browser errors.
 
-- Frontend: `sbom_ui/static` published by `.github/workflows/pages-ui.yml` (static HTML/JS/CSS — **not** served by Flask)
-- API backend: `sbom_ui/app.py` deployed from `render.yaml` (gunicorn/Flask on Render)
+**Standalone SBOM viewer:** the `viewer/` folder is a separate static page that loads a CycloneDX JSON file and a Grype JSON report from disk—useful for inspecting artifacts without the Mission Control backend.
 
-App metadata for enrichment may be maintained as **JSON, CSV, or XML**; `merge-sbom.ps1` and the API normalize to canonical JSON before merging. CI examples still use `app-metadata.json` by convention.
-
-Hosted behavior currently implemented:
-
-- GitHub Pages defaults API base to `https://sbom-control-api.onrender.com`
-- You can override API base once via `?api=https://your-api-host`
-- Override is stored in browser localStorage (`sbom_api_base`)
-- `?reset_api=1` clears saved API base and reloads default resolution
+**Optional remote hosting** (GitHub Pages static UI + API elsewhere) is documented in `FREE_HOSTING_SETUP.md` only if you need that deployment model; it is not required for local development.
 
 ### UI Provider Modes (GitHub + GitLab)
 
@@ -183,7 +207,7 @@ Connect modal fields:
 
 - Provider: `github` or `gitlab`
 - Project path: `namespace/project`
-- API Base URL: backend endpoint (for example `https://sbom-control-api.onrender.com`)
+- API Base URL: backend endpoint (local: same origin; remote: `https://your-api-host`)
 - Access token: optional for public read; required for trigger unless backend env tokens are configured
 
 Mission Control behavior implemented:
@@ -193,19 +217,36 @@ Mission Control behavior implemented:
 - GitLab single-job pipelines mapped to logical stage strip (`Build -> Generate -> Sign -> Scan -> Report`) by parsing trace markers
 - Saved API base override via `?api=...` and Connect modal `API Base URL`
 
-Recommended backend env vars (Render/API host):
+Recommended backend env vars (remote API host):
 
 - `GITHUB_TOKEN` for GitHub trigger/read/log flows
 - `GITLAB_TOKEN` for GitLab trigger/read flows
 - Optional: `GITLAB_TRIGGER_TOKEN` for GitLab trigger-token mode
 
-## CI/CD Parity
+## CI/CD parity
+
+Both pipelines **clean** generated outputs at the start (`scripts/clean-sbom-outputs.sh`), then build, generate SBOMs, merge metadata, validate, sign, scan, and publish artifacts.
 
 ### GitHub
 
 Workflow: `.github/workflows/sbom-pipeline.yml`
 
-Stages include:
+| Variable / secret | Purpose |
+|---|---|
+| `APP_DIR` | Directory of your C/C++ project (default `example-app`). Must contain the build used in the workflow (`make -C $APP_DIR`). |
+| `APP_METADATA` | Path passed to `merge-sbom.ps1` (default `example-app/app-metadata.json`). Use `.json`, `.csv`, or `.xml`. |
+| `SBOM_PRIVATE_KEY_PEM` | Optional secret: PEM for signing in CI. |
+
+### GitLab
+
+Workflow: `.gitlab-ci.yml`
+
+| Variable | Purpose |
+|---|---|
+| `APP_DIR` | Same as GitHub (default `example-app`). |
+| `APP_METADATA` | Same as GitHub; keep it consistent when you change `APP_DIR`. |
+
+Stages (both providers):
 
 - Build
 - Generate
@@ -213,22 +254,16 @@ Stages include:
 - Scan
 - Report
 
-### GitLab
-
-Workflow: `.gitlab-ci.yml`
-
-Implements the same logical stages and artifacts as GitHub.
-
 ## Current Implementation Status
 
 The following is implemented and validated in this repository:
 
 - **SBOM generation:** Syft + Trivy + Distro2SBOM are merged via CycloneDX for source/build targets.
-- **Metadata enrichment:** Custom application metadata (JSON, CSV, or XML) is merged into generated SBOMs via `merge-sbom.ps1` / API (`metadata_parser.py`).
+- **Metadata enrichment:** Custom C/C++ application component metadata is merged into generated SBOMs.
 - **Validation:** CycloneDX schema checks, local NTIA checks, and Hoppr NTIA validation are in place.
 - **Attestation:** Embedded SBOM signature generation + verification is implemented via OpenSSL-based flow.
 - **Vulnerability analysis:** Grype and Trivy scans produce JSON/table outputs and combined summary evidence.
-- **Mission Control UI:** Hosted frontend + backend APIs support GitHub and GitLab pipeline trigger/monitor flow.
+- **Mission Control UI:** Flask-served UI plus APIs support GitHub and GitLab pipeline trigger/monitor flow; optional static hosting is described in `FREE_HOSTING_SETUP.md`.
 - **Security hardening applied:** CI supports `SBOM_PRIVATE_KEY_PEM` secret injection and excludes private key material from CI artifact upload.
 
 ## Real-World Threat Relevance
@@ -268,18 +303,16 @@ If another team wants to claim "same implementation class", they should produce 
 - Trivy report and DB status/update evidence
 - Combined vulnerability summary report
 
-## How to Adapt This for Another C/C++ Project
+## How to adapt this for another C/C++ project
 
-1. Replace `example-app/` with your project path
-2. Update metadata (`app-metadata.json`, or **CSV/XML** passed to `-AppMetadataPath` / Mission Control uploads — stored as canonical JSON) with your:
-   - supplier
-   - component names
-   - versions
-   - dependency relationships
-3. Ensure build command in CI and local scripts matches your build system
-4. Keep SBOM output names stable to preserve downstream tooling/UI compatibility
-5. Re-run local generation and confirm artifact set
-6. Run CI on both GitHub and GitLab and compare outputs
+1. Copy or replace `example-app/` with your tree (or point **`APP_DIR`** / **`-SourcePath`** at it).
+2. Edit metadata (**`app-metadata.json`**, or **`.csv`** / **`.xml`** with the same fields) for supplier, application identity, and optional **`custom_components`** (multi-component dependency graph).
+3. In **`.github/workflows/sbom-pipeline.yml`**, set **`APP_DIR`** and **`APP_METADATA`** to match your paths.
+4. In **`.gitlab-ci.yml`**, set the same **`APP_DIR`** and **`APP_METADATA`** variables.
+5. Change the **build** step if you do not use Make (for example invoke CMake or Ninja instead of `make -C $APP_DIR`).
+6. Locally, use **`generate-sbom.ps1`** with **`-SourcePath`**, **`-AppMetadataPath`**, and optionally **`-SbomDir`** / **`-ReportDir`** if you keep outputs elsewhere.
+7. Keep default SBOM **file names** under `sbom/` and `reports/` stable if you rely on Mission Control or other automation.
+8. Run **`generate-sbom.ps1`** after **`git pull`** (clean runs by default) so local results match what CI would produce; use **`-NoClean`** only when debugging.
 
 ## Quality Gate Checklist
 

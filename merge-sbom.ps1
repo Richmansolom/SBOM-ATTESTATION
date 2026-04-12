@@ -2,8 +2,8 @@ param(
   [Parameter(Mandatory=$true)]
   [string]$InputSbom,
 
-  [Parameter(Mandatory=$false)]
-  [string]$AppMetadata = "",
+  [Parameter(Mandatory=$true)]
+  [string]$AppMetadata,
 
   [Parameter(Mandatory=$true)]
   [string]$OutputSbom
@@ -63,6 +63,182 @@ function Get-CpeFromApp($app) {
   return "cpe:2.3:a:$($vendor):$($product):$($ver):*:*:*:*:*:*:*"
 }
 
+function Get-CpeFromSubComponent($name, $version, $supplierName) {
+  $vendor = Get-Slug $supplierName
+  $product = Get-Slug $name
+  $ver = [string]$version
+  if ([string]::IsNullOrWhiteSpace($ver)) { $ver = "0" }
+  return "cpe:2.3:a:$($vendor):$($product):$($ver):*:*:*:*:*:*:*"
+}
+
+# --- Load app metadata: JSON (extended), CSV, or XML ---
+function Read-AppMetadataJson([string]$raw) {
+  $app = $raw | ConvertFrom-Json
+  if (-not $app.supplier) { throw "app-metadata JSON: missing supplier" }
+  if (-not $app.supplier.name) { throw "app-metadata JSON: missing supplier.name" }
+  return $app
+}
+
+function Read-AppMetadataCsv([string]$path) {
+  $rows = Import-Csv -Path $path
+  if (-not $rows -or $rows.Count -eq 0) { throw "CSV metadata is empty: $path" }
+  $appRow = $null
+  foreach ($r in $rows) {
+    $k = SafeStr $r.Kind
+    if ($k -eq "Application") { $appRow = $r; break }
+  }
+  if (-not $appRow) { throw "CSV metadata must include one row with Kind=Application" }
+
+  $supplierUrls = @()
+  $su = $appRow.SupplierUrl
+  if (-not [string]::IsNullOrWhiteSpace($su)) {
+    foreach ($part in ($su -split '[|;]')) {
+      $t = $part.Trim()
+      if ($t) { $supplierUrls += $t }
+    }
+  }
+
+  $custom = @()
+  foreach ($r in $rows) {
+    $k = SafeStr $r.Kind
+    if ($k -ne "Library") { continue }
+    $deps = @()
+    $do = $r.DependsOn
+    if (-not [string]::IsNullOrWhiteSpace($do)) {
+      foreach ($part in ($do -split '[;,]')) {
+        $t = $part.Trim()
+        if ($t) { $deps += $t }
+      }
+    }
+    $custom += [ordered]@{
+      ref          = SafeStr $r.Ref
+      name         = SafeStr $r.Name
+      version      = SafeStr $r.Version
+      type         = if ([string]::IsNullOrWhiteSpace($r.Type)) { "library" } else { $r.Type.Trim() }
+      description  = SafeStr $r.Description
+      license      = SafeStr $r.License
+      depends_on   = $deps
+      source_file  = if ($r.PSObject.Properties.Name -contains "SourceFile") { SafeStr $r.SourceFile } else { "" }
+    }
+  }
+
+  $appPurlCsv = $null
+  if ($appRow.PSObject.Properties.Name -contains 'Ref' -and $appRow.Ref -and "$($appRow.Ref)".Trim()) {
+    $appPurlCsv = "$($appRow.Ref)".Trim()
+  }
+
+  return [ordered]@{
+    name            = SafeStr $appRow.Name
+    version         = SafeStr $appRow.Version
+    description     = SafeStr $appRow.Description
+    language        = SafeStr $appRow.Language
+    author          = SafeStr $appRow.Author
+    license         = SafeStr $appRow.License
+    build_system    = SafeStr $appRow.BuildSystem
+    entry_point     = SafeStr $appRow.EntryPoint
+    source_file     = SafeStr $appRow.SourceFile
+    repository      = SafeStr $appRow.Repository
+    purl            = $appPurlCsv
+    supplier        = @{ name = SafeStr $appRow.SupplierName; url = $supplierUrls }
+    custom_components = [array]$custom
+  }
+}
+
+function Read-AppMetadataXml([string]$path) {
+  [xml]$x = Get-Content -Path $path -Encoding UTF8
+  $root = $x.AppMetadata
+  if (-not $root) { throw "XML metadata: root element must be AppMetadata" }
+  $sup = $root.Supplier
+  if (-not $sup) { throw "XML metadata: missing Supplier" }
+  $supplierUrls = @()
+  foreach ($u in $sup.Url) {
+    if ($u -and "$u".Trim()) { $supplierUrls += "$u".Trim() }
+  }
+  $a = $root.Application
+  if (-not $a) { throw "XML metadata: missing Application" }
+
+  $custom = @()
+  $ccRoot = $root.CustomComponents
+  if ($ccRoot -and $ccRoot.Component) {
+    foreach ($node in $ccRoot.Component) {
+      $deps = @()
+      if ($node.DependsOn) {
+        foreach ($d in $node.DependsOn) {
+          $refAttr = $d.Ref
+          if ($refAttr) { $deps += "$refAttr".Trim() }
+        }
+      }
+      $custom += [ordered]@{
+        ref          = "$($node.Ref)".Trim()
+        name         = "$($node.Name)".Trim()
+        version      = "$($node.Version)".Trim()
+        type         = if ($node.Type) { "$($node.Type)".Trim() } else { "library" }
+        description  = if ($node.Description) { "$($node.Description)".Trim() } else { "unknown" }
+        license      = if ($node.License) { "$($node.License)".Trim() } else { "" }
+        depends_on   = $deps
+        source_file  = if ($node.SourceFile) { "$($node.SourceFile)".Trim() } else { "" }
+      }
+    }
+  }
+
+  $appPurlXml = $null
+  if ($a.Purl) { $appPurlXml = "$($a.Purl)".Trim() }
+
+  return [ordered]@{
+    name            = "$($a.Name)".Trim()
+    version         = "$($a.Version)".Trim()
+    description     = if ($a.Description) { "$($a.Description)".Trim() } else { "unknown" }
+    language        = if ($a.Language) { "$($a.Language)".Trim() } else { "unknown" }
+    author          = if ($a.Author) { "$($a.Author)".Trim() } else { "unknown" }
+    license         = if ($a.License) { "$($a.License)".Trim() } else { "unknown" }
+    build_system    = if ($a.BuildSystem) { "$($a.BuildSystem)".Trim() } else { "unknown" }
+    entry_point     = if ($a.EntryPoint) { "$($a.EntryPoint)".Trim() } else { "unknown" }
+    source_file     = if ($a.SourceFile) { "$($a.SourceFile)".Trim() } else { "unknown" }
+    repository      = if ($a.Repository) { "$($a.Repository)".Trim() } else { "unknown" }
+    purl            = $appPurlXml
+    supplier        = @{ name = "$($sup.Name)".Trim(); url = $supplierUrls }
+    custom_components = [array]$custom
+  }
+}
+
+function Read-AppMetadataFile([string]$path) {
+  if (-not (Test-Path $path)) { throw "App metadata not found: $path" }
+  $ext = [System.IO.Path]::GetExtension($path).ToLowerInvariant()
+  switch ($ext) {
+    '.json' { return Read-AppMetadataJson (Get-Content -Path $path -Raw -Encoding UTF8) }
+    '.csv'  { return Read-AppMetadataCsv $path }
+    '.xml'  { return Read-AppMetadataXml $path }
+    default { throw "Unsupported app metadata extension '$ext' for $path — use .json, .csv, or .xml" }
+  }
+}
+
+function Get-DependsOnList($cc) {
+  $raw = $null
+  if ($cc.PSObject.Properties.Name -contains 'depends_on') { $raw = $cc.depends_on }
+  elseif ($cc.PSObject.Properties.Name -contains 'dependsOn') { $raw = $cc.dependsOn }
+  if ($null -eq $raw) { return @() }
+  if ($raw -is [string]) {
+    if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
+    return @($raw -split '[;,]' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+  }
+  return @($raw)
+}
+
+function Get-CustomRootRefs([object[]]$customList) {
+  if (-not $customList -or $customList.Count -eq 0) { return @() }
+  $depended = New-Object 'System.Collections.Generic.HashSet[string]'
+  foreach ($cc in $customList) {
+    foreach ($d in (Get-DependsOnList $cc)) { [void]$depended.Add($d) }
+  }
+  $top = @()
+  foreach ($cc in $customList) {
+    $r = SafeStr $cc.ref
+    if ([string]::IsNullOrWhiteSpace($r)) { continue }
+    if (-not $depended.Contains($r)) { $top += $r }
+  }
+  return $top
+}
+
 # SPDX license id -> { name, url } for proper CycloneDX licensing structure
 $script:SPDX_LICENSES = @{
   "MIT" = @{ name = "MIT License"; url = "https://spdx.org/licenses/MIT.html" }
@@ -82,8 +258,6 @@ $script:SPDX_LICENSES = @{
 }
 
 function ToCycloneDxLicenseEntry($licenseInput) {
-  # CycloneDX JSON schema (1.6/1.7): each license choice is oneOf SPDX id, named license, or expression.
-  # Do not combine id + name + url + licensing on the same object — CycloneDX-CLI validation will fail.
   $raw = [string]$licenseInput
   if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq "unknown") {
     return @{ license = @{ name = "unknown" } }
@@ -92,7 +266,6 @@ function ToCycloneDxLicenseEntry($licenseInput) {
   if ($script:SPDX_LICENSES.ContainsKey($id)) {
     return @{ license = @{ id = $id } }
   }
-  # Heuristic: SPDX IDs are typically identifier-like (no spaces; may include -, +, .)
   if ($id -notmatch '\s' -and $id -match '^[A-Za-z0-9.+_\-]+$') {
     return @{ license = @{ id = $id } }
   }
@@ -144,118 +317,6 @@ function Normalize-ComponentLicenses($component) {
   $component.licenses = $normalized
 }
 
-function Normalize-AppMetadataFlat([hashtable]$lc) {
-  $name = SafeStr ($lc['name'])
-  if ([string]::IsNullOrWhiteSpace($name) -or $name -eq 'unknown') {
-    $cn = [string]$lc['component_name']
-    if (-not [string]::IsNullOrWhiteSpace($cn)) { $name = $cn.Trim() }
-  }
-  if ([string]::IsNullOrWhiteSpace($name)) { $name = 'custom-cpp-app' }
-
-  $ver = SafeStr ($lc['version'])
-  if ($ver -eq 'unknown') { $ver = '1.0.0' }
-
-  $desc = [string]$lc['description']
-  if ([string]::IsNullOrWhiteSpace($desc)) { $desc = "$name (app metadata)" }
-
-  $supplierName = SafeStr ($lc['supplier_name'])
-  if ($supplierName -eq 'unknown' -or [string]::IsNullOrWhiteSpace($supplierName)) {
-    $supplierName = SafeStr ($lc['supplier'])
-  }
-  if ($supplierName -eq 'unknown' -or [string]::IsNullOrWhiteSpace($supplierName)) { $supplierName = 'Unknown' }
-
-  $urlCell = [string]($lc['supplier_url'])
-  if ([string]::IsNullOrWhiteSpace($urlCell)) { $urlCell = [string]$lc['supplier_urls'] }
-  $urls = @()
-  if (-not [string]::IsNullOrWhiteSpace($urlCell)) {
-    foreach ($p in ($urlCell -split '[|;,\n]+')) {
-      $t = $p.Trim()
-      if ($t) { $urls += $t }
-    }
-  }
-
-  $repoVal = [string]$lc['repository']
-  if ([string]::IsNullOrWhiteSpace($repoVal)) { $repoVal = [string]$lc['repo'] }
-  if ($null -eq $repoVal) { $repoVal = '' }
-
-  $out = [ordered]@{
-    name = $name
-    component_type = SafeStr ($lc['component_type'])
-    version = $ver
-    description = $desc
-    language = if ([string]::IsNullOrWhiteSpace([string]$lc['language'])) { 'C++' } else { [string]$lc['language'].Trim() }
-    author = if ([string]::IsNullOrWhiteSpace([string]$lc['author'])) { 'Unknown' } else { [string]$lc['author'].Trim() }
-    license = if ([string]::IsNullOrWhiteSpace([string]$lc['license'])) { 'MIT' } else { [string]$lc['license'].Trim() }
-    build_system = $({
-        $bs = [string]$lc['build_system']
-        if ([string]::IsNullOrWhiteSpace($bs)) { $bs = [string]$lc['build'] }
-        if ([string]::IsNullOrWhiteSpace($bs)) { 'unknown' } else { $bs.Trim() }
-      })
-    entry_point = if ([string]::IsNullOrWhiteSpace([string]$lc['entry_point'])) { 'main' } else { [string]$lc['entry_point'].Trim() }
-    source_file = if ([string]::IsNullOrWhiteSpace([string]$lc['source_file'])) { 'src/main.cpp' } else { [string]$lc['source_file'].Trim() }
-    repository = $repoVal
-    supplier = [pscustomobject]@{ name = $supplierName; url = [object[]]$urls }
-  }
-  if ($out['component_type'] -eq 'unknown' -or [string]::IsNullOrWhiteSpace($out['component_type'])) {
-    $out['component_type'] = 'application'
-  }
-  $purl = [string]$lc['purl']
-  if (-not [string]::IsNullOrWhiteSpace($purl)) { $out['purl'] = $purl.Trim() }
-  $cpe = [string]$lc['cpe']
-  if (-not [string]::IsNullOrWhiteSpace($cpe)) { $out['cpe'] = $cpe.Trim() }
-  return [pscustomobject]$out
-}
-
-function Read-AppMetadataFromFile([string]$MetaPath) {
-  $ext = [System.IO.Path]::GetExtension($MetaPath).ToLowerInvariant()
-  if ($ext -eq '.json') {
-    return Get-Content $MetaPath -Raw | ConvertFrom-Json
-  }
-  if ($ext -eq '.csv') {
-    $rows = Import-Csv -LiteralPath $MetaPath
-    if (-not $rows -or $rows.Count -eq 0) { throw "CSV metadata has no data rows: $MetaPath" }
-    $r = $rows[0]
-    $lc = @{}
-    foreach ($p in $r.PSObject.Properties) {
-      $lc[$p.Name.Trim().ToLowerInvariant()] = [string]$p.Value
-    }
-    return Normalize-AppMetadataFlat $lc
-  }
-  if ($ext -eq '.xml') {
-    [xml]$x = Get-Content $MetaPath -Raw
-    $root = $x.DocumentElement
-    $lc = @{}
-    foreach ($n in $root.ChildNodes) {
-      if ($n.NodeType -ne 'Element') { continue }
-      $tag = $n.LocalName.ToLowerInvariant()
-      if ($tag -eq 'supplier') {
-        $sn = ''
-        $urlParts = @()
-        foreach ($c in $n.ChildNodes) {
-          if ($c.NodeType -ne 'Element') { continue }
-          $ct = $c.LocalName.ToLowerInvariant()
-          if ($ct -eq 'name') { $sn = [string]$c.InnerText.Trim() }
-          elseif ($ct -eq 'url') { $urlParts += [string]$c.InnerText.Trim() }
-        }
-        if ($n.HasAttribute('name')) { $sn = [string]$n.GetAttribute('name') }
-        if ($n.HasAttribute('url')) { $urlParts += [string]$n.GetAttribute('url') }
-        $lc['supplier_name'] = $sn
-        if ($urlParts.Count -gt 0) { $lc['supplier_url'] = ($urlParts -join '|') }
-        continue
-      }
-      $txt = [string]$n.InnerText.Trim()
-      if ($txt) { $lc[$tag.Replace('-', '_')] = $txt }
-    }
-    if ($root.HasAttribute('name')) { $lc['name'] = [string]$root.GetAttribute('name') }
-    if ($root.HasAttribute('version')) { $lc['version'] = [string]$root.GetAttribute('version') }
-    if ($root.HasAttribute('license')) { $lc['license'] = [string]$root.GetAttribute('license') }
-    if ($root.HasAttribute('language')) { $lc['language'] = [string]$root.GetAttribute('language') }
-    if ($root.HasAttribute('author')) { $lc['author'] = [string]$root.GetAttribute('author') }
-    return Normalize-AppMetadataFlat $lc
-  }
-  throw "Unsupported app metadata extension '$ext' (use .json, .csv, or .xml): $MetaPath"
-}
-
 if (-not (Test-Path $InputSbom)) { throw "Input SBOM not found: $InputSbom" }
 
 $sbomRaw = Get-Content $InputSbom -Raw
@@ -264,45 +325,7 @@ if ([string]::IsNullOrWhiteSpace($sbomRaw)) { throw "Input SBOM is empty." }
 try { $sbom = $sbomRaw | ConvertFrom-Json }
 catch { throw "Input SBOM is not valid JSON." }
 
-$app = $null
-if (-not [string]::IsNullOrWhiteSpace($AppMetadata) -and (Test-Path $AppMetadata)) {
-  try {
-    $app = Read-AppMetadataFromFile $AppMetadata
-  } catch {
-    throw "App metadata could not be read ($AppMetadata): $($_.Exception.Message)"
-  }
-}
-
-if ($null -eq $app) {
-  $rootName = "unknown-app"
-  $rootVersion = "0.0.0"
-  if ($sbom.metadata -and $sbom.metadata.component) {
-    if ($sbom.metadata.component.name) { $rootName = [string]$sbom.metadata.component.name }
-    if ($sbom.metadata.component.version) { $rootVersion = [string]$sbom.metadata.component.version }
-  }
-  $app = [pscustomobject]@{
-    name = $rootName
-    version = $rootVersion
-    description = "Auto-generated metadata (app-metadata.json not provided)"
-    language = "C++"
-    author = "Unknown"
-    repository = ""
-    build_system = "unknown"
-    entry_point = "main"
-    source_file = "unknown"
-    license = "unknown"
-    supplier = [pscustomobject]@{
-      name = "Unknown"
-      url = @()
-    }
-  }
-}
-
-if (-not $app.supplier) {
-  $app | Add-Member -MemberType NoteProperty -Name supplier -Value ([pscustomobject]@{ name = "Unknown"; url = @() }) -Force
-}
-if (-not $app.supplier.name) { $app.supplier.name = "Unknown" }
-if (-not $app.supplier.url) { $app.supplier.url = @() }
+$app = Read-AppMetadataFile $AppMetadata
 
 if (-not ($sbom.PSObject.Properties.Name -contains "metadata") -or $null -eq $sbom.metadata) {
   $sbom | Add-Member -MemberType NoteProperty -Name metadata -Value ([ordered]@{})
@@ -326,7 +349,6 @@ if ($sbom.metadata.PSObject.Properties.Name -contains "supplier") {
 $appLicense = SafeStr $app.license
 $licensesValue = @(ToCycloneDxLicenseEntry $appLicense)
 $meta = $sbom.metadata
-# Always set root metadata licenses from app — merged COTS SBOMs may carry invalid license shapes for CycloneDX 1.7.
 if ($meta.PSObject.Properties.Name -contains "licenses") {
   $meta.licenses = $licensesValue
 } else {
@@ -338,6 +360,11 @@ $appVersion = SafeStr $app.version
 $appPurl = Get-PurlFromApp $app
 $appCpe = Get-CpeFromApp $app
 $appBomRef = $appPurl
+
+$customList = @()
+if ($app.PSObject.Properties.Name -contains 'custom_components' -and $app.custom_components) {
+  $customList = @($app.custom_components)
+}
 
 $customComponent = @{
   "bom-ref"   = $appBomRef
@@ -360,11 +387,7 @@ $customComponent = @{
   )
 }
 
-if (-not ($sbom.PSObject.Properties.Name -contains "components")) {
-  $sbom | Add-Member -MemberType NoteProperty -Name components -Value @()
-} elseif ($null -eq $sbom.components) {
-  $sbom.components = @()
-}
+if (-not $sbom.components) { $sbom | Add-Member -MemberType NoteProperty -Name components -Value @() }
 
 $already = $false
 $rootBomRef = $appBomRef
@@ -381,16 +404,64 @@ if (-not $already) { $sbom.components += $customComponent }
 
 $sbom.metadata.component = $customComponent
 
-foreach ($c in $sbom.components) { Normalize-ComponentLicenses $c }
-# When an existing root component matched, $customComponent may not appear in components[]; normalize metadata root anyway.
-if ($sbom.metadata -and $sbom.metadata.component) {
-  Normalize-ComponentLicenses $sbom.metadata.component
+# --- COTS component refs before adding internal custom libraries ---
+$cotsBomRefs = @()
+foreach ($c in $sbom.components) {
+  $br = $c.'bom-ref'
+  if ($br -and $br -ne $rootBomRef) { $cotsBomRefs += $br }
 }
 
-if (-not ($sbom.PSObject.Properties.Name -contains "dependencies")) {
-  $sbom | Add-Member -MemberType NoteProperty -Name dependencies -Value @()
-} elseif ($null -eq $sbom.dependencies) {
-  $sbom.dependencies = @()
+# --- Additional custom components (holistic SBOM: multiple in-house parts + dependency graph) ---
+$customRefs = New-Object 'System.Collections.Generic.HashSet[string]'
+foreach ($cc in $customList) {
+  $ref = SafeStr $cc.ref
+  if ([string]::IsNullOrWhiteSpace($ref)) { throw "custom_components entry missing ref" }
+  [void]$customRefs.Add($ref)
+
+  $ccName = SafeStr $cc.name
+  $ccVer = SafeStr $cc.version
+  if ($ccVer -eq "unknown") { $ccVer = $appVersion }
+  $ccType = SafeStr $cc.type
+  if ($ccType -eq "unknown") { $ccType = "library" }
+  $ccDesc = SafeStr $cc.description
+  $ccLicRaw = $null
+  if ($cc.PSObject.Properties.Name -contains 'license' -and $cc.license -and "$($cc.license)".Trim()) {
+    $ccLicRaw = SafeStr $cc.license
+  } else {
+    $ccLicRaw = $appLicense
+  }
+  $ccCpe = Get-CpeFromSubComponent $ccName $ccVer $supplierName
+
+  $props = @()
+  if ($cc.PSObject.Properties.Name -contains 'source_file' -and $cc.source_file -and "$($cc.source_file)".Trim() -ne "unknown") {
+    $props += @{ name = "source_file"; value = SafeStr $cc.source_file }
+  }
+
+  $sub = @{
+    "bom-ref"   = $ref
+    type        = $ccType
+    name        = $ccName
+    version     = $ccVer
+    description = $ccDesc
+    publisher   = $supplierName
+    supplier    = @{ name = $supplierName; url = $supplierUrls }
+    purl        = $ref
+    cpe         = $ccCpe
+    licenses    = @(ToCycloneDxLicenseEntry $ccLicRaw)
+    externalReferences = @(@{ type = "vcs"; url = SafeStr $app.repository })
+    properties  = $props
+  }
+
+  $dup = $false
+  foreach ($c in $sbom.components) {
+    if ($c.'bom-ref' -eq $ref) { $dup = $true; break }
+  }
+  if (-not $dup) { $sbom.components += $sub }
+}
+
+foreach ($c in $sbom.components) { Normalize-ComponentLicenses $c }
+if ($sbom.metadata -and $sbom.metadata.component) {
+  Normalize-ComponentLicenses $sbom.metadata.component
 }
 
 foreach ($c in $sbom.components) {
@@ -399,19 +470,53 @@ foreach ($c in $sbom.components) {
   }
 }
 
-$depRefs = @()
-foreach ($c in $sbom.components) {
-  if ($c.'bom-ref' -ne $rootBomRef) { $depRefs += $c.'bom-ref' }
+if (-not $sbom.dependencies) { $sbom | Add-Member -MemberType NoteProperty -Name dependencies -Value @() }
+
+# Build dependency graph
+$newDeps = @()
+foreach ($d in @($sbom.dependencies)) {
+  if (-not $d.ref) { continue }
+  if ($d.ref -eq $rootBomRef) { continue }
+  if ($customRefs.Contains([string]$d.ref)) { continue }
+  $newDeps += $d
 }
 
-$rootIndex = -1
-for ($i = 0; $i -lt $sbom.dependencies.Count; $i++) {
-  if ($sbom.dependencies[$i].ref -eq $rootBomRef) { $rootIndex = $i; break }
+foreach ($cc in $customList) {
+  $ref = SafeStr $cc.ref
+  $depOn = @(Get-DependsOnList $cc)
+  $newDeps += @{ ref = $ref; dependsOn = $depOn }
 }
 
-$rootDep = @{ ref = $rootBomRef; dependsOn = $depRefs }
-if ($rootIndex -ge 0) { $sbom.dependencies[$rootIndex] = $rootDep }
-else { $sbom.dependencies += $rootDep }
+$overrideTop = $null
+if ($app.PSObject.Properties.Name -contains 'root_depends_on_custom' -and $app.root_depends_on_custom) {
+  $overrideTop = @($app.root_depends_on_custom)
+}
+
+[string[]]$rootDependsOn = @()
+if ($customList.Count -eq 0) {
+  foreach ($c in $sbom.components) {
+    if ($c.'bom-ref' -ne $rootBomRef) { $rootDependsOn += $c.'bom-ref' }
+  }
+} else {
+  $rootDependsOn = @($cotsBomRefs)
+  if ($overrideTop -and $overrideTop.Count -gt 0) {
+    $rootDependsOn += $overrideTop
+  } else {
+    $rootDependsOn += (Get-CustomRootRefs $customList)
+  }
+}
+
+$seen = New-Object 'System.Collections.Generic.HashSet[string]'
+$deduped = @()
+foreach ($r in $rootDependsOn) {
+  if (-not $seen.Contains($r)) {
+    [void]$seen.Add($r)
+    $deduped += $r
+  }
+}
+$newDeps += @{ ref = $rootBomRef; dependsOn = $deduped }
+
+$sbom.dependencies = $newDeps
 
 $sbomJson = $sbom | ConvertTo-Json -Depth 40
 Write-Utf8NoBom -path $OutputSbom -content $sbomJson

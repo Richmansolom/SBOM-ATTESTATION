@@ -10,8 +10,38 @@
   "entry_point": "./build/sbom_demo_app",
   "source_file": "example-app/src/main.cpp",
   "repository": "https://github.com/Richmansolom/SBOM-ATTESTATION",
+  "purl": "pkg:github/Richmansolom/SBOM-ATTESTATION@1.0.0",
   "supplier": {
     "name": "Lockheed Martin Corporation",
     "url": ["https://www.lockheedmartin.com"]
-  }
+  },
+  "custom_components": [
+    {
+      "ref": "pkg:generic/scheduler-process@1.0.0",
+      "name": "Scheduler Process",
+      "type": "library",
+      "version": "1.0.0",
+      "description": "Synthetic process models and random workload generation for scheduling experiments.",
+      "depends_on": [],
+      "source_file": "example-app/src/scheduler/process.cpp"
+    },
+    {
+      "ref": "pkg:generic/scheduler-algorithms@1.0.0",
+      "name": "Scheduler Algorithms",
+      "type": "library",
+      "version": "1.0.0",
+      "description": "FIFO, SJF, and SRT scheduling algorithms over process sets.",
+      "depends_on": ["pkg:generic/scheduler-process@1.0.0"],
+      "source_file": "example-app/src/scheduler/algorithms.cpp"
+    },
+    {
+      "ref": "pkg:generic/scheduler-display@1.0.0",
+      "name": "Scheduler Display",
+      "type": "library",
+      "version": "1.0.0",
+      "description": "Console tables and comparative metrics output.",
+      "depends_on": ["pkg:generic/scheduler-process@1.0.0"],
+      "source_file": "example-app/src/scheduler/display.cpp"
+    }
+  ]
 }
