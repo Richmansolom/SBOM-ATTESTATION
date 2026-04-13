@@ -2515,7 +2515,7 @@ function VulnPage() {
     const id = setInterval(() => {
       if (manualUploadRef.current) return;
       loadFromApi(scanner, { silentError: true });
-    }, 45000);
+    }, 5000);
     return () => clearInterval(id);
   }, [scanner]);
   useEffect(() => {
