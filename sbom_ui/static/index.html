@@ -2531,6 +2531,14 @@ function VulnPage() {
     }, 45000);
     return () => clearInterval(id);
   }, [scanner]);
+  useEffect(() => {
+  const dirty = sessionStorage.getItem('sbom_reports_dirty');
+  if (dirty === '1') {
+    loadFromApi(scanner).finally(() => {
+      sessionStorage.removeItem('sbom_reports_dirty');
+    });
+  }
+}, [scanner]);
 
   const normalized = useMemo(() => {
     if (!data) return [];
