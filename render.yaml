@@ -4,7 +4,8 @@
     env: python
     plan: free
     buildCommand: pip install -r sbom_ui/requirements.txt
-    startCommand: gunicorn --chdir sbom_ui app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    # Single worker: Render free tier has little RAM; two workers duplicate Python memory and often OOM.
+    startCommand: gunicorn --chdir sbom_ui app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
