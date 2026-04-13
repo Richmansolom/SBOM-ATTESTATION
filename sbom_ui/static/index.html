@@ -1921,7 +1921,18 @@ setLastLoadedAt('');
         }
         const current = runsPayload.find((r) => r.id === runId);
         if (!current) continue;
-        const st = String(current.status || '').toLowerCase();
+        const st = String(current.status || '').toLowerCase();if (st.includes('build')) {
+  setUploadStatus('Building project...');
+} else if (st.includes('sbom')) {
+  setUploadStatus('Generating SBOM...');
+} else if (st.includes('scan')) {
+  setUploadStatus('Scanning vulnerabilities...');
+} else if (st.includes('report')) {
+  setUploadStatus('Finalizing report...');
+} else {
+  setUploadStatus(`Pipeline running: ${st}`);
+}
+        
        setUploadStatus(`Pipeline running: ${st}`);
         if (st === 'pending' || st === 'running') {
           const secs = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
