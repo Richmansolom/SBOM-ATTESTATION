@@ -1824,7 +1824,6 @@ async function handleUploadSource() {
 
   try {
     setUploadStatus('Uploading source...');
-      setUploadStatus('Uploading source...');
       const res = await fetch(apiUrl('/api/upload-source'), {
         method: 'POST',
         body: formData
@@ -1923,7 +1922,7 @@ setLastLoadedAt('');
         const current = runsPayload.find((r) => r.id === runId);
         if (!current) continue;
         const st = String(current.status || '').toLowerCase();
-        setUploadStatus('Pipeline runniing: ${st}');
+       setUploadStatus(`Pipeline running: ${st}`);
         if (st === 'pending' || st === 'running') {
           const secs = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
           setUploadStatus(`Generating SBOM... (${secs}s elapsed)`);
@@ -2081,21 +2080,9 @@ setLastLoadedAt('');
 
                 <div className="field" style={{marginBottom:12}}>
                   <span className="field-label">ZIP Upload</span>
-                  <input type="file" accept=".zip" onChange={(e) => { setProjectZip(e.target.files[0] || null); setProjectFiles([]); setSingleSourceFile(null); }} />
+                <input type="file" accept=".zip" onChange={(e) => { setProjectZip(e.target.files[0] || null); setProjectFiles([]); }} />
                   <div style={{ marginTop: 6, fontSize: 11, fontFamily: 'var(--mono)', color: projectZip ? 'var(--gold)' : 'var(--text2)' }}>
                     {projectZip ? `Selected: ${projectZip.name}` : 'No file selected'}
-                  </div>
-                </div>
-
-                <div className="field" style={{marginBottom:12}}>
-                  <span className="field-label">Single Source File</span>
-                  <input
-                    type="file"
-                    accept=".c,.cc,.cpp,.cxx,.h,.hh,.hpp,.hxx,.txt"
-                    onChange={(e) => { setSingleSourceFile(e.target.files[0] || null); setProjectZip(null); setProjectFiles([]); }}
-                  />
-                  <div style={{ marginTop: 6, fontSize: 11, fontFamily: 'var(--mono)', color: singleSourceFile ? 'var(--gold)' : 'var(--text2)' }}>
-                    {singleSourceFile ? `Selected: ${singleSourceFile.name}` : 'No file selected'}
                   </div>
                 </div>
 
@@ -2106,7 +2093,7 @@ setLastLoadedAt('');
                     webkitdirectory="true"
                     directory=""
                     multiple
-                    onChange={(e) => { setProjectFiles(Array.from(e.target.files || [])); setProjectZip(null); setSingleSourceFile(null); }}
+                  onChange={(e) => { setProjectFiles(Array.from(e.target.files || [])); setProjectZip(null); }}
                   />
                   <div style={{ marginTop: 6, fontSize: 11, fontFamily: 'var(--mono)', color: projectFiles.length ? 'var(--gold)' : 'var(--text2)' }}>
                     {projectFiles.length
