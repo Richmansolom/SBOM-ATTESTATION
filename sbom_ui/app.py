@@ -38,8 +38,27 @@ STAGE_NAMES = ["Build", "Generate", "Sign", "Scan", "Report"]
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512 MB
+# Hosted (e.g. Render free): keep memory bounded — each run can carry large pipeline logs.
+MAX_LOCAL_RUNS = max(1, int(os.environ.get("MAX_LOCAL_RUNS", "8")))
+MAX_LOCAL_RUN_LOG_CHARS = max(10_000, int(os.environ.get("MAX_LOCAL_RUN_LOG_CHARS", "200000")))
 LOCAL_RUNS = {}
 LOCAL_RUNS_LOCK = threading.Lock()
+
+
+def _prune_local_runs():
+    """Drop oldest runs so in-memory dict does not grow without bound."""
+    with LOCAL_RUNS_LOCK:
+        if len(LOCAL_RUNS) <= MAX_LOCAL_RUNS:
+            return
+        items = sorted(
+            LOCAL_RUNS.items(),
+            key=lambda kv: (kv[1].get("created_at") or ""),
+        )
+        for run_id, _ in items[: -MAX_LOCAL_RUNS]:
+            try:
+                del LOCAL_RUNS[run_id]
+            except KeyError:
+                pass
 
 
 def run_cmd(cmd, env_extra=None):
@@ -1587,13 +1606,17 @@ def _local_run_worker(run_id, body):
             run = LOCAL_RUNS.get(run_id, {})
             current = run.get("log", "")
             # Prevent unbounded growth in long-running jobs.
-            next_log = (current + chunk)[-400000:]
+            cap = max(MAX_LOCAL_RUN_LOG_CHARS * 2, 400_000)
+            next_log = (current + chunk)[-cap:]
             run["log"] = next_log
             LOCAL_RUNS[run_id] = run
 
     result = run_generate_pipeline(body, log_callback=_append_live_log)
     finished = datetime.now(timezone.utc)
     duration = max(int((finished - started).total_seconds()), 0)
+    final_log = result.get("log", "") or ""
+    if len(final_log) > MAX_LOCAL_RUN_LOG_CHARS:
+        final_log = final_log[-MAX_LOCAL_RUN_LOG_CHARS:]
     with LOCAL_RUNS_LOCK:
         run = LOCAL_RUNS.get(run_id, {})
         run.update(
@@ -1602,7 +1625,7 @@ def _local_run_worker(run_id, body):
                 "finished_at": finished.isoformat(),
                 "duration": duration,
                 "exit_code": result.get("exit_code"),
-                "log": result.get("log", ""),
+                "log": final_log,
                 "source_path": result.get("source_path"),
                 "app_metadata_path": result.get("app_metadata_path"),
             }
@@ -2468,6 +2491,7 @@ def start_local_run():
         }
     t = threading.Thread(target=_local_run_worker, args=(run_id, body), daemon=True)
     t.start()
+    _prune_local_runs()
     return jsonify({"status": "ok", "id": run_id})
 
 
