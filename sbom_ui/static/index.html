@@ -1624,7 +1624,6 @@ function SBOMPage({ config }) {
   const [sbom, setSbom] = useState(null);
   const [projectZip, setProjectZip] = useState(null);
   const [projectFiles, setProjectFiles] = useState([]);
-  const [singleSourceFile, setSingleSourceFile] = useState(null);
   const [uploadStatus, setUploadStatus] = useState('');
   const [uploadedSourcePath, setUploadedSourcePath] = useState('');
   const [metadataFile, setMetadataFile] = useState(null);
@@ -1804,31 +1803,27 @@ function SBOMPage({ config }) {
     setLastLoadedAt('');
   }
 
-  async function handleUploadSource() {
-    setUploadStatus('');
-    setErr('');
+async function handleUploadSource() {
+  setUploadStatus('');
+  setErr('');
 
-    if (!projectZip && projectFiles.length === 0 && !singleSourceFile) {
-      setUploadStatus('Please choose a ZIP, folder, or single source file.');
-      return;
+  if (!projectZip && projectFiles.length === 0) {
+    setUploadStatus('Please choose a ZIP file or project folder.');
+    return;
+  }
+
+  const formData = new FormData();
+
+  if (projectZip) {
+    formData.append('project_zip', projectZip);
+  } else {
+    for (const file of projectFiles) {
+      formData.append('project_files', file, file.webkitRelativePath || file.name);
     }
+  }
 
-    const formData = new FormData();
-
-    if (projectZip) {
-      formData.append('project_zip', projectZip);
-    } else if (singleSourceFile) {
-      formData.append('project_files', singleSourceFile, singleSourceFile.name);
-    } else {
-      for (const file of projectFiles) {
-        formData.append('project_files', file, file.webkitRelativePath || file.name);
-      }
-    }
-    if (metadataFile) {
-      formData.append('app_metadata', metadataFile, metadataFile.name);
-    }
-
-    try {
+  try {
+    setUploadStatus('Uploading source...');
       setUploadStatus('Uploading source...');
       const res = await fetch(apiUrl('/api/upload-source'), {
         method: 'POST',
@@ -1890,9 +1885,11 @@ function SBOMPage({ config }) {
       setUploadStatus('Upload a source project first.');
       return;
     }
-
+setSbom(null);
+setErr('');
+setLastLoadedAt('');
     try {
-      setUploadStatus('Queueing SBOM generation...');
+      setUploadStatus('Queueing SBOM generation... please wait');
       const res = await fetch(apiUrl('/api/local-run/start'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1926,6 +1923,7 @@ function SBOMPage({ config }) {
         const current = runsPayload.find((r) => r.id === runId);
         if (!current) continue;
         const st = String(current.status || '').toLowerCase();
+        setUploadStatus('Pipeline runniing: ${st}');
         if (st === 'pending' || st === 'running') {
           const secs = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
           setUploadStatus(`Generating SBOM... (${secs}s elapsed)`);
