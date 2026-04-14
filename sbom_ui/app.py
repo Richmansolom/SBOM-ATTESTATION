@@ -826,6 +826,113 @@ def _enrichment_supplier_license(payload, source_dir: Path, metadata_file=None):
     return None, []
 
 
+def inject_custom_components_from_metadata(sbom_path, app_metadata_path=None):
+    """Inject custom_components from app-metadata.json into SBOM with proper PURLs and dependencies."""
+    payload = parse_json(sbom_path)
+    if payload is None or not isinstance(payload, dict):
+        return 0
+    
+    # Find metadata file
+    metadata_file = None
+    if app_metadata_path:
+        try:
+            mf = Path(app_metadata_path)
+            if mf.is_file():
+                metadata_file = mf
+        except Exception:
+            pass
+    
+    if metadata_file is None:
+        return 0
+    
+    try:
+        app_meta = json.loads(metadata_file.read_text(encoding="utf-8"))
+    except Exception:
+        return 0
+    
+    if not isinstance(app_meta, dict):
+        return 0
+    
+    custom_comps = app_meta.get("custom_components")
+    if not isinstance(custom_comps, list) or len(custom_comps) == 0:
+        return 0
+    
+    components = payload.get("components")
+    if not isinstance(components, list):
+        components = []
+    
+    existing_refs = {str((c or {}).get("bom-ref") or "").strip() for c in components}
+    
+    # Get supplier/license from app metadata
+    sup_info = app_meta.get("supplier") or {}
+    sup_name = str(sup_info.get("name") or "Unknown").strip() or "Unknown"
+    sup_urls = sup_info.get("url") or []
+    if isinstance(sup_urls, str):
+        sup_urls = [sup_urls]
+    
+    app_lic = app_meta.get("license") or "Unknown"
+    sup = {"name": sup_name}
+    if sup_urls:
+        sup["url"] = sup_urls
+    lic_entries = _license_entries_from_spdx_or_name(app_lic)
+    
+    added = 0
+    for comp in custom_comps:
+        if not isinstance(comp, dict):
+            continue
+        
+        ref = str(comp.get("ref") or "").strip()
+        if not ref or ref in existing_refs:
+            continue
+        
+        name = str(comp.get("name") or "unknown").strip() or "unknown"
+        version = str(comp.get("version") or "1.0.0").strip() or "1.0.0"
+        comp_type = str(comp.get("type") or "library").strip() or "library"
+        description = str(comp.get("description") or "").strip() or ""
+        comp_lic = comp.get("license") or app_lic
+        
+        # Build component entry
+        row = {
+            "type": comp_type,
+            "name": name,
+            "version": version,
+            "bom-ref": ref,
+            "purl": ref,  # Use provided PURL directly
+            "description": description,
+            "properties": [
+                {"name": "sbom-attestation:enrichment", "value": "custom-component"},
+            ],
+        }
+        
+        # Add supplier
+        row["supplier"] = copy.deepcopy(sup)
+        
+        # Add license
+        comp_lic_entries = _license_entries_from_spdx_or_name(comp_lic)
+        if comp_lic_entries:
+            row["licenses"] = copy.deepcopy(comp_lic_entries)
+        
+        # Handle dependencies
+        depends_on = comp.get("depends_on")
+        if depends_on:
+            if isinstance(depends_on, str):
+                depends_on = [depends_on]
+            if isinstance(depends_on, list):
+                row["dependencies"] = [{"ref": str(d).strip()} for d in depends_on if str(d).strip()]
+        
+        components.append(row)
+        existing_refs.add(ref)
+        added += 1
+    
+    if added > 0:
+        payload["components"] = components
+        payload.setdefault("metadata", {})
+        payload["metadata"]["timestamp"] = datetime.now(timezone.utc).isoformat()
+        sbom_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    
+    return added
+
+
 def _should_drop_hosted_noise_component(comp) -> bool:
     """Strip ccls-cache / Nix-store mirror paths and legacy include:* pseudo-libraries from SBOM lists."""
     if not isinstance(comp, dict):
@@ -1410,6 +1517,13 @@ def run_generate_pipeline(body, log_callback=None):
                     }
                 if signed_sbom_path.exists():
                     shutil.move(str(signed_sbom_path), str(sbom_path))
+                
+                custom_injected = inject_custom_components_from_metadata(sbom_path, app_meta_path)
+                if log_callback and custom_injected > 0:
+                    log_callback(
+                        f"==> Injected {custom_injected} custom component(s) from app-metadata with proper PURLs and dependencies\n"
+                    )
+                
                 g_m, t_v = count_vuln_report_totals()
                 source_diag.update({"execution_path": "docker-ci-parity", "status": "ok"})
                 source_diag.update(
@@ -1510,6 +1624,12 @@ def run_generate_pipeline(body, log_callback=None):
         if log_callback and added_components > 0:
             log_callback(
                 f"==> Added {added_components} source-file inventory row(s) (supplier/license from app metadata when available; no #include pseudo-libraries)\n"
+            )
+
+        custom_injected = inject_custom_components_from_metadata(sbom_path, app_meta_path)
+        if log_callback and custom_injected > 0:
+            log_callback(
+                f"==> Injected {custom_injected} custom component(s) from app-metadata with proper PURLs and dependencies\n"
             )
 
         sign_cmd = [
@@ -3305,6 +3425,7 @@ def trigger_pipeline():
     token = _github_token_for_request()
     ref_full = str(ref) if str(ref).startswith("refs/") else f"refs/heads/{ref}"
     wf_enc = quote(workflow, safe="")
+    fallback_note = None
 
     if token:
         dispatch_path = f"repos/{repo}/actions/workflows/{wf_enc}/dispatches"
@@ -3320,13 +3441,30 @@ def trigger_pipeline():
                 },
             },
         )
+        # If the remote workflow does not support these inputs yet, retry without inputs.
         if code not in (200, 201, 204):
             msg = body
             try:
                 msg = json.loads(body).get("message", body) if body else str(code)
             except Exception:
                 pass
-            return jsonify({"message": f"GitHub API: {msg}"}), 500
+            if isinstance(msg, str) and "Unexpected inputs provided" in msg:
+                fallback_note = (
+                    "Workflow dispatch did not support app_dir/app_version inputs; retrying without workflow inputs."
+                )
+                code, body = github_rest_request(
+                    dispatch_path,
+                    "POST",
+                    token,
+                    json_body={"ref": ref_full},
+                )
+            if code not in (200, 201, 204):
+                msg = body
+                try:
+                    msg = json.loads(body).get("message", body) if body else str(code)
+                except Exception:
+                    pass
+                return jsonify({"message": f"GitHub API: {msg}"}), 500
     elif shutil.which("gh"):
         code, out = run_cmd(["gh", "workflow", "run", workflow, "--repo", repo, "--ref", str(ref)])
         if code != 0:
@@ -3344,13 +3482,20 @@ def trigger_pipeline():
     if latest_data:
         latest = (latest_data.get("workflow_runs") or [None])[0]
     if not latest:
-        return jsonify({"id": None, "status": "queued", "html_url": None, "message": "Workflow trigger submitted"})
+        return jsonify(
+            {
+                "id": None,
+                "status": "queued",
+                "html_url": None,
+                "message": fallback_note or "Workflow trigger submitted",
+            }
+        )
     return jsonify(
         {
             "id": latest.get("id"),
             "status": map_run_status(latest),
             "html_url": latest.get("html_url"),
-            "message": "Workflow trigger submitted",
+            "message": fallback_note or "Workflow trigger submitted",
         }
     )
 
