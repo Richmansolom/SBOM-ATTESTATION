@@ -2514,11 +2514,18 @@ function VulnPage() {
       if (manualUploadRef.current) return;
       loadFromApi(scanner, { silentError: true, pipelineEvent: event?.detail || null });
     };
+    const onPageShow = () => {
+      // Reset manual upload state when navigating back to the page
+      manualUploadRef.current = false;
+      loadFromApi(scanner, { silentError: true });
+    };
     window.addEventListener('sbom:local-scan-done', onLocalScan);
     window.addEventListener('sbom:pipeline-finished', onPipeline);
+    window.addEventListener('pageshow', onPageShow);
     return () => {
       window.removeEventListener('sbom:local-scan-done', onLocalScan);
       window.removeEventListener('sbom:pipeline-finished', onPipeline);
+      window.removeEventListener('pageshow', onPageShow);
     };
   }, [scanner]);
 
