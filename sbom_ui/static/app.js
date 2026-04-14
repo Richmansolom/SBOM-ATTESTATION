@@ -188,6 +188,10 @@ async function runAction(name, endpoint, payload = null) {
     const result = await api(endpoint, "POST", payload);
     appendLog(result.log || `${name} complete.`);
     await refreshDashboard();
+    // Dispatch event for vulnerability scanner to reload after actions
+    if (name === "Scan" || name === "Generate") {
+      window.dispatchEvent(new CustomEvent('sbom:local-scan-done'));
+    }
   } catch (err) {
     appendLog(`ERROR: ${err.message}`);
   } finally {
