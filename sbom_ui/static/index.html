@@ -275,6 +275,27 @@ function Toasts(){
 const toast=(m,t)=>_toast?.(m,t);
 
 /* ── SPINNER ─────────────────────────────────────── */
+/* ── CST CLOCK ───────────────────────────────────────── */
+function CSTClock(){
+  const[t,setT]=useState(new Date());
+  useEffect(()=>{const id=setInterval(()=>setT(new Date()),1000);return()=>clearInterval(id);},[]);
+  const cst=new Date(t.toLocaleString('en-US',{timeZone:'America/Chicago'}));
+  const days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const day=days[cst.getDay()];
+  const date=months[cst.getMonth()]+' '+cst.getDate()+', '+cst.getFullYear();
+  const hh=String(cst.getHours()).padStart(2,'0');
+  const mm=String(cst.getMinutes()).padStart(2,'0');
+  const ss=String(cst.getSeconds()).padStart(2,'0');
+  return(
+    <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:1}}>
+      <span style={{fontFamily:'var(--mono)',fontSize:11,color:'var(--blue)',fontWeight:600,letterSpacing:'1px'}}>{hh}:{mm}:{ss} <span style={{color:'var(--text2)',fontSize:9}}>CST</span></span>
+      <span style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--text2)',letterSpacing:'.5px'}}>{day} · {date}</span>
+    </div>
+  );
+}
+
+/* ── SPINNER ─────────────────────────────────────────── */
 const Spin=()=><span className="spin"/>;
 
 /* ── COPY BTN ─────────────────────────────────────── */
