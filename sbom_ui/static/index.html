@@ -5,23 +5,23 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
 <title>SBOM Attestation — Mission Control</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
 /* ── TOKENS ─────────────────────────────────────────── */
 :root {
-  --bg0:#0D1117; --bg1:#161B22; --bg2:#1C2128; --bg3:#21262D; --bg4:#2D333B;
-  --blue:#58A6FF; --blue2:#1F6FEB; --blue-dim:rgba(88,166,255,.1);
-  --green:#3FB950; --green-dim:rgba(63,185,80,.1);
-  --red:#F85149; --red-dim:rgba(248,81,73,.1);
-  --amber:#D29922; --amber-dim:rgba(210,153,34,.1);
-  --purple:#BC8CFF; --purple-dim:rgba(188,140,255,.1);
-  --teal:#39D0B8; --teal-dim:rgba(57,208,184,.1);
-  --text0:#E6EDF3; --text1:#8B949E; --text2:#484F58; --text3:#30363D;
-  --border:rgba(240,246,252,.1); --border2:rgba(240,246,252,.05);
-  --mono:'JetBrains Mono',monospace; --sans:'DM Sans',sans-serif;
+  --bg0:#0a0e14; --bg1:#0f1520; --bg2:#141c2a; --bg3:#1a2436; --bg4:#202c40;
+  --blue:#f0a500; --blue2:#c9870a; --blue-dim:rgba(240,165,0,.12);
+  --green:#22d3a2; --green-dim:rgba(34,211,162,.1);
+  --red:#f43f5e; --red-dim:rgba(244,63,94,.1);
+  --amber:#fb923c; --amber-dim:rgba(251,146,60,.1);
+  --purple:#a78bfa; --purple-dim:rgba(167,139,250,.1);
+  --teal:#2dd4bf; --teal-dim:rgba(45,212,191,.12);
+  --text0:#e8edf5; --text1:#96a6be; --text2:#4a5a72; --text3:#2a3548;
+  --border:rgba(255,255,255,.07); --border2:rgba(255,255,255,.04);
+  --mono:'IBM Plex Mono',monospace; --sans:'Manrope',sans-serif;
   --r:6px; --r2:10px; --r3:16px;
   --sh: 0 8px 32px rgba(0,0,0,.4);
   --header-h:54px; --tab-h:56px;
@@ -39,7 +39,7 @@ a{color:inherit;text-decoration:none}
 /* ── LAYOUT ─────────────────────────────────────────── */
 .root{display:flex;flex-direction:column;height:100%}
 .header{height:var(--header-h);background:var(--bg1);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:12px;flex-shrink:0;z-index:30}
-.logo{width:30px;height:30px;background:var(--blue2);border-radius:var(--r);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.logo{width:30px;height:30px;background:var(--blue);border-radius:var(--r);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .logo-txt{font-family:var(--mono);font-size:11px;font-weight:700;color:#fff;letter-spacing:-.5px}
 .brand-title{font-size:14px;font-weight:600;color:var(--text0);white-space:nowrap}
 .brand-sub{font-size:10px;font-family:var(--mono);color:var(--text2);letter-spacing:1.5px;text-transform:uppercase;margin-top:1px}
@@ -706,7 +706,7 @@ function DashboardPage({config,onNav}){
   const[latestJobs,setLatestJobs]=useState([]);
 
   useEffect(()=>{
-    if(!config)return;
+    if(!config){setLoading(false);return;}
     const fn=config.provider==='gitlab'
       ?()=>GL(config.token,config.projectId,'/pipelines?per_page=15')
       :()=>GH(config.token,config.projectId,'/actions/runs?per_page=15').then(d=>d.workflow_runs.map(r=>({id:r.id,status:r.status==='completed'?r.conclusion:r.status,ref:r.head_branch,sha:r.head_sha,created_at:r.created_at,duration:null})));
@@ -813,7 +813,7 @@ function PipelinePage({config}){
   const pollRef=useRef(null);
 
   const load=useCallback(async()=>{
-    if(!config)return;
+    if(!config){setLoading(false);return;}
     try{
       const d=config.provider==='gitlab'
         ?await GL(config.token,config.projectId,'/pipelines?per_page=15')
@@ -998,16 +998,8 @@ function App(){
   const renderPage=()=>{
     switch(nav){
       case'analyze': return<AnalyzerPage/>;
-      case'dashboard': return config?<DashboardPage config={config} onNav={onNav}/>:<div className="page"><div className="empty" style={{minHeight:'50vh'}}>
-        <div className="empty-icon">🔌</div>
-        <div className="empty-msg">Connect to GitHub or GitLab to view live pipeline data</div>
-        <button className="btn btn-blue" style={{marginTop:8}} onClick={()=>setShowConnect(true)}>⚡ Connect</button>
-      </div></div>;
-      case'pipeline': return config?<PipelinePage config={config}/>:<div className="page"><div className="empty" style={{minHeight:'50vh'}}>
-        <div className="empty-icon">🔌</div>
-        <div className="empty-msg">Connect to a provider first</div>
-        <button className="btn btn-blue" style={{marginTop:8}} onClick={()=>setShowConnect(true)}>⚡ Connect</button>
-      </div></div>;
+      case'dashboard': return <DashboardPage config={config} onNav={onNav}/>;
+      case'pipeline': return <PipelinePage config={config}/>;
       case'pki': return<PKIPage/>;
       default: return null;
     }
@@ -1027,6 +1019,7 @@ function App(){
         </div>
         <div className="hdr-spacer"/>
         <div className="hdr-right">
+          <CSTClock/>
           <a className="hdr-link" href="https://github.com/Richmansolom/SBOM-ATTESTATION" target="_blank" rel="noreferrer">GitHub ↗</a>
           <a className="hdr-link" href="https://gitlab.com/Richmansolom/SBOM-ATTESTATION" target="_blank" rel="noreferrer">GitLab ↗</a>
           <button className={`conn-pill${config?' on':''}`} onClick={config?disconnect:()=>setShowConnect(true)}>
