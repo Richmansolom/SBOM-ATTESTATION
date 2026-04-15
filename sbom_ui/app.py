@@ -29,6 +29,8 @@ TRIVY_IMAGE = os.environ.get("TRIVY_IMAGE", "aquasec/trivy:0.69.3")
 GRYPE_IMAGE = os.environ.get("GRYPE_IMAGE", "anchore/grype:latest")
 SBOM_DIR = REPO_ROOT / "sbom"
 REPORT_DIR = REPO_ROOT / "reports"
+# Per-run copies of sbom/ + reports/ (like CI downloadable artifacts) after Generate completes.
+ARTIFACT_RUNS_DIR = REPO_ROOT / "artifacts" / "runs"
 SCAN_MANIFEST_PATH = REPORT_DIR / "scan-manifest.json"
 STATIC_DIR = REPO_ROOT / "sbom_ui" / "static"
 UPLOAD_DIR = REPO_ROOT / ".ui_uploads"
@@ -361,6 +363,56 @@ def _app_metadata_display_name(app_meta_path):
         return None
 
 
+def snapshot_pipeline_artifacts(source_path_str):
+    """
+    Copy current sbom/ + reports/ into artifacts/runs/<timestamp>_<source_slug>/,
+    matching the CI layout (sbom/*.json, reports/*) so upload/generate results are easy to find and zip.
+    Disable with SBOM_UI_SNAPSHOT_ARTIFACTS=0.
+    """
+    flag = (os.getenv("SBOM_UI_SNAPSHOT_ARTIFACTS", "1") or "1").strip().lower()
+    if flag in ("0", "false", "no"):
+        return None
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    raw = (source_path_str or "app").replace("\\", "/")
+    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", raw).strip("-")[:96] or "app"
+    run_dir = ARTIFACT_RUNS_DIR / f"{ts}_{slug}"
+    try:
+        ARTIFACT_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        sbom_d = run_dir / "sbom"
+        rep_d = run_dir / "reports"
+        sbom_d.mkdir(parents=True, exist_ok=True)
+        rep_d.mkdir(parents=True, exist_ok=True)
+        for name in (
+            "sbom-source.enriched.json",
+            "sbom-build.enriched.json",
+            "sbom-image.enriched.json",
+            "sbom-source.json",
+            "sbom-source.signed.json",
+        ):
+            p = SBOM_DIR / name
+            if p.exists():
+                shutil.copy2(p, sbom_d / name)
+        pki_src = SBOM_DIR / "pki" / "sbom_public_key.pem"
+        if pki_src.exists():
+            (sbom_d / "pki").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(pki_src, sbom_d / "pki" / "sbom_public_key.pem")
+        for p in REPORT_DIR.iterdir():
+            if p.is_file():
+                try:
+                    shutil.copy2(p, rep_d / p.name)
+                except Exception:
+                    pass
+        rel = str(run_dir.relative_to(REPO_ROOT)).replace("\\", "/")
+        (run_dir / "README.txt").write_text(
+            "Snapshot of pipeline outputs (same layout as CI artifacts: sbom/ + reports/).\n"
+            f"Scanned source_path: {source_path_str}\n",
+            encoding="utf-8",
+        )
+        return rel
+    except Exception:
+        return None
+
+
 def write_scan_manifest_file(
     *,
     source_path_str,
@@ -387,6 +439,15 @@ def write_scan_manifest_file(
         SCAN_MANIFEST_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     except Exception:
         pass
+    snap_rel = snapshot_pipeline_artifacts(source_path_str)
+    if snap_rel:
+        payload["artifact_snapshot_dir"] = snap_rel
+        try:
+            SCAN_MANIFEST_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            snap_manifest = (REPO_ROOT / snap_rel / "reports" / "scan-manifest.json")
+            shutil.copy2(SCAN_MANIFEST_PATH, snap_manifest)
+        except Exception:
+            pass
 
 
 def build_local_scan_meta():
@@ -399,6 +460,7 @@ def build_local_scan_meta():
             "scan_source_path": manifest.get("source_path"),
             "scan_execution_path": manifest.get("execution_path"),
             "app_metadata_path": manifest.get("app_metadata_path"),
+            "artifact_snapshot_dir": manifest.get("artifact_snapshot_dir"),
             "scan_manifest": manifest,
         }
     sbom_path = get_latest_sbom_path()
@@ -1840,6 +1902,40 @@ def rel_to_repo(path_obj):
     return os.path.relpath(str(path_obj.resolve()), str(REPO_ROOT))
 
 
+def _safe_upload_target_rel():
+    """Repo-relative APP_DIR for CI-parity (default matches GitHub/GitLab workflows)."""
+    raw = (os.getenv("SBOM_UI_UPLOAD_TARGET_DIR") or "example-app").strip().replace("\\", "/")
+    if not raw or ".." in raw:
+        return "example-app"
+    parts = [p for p in raw.split("/") if p and p not in (".", "..")]
+    if not parts:
+        return "example-app"
+    return "/".join(parts)
+
+
+def _path_under_repo(path: Path) -> bool:
+    try:
+        path.resolve().relative_to(REPO_ROOT.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def promote_upload_to_ci_app_dir(src_root: Path) -> Path:
+    """
+    Replace repo-root APP_DIR with the uploaded tree so paths match CI:
+    workspace/example-app → same as GitHub $GITHUB_WORKSPACE/example-app and GitLab $CI_PROJECT_DIR/example-app.
+    """
+    rel = _safe_upload_target_rel()
+    dst = (REPO_ROOT / rel).resolve()
+    if not _path_under_repo(dst) or dst == REPO_ROOT.resolve():
+        dst = (REPO_ROOT / "example-app").resolve()
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(src_root, dst)
+    return dst
+
+
 @app.after_request
 def add_no_cache_headers(response):
     # Prevent stale cached JS/HTML so UI updates are immediately visible.
@@ -1864,14 +1960,25 @@ def api_preflight(_unused):
     return ("", 204)
 
 
+@app.route("/favicon.ico")
+def favicon():
+    icon_path = Path(STATIC_DIR) / "favicon.ico"
+    if icon_path.exists():
+        return send_from_directory(str(STATIC_DIR), "favicon.ico")
+    return ("", 204)
+
+
 @app.errorhandler(Exception)
 def handle_unexpected_error(err):
-    # Ensure API callers always receive JSON, even on unexpected server faults.
-    if has_request_context() and (request.path or "").startswith("/api/"):
-        if isinstance(err, HTTPException):
+    # Keep normal HTTP behavior (404/405/etc.) for non-API routes.
+    if isinstance(err, HTTPException):
+        if has_request_context() and (request.path or "").startswith("/api/"):
             return jsonify({"status": "error", "message": err.description or str(err)}), int(err.code or 500)
+        return err
+    # Ensure API callers always receive JSON on unexpected server faults.
+    if has_request_context() and (request.path or "").startswith("/api/"):
         return jsonify({"status": "error", "message": f"Internal server error: {err}"}), 500
-    raise err
+    return "Internal Server Error", 500
 
 
 def get_local_snapshot():
@@ -2672,23 +2779,53 @@ def upload_source():
         except Exception as exc:
             return jsonify({"status": "error", "message": f"Invalid app metadata: {exc}"}), 400
     detected_name = source_root.name
+
+    ci_parity = (os.getenv("SBOM_UI_CI_PARITY_UPLOAD", "1") or "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+    )
+    staging_extract = rel_to_repo(extract_root)
+    staging_selected = rel_to_repo(source_root)
+    if ci_parity:
+        try:
+            source_root = promote_upload_to_ci_app_dir(source_root)
+            app_meta = source_root / "app-metadata.json"
+            detected_name = source_root.name
+            try:
+                shutil.rmtree(upload_root)
+            except Exception:
+                pass
+        except Exception as exc:
+            return jsonify(
+                {"status": "error", "message": f"Failed to mirror upload to CI app directory: {exc}"}
+            ), 500
+
     source_diag = collect_source_diagnostics(source_root)
     source_diag.update(
         {
             "context": "upload",
-            "extract_root": rel_to_repo(extract_root),
-            "selected_root": rel_to_repo(source_root),
+            "extract_root": staging_extract,
+            "selected_root": staging_selected,
             "uploaded_file_count": count,
+            "ci_parity_upload": ci_parity,
+            "ci_app_dir": _safe_upload_target_rel() if ci_parity else "",
+            "source_path_final": rel_to_repo(source_root),
         }
     )
     write_source_diagnostics(source_diag)
+    msg = "Project uploaded successfully"
+    if ci_parity:
+        msg += f" (mirrored to {_safe_upload_target_rel()}/ for CI parity with GitHub Actions / GitLab CI)"
     return jsonify(
         {
             "status": "ok",
             "source_path": rel_to_repo(source_root),
             "app_metadata_path": rel_to_repo(app_meta) if app_meta.exists() else "",
             "detected_app_name": detected_name,
-            "message": "Project uploaded successfully",
+            "message": msg,
+            "ci_parity_upload": ci_parity,
+            "ci_app_dir": _safe_upload_target_rel() if ci_parity else "",
             "source_diagnostics": source_diag,
         }
     )
