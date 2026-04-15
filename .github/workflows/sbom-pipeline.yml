@@ -7,9 +7,16 @@ on:
   workflow_dispatch:
     inputs:
       app_path:
-        description: "Path to the app folder"
+        description: "Select the test app to run"
         required: true
-        default: "example-app"
+        type: choice
+        options:
+          - example-app
+          - test-apps/app1
+          - test-apps/app2
+          - test-apps/app3
+          - test-apps/app4
+        default: example-app
       app_version:
         description: "Application version"
         required: false
