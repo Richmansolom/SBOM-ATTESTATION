@@ -1,19 +1,17 @@
 name: SBOM Pipeline
-
 on:
   push:
     branches: [main, master]
   pull_request:
     branches: [main, master]
   workflow_dispatch:
-     workflow_dispatch:
     inputs:
       app_path:
         description: "Path to the app folder"
         required: true
         default: "example-app"
       app_version:
-        description: "Application version. Optional reference metadata."
+        description: "Application version"
         required: false
         default: "1.0.0"
 
@@ -25,9 +23,9 @@ jobs:
       REPORT_DIR: reports
       BUILD_LOG: build-output.log
       # Point at your C/C++ project root (contains Makefile or your build; holds app-metadata.*).
-      APP_DIR: ${{ github.event.inputs.app_dir || 'example-app' }}
+      APP_DIR: ${{ github.event.inputs.app_path || 'example-app' }}
       # merge-sbom.ps1 accepts .json, .csv, or .xml — keep path in sync with APP_DIR when retargeting.
-      APP_METADATA: ${{ github.event.inputs.app_dir || 'example-app' }}/app-metadata.json
+      APP_METADATA: ${{ github.event.inputs.app_path || 'example-app' }}/app-metadata.json
       APP_VERSION: ${{ github.event.inputs.app_version || '1.0.0' }}
       TRIVY_IMAGE: aquasec/trivy:0.69.3
       SBOM_PRIVATE_KEY_PEM: ${{ secrets.SBOM_PRIVATE_KEY_PEM }}
@@ -43,7 +41,7 @@ jobs:
         run: mkdir -p "$SBOM_DIR" "$REPORT_DIR" "$APP_DIR/build"
 
       - name: Build C++ application
-        run: make -C $APP_DIR 2>&1 | tee "$REPORT_DIR/$BUILD_LOG"
+        run: dir:/src/$APP_DIR 2>&1 | tee "$REPORT_DIR/$BUILD_LOG"
 
       - name: Generate COTS SBOMs (Syft + Trivy + Distro2SBOM)
         run: |
