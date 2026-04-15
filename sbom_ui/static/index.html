@@ -6,9 +6,9 @@
 <title>SBOM Attestation — Mission Control</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script id="react-cdn" src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
+<script id="react-dom-cdn" src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+<script id="babel-cdn" src="https://unpkg.com/@babel/standalone@7.26.10/babel.min.js" crossorigin="anonymous"></script>
 <style>
 :root {
   --bg0:#0a0e14; --bg1:#0f1520; --bg2:#141c2a; --bg3:#1a2436; --bg4:#202c40;
@@ -206,6 +206,11 @@ tr:hover td{background:var(--bg2)}
 .empty-msg{font-size:12.5px}
 .copy-btn{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;font-size:10px;font-family:var(--mono);background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);color:var(--text2);cursor:pointer;transition:.2s}
 .copy-btn:hover{border-color:var(--gold);color:var(--gold)}
+.boot-error{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}
+.boot-error-card{width:min(680px,100%);background:var(--bg1);border:1px solid rgba(244,63,94,.35);border-radius:var(--r3);padding:20px;box-shadow:var(--sh)}
+.boot-error-title{font-size:14px;font-weight:800;color:#fca5b7;margin-bottom:8px}
+.boot-error-text{font-size:12px;color:var(--text1);line-height:1.55}
+.boot-error-detail{margin-top:10px;font-size:11px;font-family:var(--mono);color:var(--amber);background:var(--amber-dim);border:1px solid rgba(251,146,60,.2);border-radius:var(--r);padding:8px 10px;white-space:pre-wrap}
 </style>
 </head>
 <body>
@@ -322,7 +327,7 @@ function ConnectModal({onConnect,onClose}){
             <input className="finput" type="password" value={tok} onChange={e=>setTok(e.target.value)} placeholder={provider==='gitlab'?'glpat-...':'ghp_...'} onKeyDown={e=>{if(e.key==='Enter')connect();}}/>
           </div>
           {err&&<div className="modal-err">{err}</div>}
-          <button onClick={connect} disabled={loading} style={{padding:'10px',background:'var(--gold)',borderRadius:'var(--r)',color:'#000',fontSize:'13px',fontWeight:'800',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px',border:'none',cursor:'pointer',opacity:loading?.5:1}}>
+          <button onClick={connect} disabled={loading} style={{padding:'10px',background:'var(--gold)',borderRadius:'var(--r)',color:'#000',fontSize:'13px',fontWeight:'800',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px',border:'none',cursor:'pointer',opacity:loading?0.5:1}}>
             {loading?<><Spin/> Connecting…</>:'⚡ Connect'}
           </button>
         </div>
@@ -914,7 +919,7 @@ function PipelinePage({config,onConnect}){
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(150px,100%),1fr))',gap:10,alignItems:'flex-end'}}>
             <div className="field"><span className="flbl">Branch</span><input className="finput" value={ref} onChange={e=>setRef(e.target.value)} placeholder="main"/></div>
             <div className="field"><span className="flbl">Version</span><input className="finput" value={ver} onChange={e=>setVer(e.target.value)} placeholder="1.0.0"/></div>
-            <button onClick={launch} disabled={launching} style={{height:40,padding:'0 20px',background:'var(--gold)',borderRadius:'var(--r)',color:'#000',fontSize:12,fontWeight:800,display:'flex',alignItems:'center',justifyContent:'center',gap:8,border:'none',cursor:launching?'not-allowed':'pointer',opacity:launching?.5:1}}>
+            <button onClick={launch} disabled={launching} style={{height:40,padding:'0 20px',background:'var(--gold)',borderRadius:'var(--r)',color:'#000',fontSize:12,fontWeight:800,display:'flex',alignItems:'center',justifyContent:'center',gap:8,border:'none',cursor:launching?'not-allowed':'pointer',opacity:launching?0.5:1}}>
               {launching?<><Spin/> Launching…</>:'▶ Launch'}
             </button>
           </div>
@@ -1128,7 +1133,70 @@ function App(){
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+if(!window.__showBootError){
+  window.__showBootError=function(title,detail){
+    var root=document.getElementById('root');
+    if(!root)return;
+    root.innerHTML='<div class="boot-error"><div class="boot-error-card"><div class="boot-error-title">'+String(title||'Startup error')+'</div><div class="boot-error-text">The UI did not initialize. Open browser developer console for detailed errors.</div>'+(detail?'<div class="boot-error-detail">'+String(detail)+'</div>':'')+'</div></div>';
+  };
+}
+
+if(!window.React||!window.ReactDOM){
+  if(window.__showBootError){
+    window.__showBootError(
+      'UI libraries failed to load.',
+      'Could not load React/ReactDOM from CDN. Check internet access or firewall/proxy rules for unpkg.com.'
+    );
+  }
+}else{
+  try{
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  }catch(err){
+    if(window.__showBootError){
+      window.__showBootError('App failed to start.',err&&err.stack?err.stack:String(err));
+    }
+  }
+}
+</script>
+<script>
+(function(){
+  function escapeHtml(v){
+    return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+  function showBootError(title,detail){
+    var root=document.getElementById('root');
+    if(!root)return;
+    root.innerHTML='<div class="boot-error"><div class="boot-error-card"><div class="boot-error-title">'+escapeHtml(title)+'</div><div class="boot-error-text">The UI did not initialize. Open browser developer console for detailed errors.</div>'+(detail?'<div class="boot-error-detail">'+escapeHtml(detail)+'</div>':'')+'</div></div>';
+  }
+  window.__showBootError=showBootError;
+  ['react-cdn','react-dom-cdn','babel-cdn'].forEach(function(id){
+    var s=document.getElementById(id);
+    if(s){
+      s.addEventListener('error',function(){
+        showBootError('CDN script failed to load.','Failed loading '+id+'. Check internet access or firewall/proxy rules for unpkg.com.');
+      });
+    }
+  });
+  window.addEventListener('error',function(e){
+    if(e&&e.message){
+      showBootError('Runtime error during startup.',e.message);
+    }
+  });
+  window.addEventListener('unhandledrejection',function(e){
+    var msg=(e&&e.reason&&e.reason.message)?e.reason.message:String(e&&e.reason?e.reason:'Unknown promise rejection');
+    showBootError('Unhandled startup rejection.',msg);
+  });
+  window.addEventListener('load',function(){
+    setTimeout(function(){
+      var root=document.getElementById('root');
+      if(root && !root.firstElementChild){
+        if(!window.Babel)showBootError('Babel failed to load.','Could not load @babel/standalone from CDN (unpkg.com).');
+        else if(!window.React||!window.ReactDOM)showBootError('React libraries failed to load.','Could not load React/ReactDOM from CDN (unpkg.com).');
+        else showBootError('UI render did not mount.','A startup script error likely prevented app initialization.');
+      }
+    },300);
+  });
+})();
 </script>
 </body>
 </html>
