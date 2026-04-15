@@ -6,11 +6,12 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+     workflow_dispatch:
     inputs:
-      app_dir:
-        description: "Application directory. Defaults to example-app."
-        required: false
-        default: example-app
+      app_path:
+        description: "Path to the app folder"
+        required: true
+        default: "example-app"
       app_version:
         description: "Application version. Optional reference metadata."
         required: false
