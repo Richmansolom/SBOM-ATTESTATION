@@ -1,0 +1,53 @@
+name: Docker Vulnerability Scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "Select app to scan"
+        required: true
+        type: choice
+        options:
+          - app1
+          - app2
+          - app3
+        default: app3
+
+jobs:
+  docker_scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t test-image ./test-apps/${{ github.event.inputs.app }}
+
+      - name: Generate SBOM from Docker image
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            anchore/syft:latest test-image -o cyclonedx-json > sbom.json
+
+      - name: Scan Docker image with Grype
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            anchore/grype:latest test-image -o table > grype-report.txt
+
+      - name: Scan Docker image with Trivy
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest image --format table -o trivy-report.txt test-image
+
+      - name: Upload scan artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-scan-results
+          path: |
+            sbom.json
+            grype-report.txt
+            trivy-report.txt
