@@ -9,7 +9,9 @@
     {
       "name": "libpng",
       "version": "1.2.56",
-      "type": "library"
+      "type": "library",
+      "purl": "pkg:generic/libpng@1.2.56",
+      "cpe": "cpe:2.3:a:libpng:libpng:1.2.56:*:*:*:*:*:*:*"
     }
   ]
 }
