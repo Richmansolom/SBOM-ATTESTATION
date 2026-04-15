@@ -2,4 +2,5 @@
   "name": "app2",
   "version": "1.0.0",
   "description": "Test C++ application using OpenSSL"
+  "supplier": "Byte Masters"
 }
