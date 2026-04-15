@@ -901,7 +901,7 @@ function PipelinePage({config,onConnect}){
           <div style={{fontSize:11,fontFamily:'var(--mono)',color:'var(--text2)',letterSpacing:'1px',textTransform:'uppercase',marginTop:3}}>Launch · Monitor · Inspect</div>
         </div>
         <div className="flex gap-8">
-          {config&&<button className={'btn'+(polling?' btn-gold':'')} onClick={()=>setPolling(!p=>!p)}>{polling?<><Spin/> Live</>:'🔄 Poll'}</button>}
+          {config&&<button className={'btn'+(polling?' btn-gold':'')} onClick={()=>setPolling(p=>!p)}>{polling?<><Spin/> Live</>:'🔄 Poll'}</button>}
           {config&&<button className="btn" onClick={load}>↻</button>}
           {!config&&<button className="btn btn-gold btn-sm" onClick={onConnect}>⚡ Connect to trigger</button>}
         </div>
