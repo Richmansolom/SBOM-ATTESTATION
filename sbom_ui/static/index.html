@@ -868,12 +868,26 @@ function DashboardPage({config,onConnect,onNav}){
     if(reportDownloadBusy)return;
     setReportDownloadBusy(scanner);
     try{
-      const query={scanner,source:'auto'};
+      let data=null;
+      let usedLocalFallback=false;
       if(latest&&latest.id){
-        if(config&&config.provider==='gitlab')query.pipeline_id=latest.id;
-        else query.run_id=latest.id;
+        const pinnedQuery={scanner,source:'ci'};
+        if(config&&config.provider==='gitlab')pinnedQuery.pipeline_id=latest.id;
+        else pinnedQuery.run_id=latest.id;
+        try{
+          data=await sbomApi('report/unified',{config,query:pinnedQuery});
+        }catch(_e){
+          data=null;
+        }
       }
-      const data=await sbomApi('report/unified',{config,query});
+      if(!data){
+        try{
+          data=await sbomApi('report/unified',{config,query:{scanner,source:'ci'}});
+        }catch(_e){
+          data=await sbomApi('report/unified',{config,query:{scanner,source:'auto'}});
+          usedLocalFallback=true;
+        }
+      }
       const meta=(data&&data._meta)||{};
       const stamp=new Date().toISOString().replace(/[:.]/g,'-');
       const provider=(meta.provider||(config&&config.provider)||'local').toLowerCase();
@@ -888,7 +902,8 @@ function DashboardPage({config,onConnect,onNav}){
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      toast('Downloaded '+scanner.toUpperCase()+' report artifact','ok');
+      if(usedLocalFallback)toast('Downloaded '+scanner.toUpperCase()+' report (local fallback)','info');
+      else toast('Downloaded '+scanner.toUpperCase()+' report artifact','ok');
     }catch(e){
       toast('Download failed: '+(e.message||'Unknown error'),'err');
     }
