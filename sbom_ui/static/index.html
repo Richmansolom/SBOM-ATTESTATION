@@ -806,6 +806,7 @@ function DashboardPage({config,onConnect,onNav}){
   const[stageLog,setStageLog]=useState('');
   const[stageLogLoading,setStageLogLoading]=useState(false);
   const[stageLogError,setStageLogError]=useState('');
+  const[reportDownloadBusy,setReportDownloadBusy]=useState('');
 
   useEffect(()=>{
     setLoading(true);
@@ -862,6 +863,38 @@ function DashboardPage({config,onConnect,onNav}){
     setStageLogLoading(false);
   }
 
+  async function downloadReportArtifact(scanner){
+    scanner=(scanner||'grype').toLowerCase();
+    if(reportDownloadBusy)return;
+    setReportDownloadBusy(scanner);
+    try{
+      const query={scanner,source:'auto'};
+      if(latest&&latest.id){
+        if(config&&config.provider==='gitlab')query.pipeline_id=latest.id;
+        else query.run_id=latest.id;
+      }
+      const data=await sbomApi('report/unified',{config,query});
+      const meta=(data&&data._meta)||{};
+      const stamp=new Date().toISOString().replace(/[:.]/g,'-');
+      const provider=(meta.provider||(config&&config.provider)||'local').toLowerCase();
+      const runTag=meta.run_id?('run-'+meta.run_id):(meta.pipeline_id?('pipeline-'+meta.pipeline_id):'latest');
+      const fileName=scanner+'-report-'+provider+'-'+runTag+'-'+stamp+'.json';
+      const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url;
+      a.download=fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast('Downloaded '+scanner.toUpperCase()+' report artifact','ok');
+    }catch(e){
+      toast('Download failed: '+(e.message||'Unknown error'),'err');
+    }
+    setReportDownloadBusy('');
+  }
+
   return(
     <div className="page fade-in">
       <div className="flex items-center justify-between" style={{flexWrap:'wrap',gap:10}}>
@@ -907,6 +940,14 @@ function DashboardPage({config,onConnect,onNav}){
                     <span className="badge badge-gray">{latest.ref}</span>
                     <span className="mono" style={{fontSize:11,color:'var(--text2)'}}>{sha7(latest.sha)}</span>
                     <span className="mono" style={{fontSize:11,color:'var(--text2)',marginLeft:'auto'}}>{ago(latest.created_at)}</span>
+                  </div>
+                  <div className="flex gap-8" style={{marginBottom:10,flexWrap:'wrap'}}>
+                    <button className="btn btn-xs" disabled={!!reportDownloadBusy} onClick={()=>downloadReportArtifact('grype')}>
+                      {reportDownloadBusy==='grype'?<><Spin/> Downloading…</>:'⬇ Grype Report'}
+                    </button>
+                    <button className="btn btn-xs" disabled={!!reportDownloadBusy} onClick={()=>downloadReportArtifact('trivy')}>
+                      {reportDownloadBusy==='trivy'?<><Spin/> Downloading…</>:'⬇ Trivy Report'}
+                    </button>
                   </div>
                   <StageFlow
                     done={['success','passed','completed'].includes(latest.status)?['build','generate','sign','scan','report']:[]}
