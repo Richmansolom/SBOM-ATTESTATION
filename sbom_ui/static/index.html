@@ -107,13 +107,12 @@ select.finput option{background:var(--bg2)}
 .stage-flow::-webkit-scrollbar{display:none}
 .stage-node{display:flex;flex-direction:column;align-items:center;gap:4px;flex-shrink:0}
 .stage-box{padding:7px 14px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg2);font-size:9.5px;font-family:var(--mono);font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);white-space:nowrap;transition:.3s;min-width:76px;text-align:center}
-.stage-box.active{border-color:rgba(240,165,0,.4);color:var(--gold);background:var(--gold-dim);animation:sp .8s ease-in-out infinite}
+.stage-box.active{border-color:rgba(240,165,0,.4);color:var(--gold);background:var(--gold-dim)}
 .stage-box.done{border-color:rgba(34,211,162,.3);color:var(--green);background:var(--green-dim)}
 .stage-box.error{border-color:rgba(244,63,94,.3);color:var(--red);background:var(--red-dim)}
 .stage-box.clickable{cursor:pointer}
 .stage-box.clickable:hover{border-color:rgba(45,212,191,.45);box-shadow:0 0 0 2px rgba(45,212,191,.12)}
 .stage-box.selected{box-shadow:0 0 0 2px rgba(240,165,0,.18)}
-@keyframes sp{0%,100%{opacity:1}50%{opacity:.55}}
 .stage-arrow{color:var(--text3);font-size:12px;flex-shrink:0;margin-bottom:18px}
 .stage-time{font-size:9px;font-family:var(--mono);color:var(--text3)}
 
