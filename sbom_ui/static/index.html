@@ -223,8 +223,25 @@ const ago=d=>{if(!d)return'—';const s=Math.round((Date.now()-new Date(d))/1000
 const sha7=s=>s?s.slice(0,7):'';
 const SEV_COL={Critical:'#f43f5e',High:'#fb923c',Medium:'#D29922',Low:'#22d3a2',Negligible:'#2a3548',Unknown:'#2a3548'};
 const SEV_ORD=['Critical','High','Medium','Low','Negligible'];
-const GL=(tok,proj,path,opts={})=>fetch('https://gitlab.com/api/v4/projects/'+encodeURIComponent(proj)+path,{...opts,headers:{'PRIVATE-TOKEN':tok,'Content-Type':'application/json',...(opts.headers||{})}}).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.message||String(r.status));return d;});
-const GH=(tok,repo,path,opts={})=>fetch('https://api.github.com/repos/'+repo+path,{...opts,headers:{Authorization:'Bearer '+tok,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28',...(opts.headers||{})}}).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.message||String(r.status));return d;});
+
+function sbomApi(path,{method='GET',body=null,config=null,query={}}={}){
+  const cleanPath=String(path||'').replace(/^\/+/, '');
+  const params=new URLSearchParams();
+  if(config&&config.provider)params.set('provider',String(config.provider));
+  if(config&&config.projectId)params.set('project',String(config.projectId));
+  Object.entries(query||{}).forEach(([k,v])=>{if(v!==undefined&&v!==null&&v!=='')params.set(k,String(v));});
+  const url='/api/'+cleanPath+(params.toString()?'?'+params.toString():'');
+  const headers={};
+  if(body)headers['Content-Type']='application/json';
+  if(config&&config.token)headers['X-SBOM-TOKEN']=String(config.token);
+  return fetch(url,{method,headers,body:body?JSON.stringify(body):undefined}).then(async r=>{
+    const txt=await r.text();
+    let data={};
+    try{data=txt?JSON.parse(txt):{};}catch{data={message:txt||''};}
+    if(!r.ok)throw new Error(data.message||txt||String(r.status));
+    return data;
+  });
+}
 
 /* ── TOAST ── */
 let _toast=null;
@@ -286,20 +303,19 @@ function CopyBtn({text}){
 }
 
 /* ── CONNECT MODAL ── */
-function ConnectModal({onConnect,onClose}){
-  const[provider,setProv]=useState('github');
-  const[proj,setProj]=useState('');
-  const[tok,setTok]=useState('');
+function ConnectModal({onConnect,onClose,initialConfig}){
+  const[provider,setProv]=useState(initialConfig&&initialConfig.provider?initialConfig.provider:'github');
+  const[proj,setProj]=useState(initialConfig&&initialConfig.projectId?initialConfig.projectId:'');
+  const[tok,setTok]=useState(initialConfig&&initialConfig.token?initialConfig.token:'');
   const[loading,setLoading]=useState(false);
   const[err,setErr]=useState('');
   async function connect(){
-    if(!proj||!tok){setErr('Project path and token are required');return;}
+    if(!proj){setErr('Project path is required');return;}
     setLoading(true);setErr('');
     try{
-      if(provider==='gitlab')await GL(tok,proj,'');
-      else await GH(tok,proj,'');
+      await sbomApi('pipelines',{config:{provider,projectId:proj,token:tok},query:{per_page:1}});
       const cfg={provider,projectId:proj,token:tok};
-      sessionStorage.setItem('sbom_cfg',JSON.stringify(cfg));
+      localStorage.setItem('sbom_cfg',JSON.stringify(cfg));
       onConnect(cfg);toast('Connected','ok');
     }catch(e){setErr('Failed: '+e.message);}
     setLoading(false);
@@ -323,7 +339,7 @@ function ConnectModal({onConnect,onClose}){
             <input className="finput" value={proj} onChange={e=>setProj(e.target.value)} placeholder={provider==='gitlab'?'namespace/project':'owner/repo'} autoFocus onKeyDown={e=>{if(e.key==='Enter')connect();}}/>
           </div>
           <div className="field">
-            <span className="flbl">Access Token</span>
+            <span className="flbl">Access Token (Optional)</span>
             <input className="finput" type="password" value={tok} onChange={e=>setTok(e.target.value)} placeholder={provider==='gitlab'?'glpat-...':'ghp_...'} onKeyDown={e=>{if(e.key==='Enter')connect();}}/>
           </div>
           {err&&<div className="modal-err">{err}</div>}
@@ -331,7 +347,7 @@ function ConnectModal({onConnect,onClose}){
             {loading?<><Spin/> Connecting…</>:'⚡ Connect'}
           </button>
         </div>
-        <div className="modal-note">Token stored in session only · Never sent to third parties</div>
+        <div className="modal-note">Uses backend token fallback when available · Saved locally in this browser</div>
       </div>
     </div>
   );
@@ -741,11 +757,10 @@ function DashboardPage({config,onConnect,onNav}){
   const[loading,setLoading]=useState(true);
 
   useEffect(()=>{
-    if(!config){setLoading(false);return;}
-    const fn=config.provider==='gitlab'
-      ?()=>GL(config.token,config.projectId,'/pipelines?per_page=10')
-      :()=>GH(config.token,config.projectId,'/actions/runs?per_page=10').then(d=>d.workflow_runs.map(r=>({id:r.id,status:r.status==='completed'?r.conclusion:r.status,ref:r.head_branch,sha:r.head_sha,created_at:r.created_at})));
-    fn().then(d=>{setPipelines(d);setLoading(false);}).catch(e=>{toast('Load failed: '+e.message,'err');setLoading(false);});
+    setLoading(true);
+    sbomApi('pipelines',{config,query:{per_page:10}})
+      .then(d=>{setPipelines(Array.isArray(d)?d:[]);setLoading(false);})
+      .catch(e=>{toast('Load failed: '+e.message,'err');setLoading(false);});
   },[config]);
 
   const stats=useMemo(()=>{
@@ -765,21 +780,21 @@ function DashboardPage({config,onConnect,onNav}){
         </div>
         <div className="flex gap-8">
           <button className="btn btn-gold" onClick={()=>onNav('analyze')}>⚡ Analyze New App</button>
-          {!config&&<button className="btn btn-sm" onClick={onConnect}>🔗 Connect for live data</button>}
+          <button className="btn btn-sm" onClick={onConnect}>🔗 Configure source</button>
         </div>
       </div>
 
       {/* Stats */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(120px,100%),1fr))',gap:10}}>
         {[
-          {v:config?stats.total:'—',l:'Total Runs',c:'var(--gold)'},
-          {v:config?stats.ok:'—',l:'Passed',c:'var(--green)'},
-          {v:config?stats.fail:'—',l:'Failed',c:'var(--red)'},
-          {v:config?stats.rate+'%':'—',l:'Success Rate',c:'var(--teal)'},
+          {v:stats.total,l:'Total Runs',c:'var(--gold)'},
+          {v:stats.ok,l:'Passed',c:'var(--green)'},
+          {v:stats.fail,l:'Failed',c:'var(--red)'},
+          {v:stats.rate+'%',l:'Success Rate',c:'var(--teal)'},
         ].map(s=>(
           <div key={s.l} style={{background:'var(--bg1)',border:'1px solid var(--border)',borderRadius:'var(--r2)',padding:'14px 16px',position:'relative',overflow:'hidden'}}>
             <div style={{position:'absolute',bottom:0,left:0,right:0,height:2,background:s.c}}/>
-            <div style={{fontSize:'clamp(22px,4vw,30px)',fontFamily:'var(--mono)',fontWeight:700,color:s.c,lineHeight:1}}>{loading&&config?'…':s.v}</div>
+            <div style={{fontSize:'clamp(22px,4vw,30px)',fontFamily:'var(--mono)',fontWeight:700,color:s.c,lineHeight:1}}>{loading?'…':s.v}</div>
             <div style={{fontSize:10,fontWeight:700,color:'var(--text2)',letterSpacing:'1px',textTransform:'uppercase',marginTop:5}}>{s.l}</div>
           </div>
         ))}
@@ -793,13 +808,7 @@ function DashboardPage({config,onConnect,onNav}){
             {latest&&<Bdg s={latest.status}/>}
           </div>
           <div className="card-body">
-            {!config
-              ?<div className="empty">
-                <div className="empty-icon">🔌</div>
-                <div className="empty-msg">Connect to see live pipeline data</div>
-                <button className="btn btn-gold btn-sm" style={{marginTop:8}} onClick={onConnect}>⚡ Connect</button>
-              </div>
-              :loading?<div className="empty"><Spin/></div>
+            {loading?<div className="empty"><Spin/></div>
               :latest
                 ?<>
                   <div className="flex items-center gap-8" style={{marginBottom:12,flexWrap:'wrap'}}>
@@ -810,7 +819,7 @@ function DashboardPage({config,onConnect,onNav}){
                   </div>
                   <StageFlow done={['success','passed','completed'].includes(latest.status)?['build','generate','sign','scan','report']:[]} errors={['failed','failure'].includes(latest.status)?['scan']:[]}/>
                 </>
-                :<div className="empty"><div className="empty-icon">🔭</div><div className="empty-msg">No pipelines found</div></div>
+                :<div className="empty"><div className="empty-icon">🔭</div><div className="empty-msg">No pipelines found for this source</div><button className="btn btn-sm" onClick={onConnect}>Configure source</button></div>
             }
           </div>
         </div>
@@ -836,23 +845,22 @@ function DashboardPage({config,onConnect,onNav}){
       </div>
 
       {/* Recent runs */}
-      {config&&(
-        <div className="card">
-          <div className="card-hd"><div className="card-title">📋 Recent Runs</div></div>
-          <div className="card-body" style={{padding:'8px 14px'}}>
-            {loading?<div className="empty"><Spin/></div>
-            :pipelines.map(p=>(
-              <div key={p.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',background:'var(--bg2)',border:'1px solid var(--border2)',borderRadius:'var(--r)',marginBottom:6}}>
-                <Bdg s={p.status}/>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:12,fontWeight:600,color:'var(--text0)'}}><span className="mono text-gold">#{p.id}</span> · {p.ref}</div>
-                  <div style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--text2)',marginTop:2}}>{sha7(p.sha)} · {ago(p.created_at)}</div>
-                </div>
+      <div className="card">
+        <div className="card-hd"><div className="card-title">📋 Recent Runs</div></div>
+        <div className="card-body" style={{padding:'8px 14px'}}>
+          {loading?<div className="empty"><Spin/></div>
+          :pipelines.map(p=>(
+            <div key={p.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',background:'var(--bg2)',border:'1px solid var(--border2)',borderRadius:'var(--r)',marginBottom:6}}>
+              <Bdg s={p.status}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:600,color:'var(--text0)'}}><span className="mono text-gold">#{p.id}</span> · {p.ref}</div>
+                <div style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--text2)',marginTop:2}}>{sha7(p.sha)} · {ago(p.created_at)}</div>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
+          {!loading&&pipelines.length===0&&<div className="empty"><div className="empty-msg">No recent runs available.</div></div>}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -870,11 +878,10 @@ function PipelinePage({config,onConnect}){
   const pollRef=useRef(null);
 
   const load=useCallback(()=>{
-    if(!config){setLoading(false);return;}
-    const fn=config.provider==='gitlab'
-      ?()=>GL(config.token,config.projectId,'/pipelines?per_page=15')
-      :()=>GH(config.token,config.projectId,'/actions/runs?per_page=15').then(d=>d.workflow_runs.map(r=>({id:r.id,status:r.status==='completed'?r.conclusion:r.status,ref:r.head_branch,sha:r.head_sha,created_at:r.created_at})));
-    fn().then(d=>{setPipelines(d);setLoading(false);}).catch(e=>{toast('Load failed: '+e.message,'err');setLoading(false);});
+    setLoading(true);
+    sbomApi('pipelines',{config,query:{per_page:15}})
+      .then(d=>{setPipelines(Array.isArray(d)?d:[]);setLoading(false);})
+      .catch(e=>{toast('Load failed: '+e.message,'err');setLoading(false);});
   },[config]);
 
   useEffect(()=>{load();},[load]);
@@ -887,13 +894,12 @@ function PipelinePage({config,onConnect}){
   async function launch(){
     setLaunching(true);
     try{
-      if(config&&config.provider==='gitlab'){
-        const p=await GL(config.token,config.projectId,'/pipeline',{method:'POST',body:JSON.stringify({ref,variables:[{key:'APP_VERSION',value:ver,variable_type:'env_var'}]})});
-        toast('Pipeline #'+p.id+' launched','ok');
-        setPolling(true);setTimeout(load,1500);
-      }else{
-        toast('Connect to GitLab to trigger pipelines','info');
-      }
+      const body={ref,app_version:ver};
+      if(config&&config.provider)body.provider=config.provider;
+      if(config&&config.projectId)body.project=config.projectId;
+      const p=await sbomApi('pipeline',{method:'POST',body,config});
+      toast((p.message||('Pipeline #'+p.id+' launched')),'ok');
+      setPolling(true);setTimeout(load,1500);
     }catch(e){toast('Launch failed: '+e.message,'err');}
     setLaunching(false);
   }
@@ -907,8 +913,8 @@ function PipelinePage({config,onConnect}){
         </div>
         <div className="flex gap-8">
           {config&&<button className={'btn'+(polling?' btn-gold':'')} onClick={()=>setPolling(p=>!p)}>{polling?<><Spin/> Live</>:'🔄 Poll'}</button>}
-          {config&&<button className="btn" onClick={load}>↻</button>}
-          {!config&&<button className="btn btn-gold btn-sm" onClick={onConnect}>⚡ Connect to trigger</button>}
+          <button className="btn" onClick={load}>↻</button>
+          <button className="btn btn-gold btn-sm" onClick={onConnect}>⚡ Configure source</button>
         </div>
       </div>
 
@@ -928,13 +934,7 @@ function PipelinePage({config,onConnect}){
       </div>
 
       {/* List */}
-      {!config
-        ?<div className="card"><div className="card-body"><div className="empty">
-          <div className="empty-icon">🔌</div>
-          <div className="empty-msg">Connect to view live pipeline runs</div>
-          <button className="btn btn-gold btn-sm" style={{marginTop:8}} onClick={onConnect}>⚡ Connect</button>
-        </div></div></div>
-        :loading?<div className="empty"><Spin/></div>
+      {loading?<div className="empty"><Spin/></div>
         :<div style={{display:'flex',flexDirection:'column',gap:6}}>
           {pipelines.map(p=>(
             <div key={p.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--bg1)',border:'1px solid var(--border)',borderRadius:'var(--r)'}}>
@@ -945,6 +945,7 @@ function PipelinePage({config,onConnect}){
               </div>
             </div>
           ))}
+          {pipelines.length===0&&<div className="card"><div className="card-body"><div className="empty"><div className="empty-msg">No pipeline runs found for this source.</div><button className="btn btn-sm" onClick={onConnect}>Configure source</button></div></div></div>}
         </div>
       }
     </div>
@@ -1039,7 +1040,14 @@ const PAGES=[
 ];
 
 function App(){
-  const[config,setConfig]=useState(()=>{try{return JSON.parse(sessionStorage.getItem('sbom_cfg')||'null');}catch{return null;}});
+  const[config,setConfig]=useState(()=>{
+    try{
+      const raw=localStorage.getItem('sbom_cfg')||sessionStorage.getItem('sbom_cfg')||'null';
+      const cfg=JSON.parse(raw);
+      if(cfg&&raw!==localStorage.getItem('sbom_cfg'))localStorage.setItem('sbom_cfg',JSON.stringify(cfg));
+      return cfg;
+    }catch{return null;}
+  });
   const[nav,setNav]=useState('analyze');
   const[showConnect,setShowConnect]=useState(false);
 
@@ -1055,7 +1063,7 @@ function App(){
     window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h);
   },[]);
 
-  function disconnect(){sessionStorage.removeItem('sbom_cfg');setConfig(null);toast('Disconnected','info');}
+  function disconnect(){sessionStorage.removeItem('sbom_cfg');localStorage.removeItem('sbom_cfg');setConfig(null);toast('Disconnected','info');}
   function openConnect(){setShowConnect(true);}
 
   const renderPage=()=>{
@@ -1069,7 +1077,7 @@ function App(){
   return(
     <>
       <Toasts/>
-      {showConnect&&<ConnectModal onConnect={cfg=>{setConfig(cfg);setShowConnect(false);}} onClose={()=>setShowConnect(false)}/>}
+      {showConnect&&<ConnectModal initialConfig={config} onConnect={cfg=>{setConfig(cfg);setShowConnect(false);}} onClose={()=>setShowConnect(false)}/>} 
       <div className="root">
         {/* Header */}
         <header className="header">
