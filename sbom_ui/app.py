@@ -2300,6 +2300,20 @@ def fetch_github_report_from_artifacts(repo, scanner, token="", run_id=None):
     run_ids = []
     if run_id:
         run_ids.append(int(run_id))
+        # If a pinned run is still in progress or has no uploaded artifacts yet,
+        # fallback to recent successful runs so UI downloads still work.
+        status, out = github_rest_request(f"repos/{repo}/actions/runs?per_page=20", "GET", token)
+        if status < 300:
+            runs_json = parse_json_text(out) or {}
+            runs = runs_json.get("workflow_runs") or []
+            for run in runs:
+                if (run.get("conclusion") or "").lower() != "success":
+                    continue
+                rid = run.get("id")
+                if rid:
+                    rid_int = int(rid)
+                    if rid_int not in run_ids:
+                        run_ids.append(rid_int)
     else:
         status, out = github_rest_request(f"repos/{repo}/actions/runs?per_page=20", "GET", token)
         if status >= 300:
@@ -2351,6 +2365,16 @@ def fetch_gitlab_report_from_artifacts(project, scanner, token="", pipeline_id=N
     pipeline_ids = []
     if pipeline_id:
         pipeline_ids.append(int(pipeline_id))
+        # If pinned pipeline has no artifacts yet, fallback to recent successful pipelines.
+        status, out = gitlab_api(f"projects/{encoded_project}/pipelines?status=success&per_page=20", token=token)
+        if status < 300:
+            pipelines = parse_json_text(out) or []
+            for p in pipelines:
+                pid = p.get("id")
+                if pid:
+                    pid_int = int(pid)
+                    if pid_int not in pipeline_ids:
+                        pipeline_ids.append(pid_int)
     else:
         status, out = gitlab_api(f"projects/{encoded_project}/pipelines?status=success&per_page=20", token=token)
         if status >= 300:
