@@ -110,6 +110,9 @@ select.finput option{background:var(--bg2)}
 .stage-box.active{border-color:rgba(240,165,0,.4);color:var(--gold);background:var(--gold-dim);animation:sp .8s ease-in-out infinite}
 .stage-box.done{border-color:rgba(34,211,162,.3);color:var(--green);background:var(--green-dim)}
 .stage-box.error{border-color:rgba(244,63,94,.3);color:var(--red);background:var(--red-dim)}
+.stage-box.clickable{cursor:pointer}
+.stage-box.clickable:hover{border-color:rgba(45,212,191,.45);box-shadow:0 0 0 2px rgba(45,212,191,.12)}
+.stage-box.selected{box-shadow:0 0 0 2px rgba(240,165,0,.18)}
 @keyframes sp{0%,100%{opacity:1}50%{opacity:.55}}
 .stage-arrow{color:var(--text3);font-size:12px;flex-shrink:0;margin-bottom:18px}
 .stage-time{font-size:9px;font-family:var(--mono);color:var(--text3)}
@@ -236,11 +239,36 @@ function sbomApi(path,{method='GET',body=null,config=null,query={}}={}){
   if(config&&config.token)headers['X-SBOM-TOKEN']=String(config.token);
   return fetch(url,{method,headers,body:body?JSON.stringify(body):undefined}).then(async r=>{
     const txt=await r.text();
-    let data={};
-    try{data=txt?JSON.parse(txt):{};}catch{data={message:txt||''};}
-    if(!r.ok)throw new Error(data.message||txt||String(r.status));
+    const ctype=(r.headers.get('content-type')||'').toLowerCase();
+    const wantsJson=ctype.includes('application/json');
+    let data=wantsJson?{}:txt;
+    if(wantsJson){
+      try{data=txt?JSON.parse(txt):{};}catch{data={message:txt||''};}
+    }
+    if(!r.ok){
+      if(wantsJson)throw new Error((data&&data.message)||txt||String(r.status));
+      throw new Error(txt||String(r.status));
+    }
     return data;
   });
+}
+
+function toUiStageKey(stage){
+  const s=String(stage||'').toLowerCase();
+  if(s==='build')return'build';
+  if(s==='generate'||s==='sbom_generate'||s==='sbom-generate')return'generate';
+  if(s==='sign'||s==='sbom_sign'||s==='sbom-sign')return'sign';
+  if(s==='scan'||s==='sbom_scan'||s==='sbom-scan')return'scan';
+  if(s==='report')return'report';
+  return'';
+}
+
+function stageStatusClass(status){
+  const s=String(status||'').toLowerCase();
+  if(['success','passed','completed'].includes(s))return'done';
+  if(['failed','failure','cancelled','canceled'].includes(s))return'error';
+  if(['running','in_progress','queued','pending','created'].includes(s))return'active';
+  return'';
 }
 
 /* ── TOAST ── */
@@ -354,27 +382,45 @@ function ConnectModal({onConnect,onClose,initialConfig}){
 }
 
 /* ── STAGE FLOW ── */
-function StageFlow({current,done,errors}){
+function StageFlow({current,done,errors,stageJobs,selectedStage,onStageClick,showHint}){
   done=done||[];errors=errors||[];
   const items=[{k:'build',i:'🔨',l:'Build'},{k:'generate',i:'📄',l:'Generate'},{k:'sign',i:'✍️',l:'Sign'},{k:'scan',i:'🔍',l:'Scan'},{k:'report',i:'📦',l:'Report'}];
   function cls(k){
+    if(stageJobs&&stageJobs[k]){
+      const mapped=stageStatusClass(stageJobs[k].status);
+      if(mapped)return mapped;
+    }
     if(errors.includes(k))return'error';
     if(done.includes(k))return'done';
     if(current===k)return'active';
     return'';
   }
   return(
-    <div className="stage-flow">
-      {items.map((s,i)=>(
-        <React.Fragment key={s.k}>
-          {i>0&&<div className="stage-arrow">→</div>}
-          <div className="stage-node">
-            <div className={'stage-box '+cls(s.k)}>{s.i} {s.l}</div>
-            <div className="stage-time">{done.includes(s.k)?'✓':current===s.k?'running…':''}</div>
-          </div>
-        </React.Fragment>
-      ))}
-    </div>
+    <>
+      <div className="stage-flow">
+        {items.map((s,i)=>{
+          const info=stageJobs&&stageJobs[s.k]?stageJobs[s.k]:null;
+          const clickable=!!(onStageClick&&info&&info.jobId);
+          return(
+            <React.Fragment key={s.k}>
+              {i>0&&<div className="stage-arrow">→</div>}
+              <div className="stage-node">
+                <div
+                  className={'stage-box '+cls(s.k)+(clickable?' clickable':'')+(selectedStage===s.k?' selected':'')}
+                  role={clickable?'button':undefined}
+                  tabIndex={clickable?0:undefined}
+                  onClick={clickable?()=>onStageClick(s.k):undefined}
+                  onKeyDown={clickable?(e=>{if(e.key==='Enter'||e.key===' ')onStageClick(s.k);}):undefined}
+                  title={clickable?'Click to view stage logs':'No logs for this stage'}
+                >{s.i} {s.l}</div>
+                <div className="stage-time">{done.includes(s.k)?'✓':current===s.k?'running…':''}</div>
+              </div>
+            </React.Fragment>
+          );
+        })}
+      </div>
+      {showHint&&<div style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--text3)',marginTop:8}}>Tip: click a stage to view logs without leaving this page.</div>}
+    </>
   );
 }
 
@@ -755,6 +801,12 @@ function AnalyzePage(){
 function DashboardPage({config,onConnect,onNav}){
   const[pipelines,setPipelines]=useState([]);
   const[loading,setLoading]=useState(true);
+  const[latestJobs,setLatestJobs]=useState([]);
+  const[jobsLoading,setJobsLoading]=useState(false);
+  const[selectedStage,setSelectedStage]=useState('');
+  const[stageLog,setStageLog]=useState('');
+  const[stageLogLoading,setStageLogLoading]=useState(false);
+  const[stageLogError,setStageLogError]=useState('');
 
   useEffect(()=>{
     setLoading(true);
@@ -770,6 +822,46 @@ function DashboardPage({config,onConnect,onNav}){
   },[pipelines]);
 
   const latest=pipelines[0];
+  const stageJobsByKey=useMemo(()=>{
+    const out={};
+    for(const j of latestJobs){
+      const key=toUiStageKey(j&&j.stage?j.stage:j&&j.name?j.name:'');
+      if(!key)continue;
+      if(!out[key])out[key]={jobId:j.id,status:j.status,name:j.name||key};
+    }
+    return out;
+  },[latestJobs]);
+
+  useEffect(()=>{
+    if(!latest||!latest.id){
+      setLatestJobs([]);
+      setSelectedStage('');
+      setStageLog('');
+      setStageLogError('');
+      return;
+    }
+    setJobsLoading(true);
+    sbomApi('pipelines/'+latest.id+'/jobs',{config})
+      .then(d=>{setLatestJobs(Array.isArray(d)?d:[]);setJobsLoading(false);})
+      .catch(()=>{setLatestJobs([]);setJobsLoading(false);});
+  },[config,latest&&latest.id]);
+
+  async function openStageLogs(stageKey){
+    const info=stageJobsByKey[stageKey];
+    if(!info||!info.jobId||!latest||!latest.id)return;
+    setSelectedStage(stageKey);
+    setStageLogLoading(true);
+    setStageLogError('');
+    try{
+      const raw=await sbomApi('jobs/'+info.jobId+'/trace',{config,query:{run_id:latest.id}});
+      const text=typeof raw==='string'?raw:JSON.stringify(raw||{},null,2);
+      setStageLog(text||'No logs returned for this stage yet.');
+    }catch(e){
+      setStageLog('');
+      setStageLogError(e.message||'Failed to load stage logs.');
+    }
+    setStageLogLoading(false);
+  }
 
   return(
     <div className="page fade-in">
@@ -817,7 +909,36 @@ function DashboardPage({config,onConnect,onNav}){
                     <span className="mono" style={{fontSize:11,color:'var(--text2)'}}>{sha7(latest.sha)}</span>
                     <span className="mono" style={{fontSize:11,color:'var(--text2)',marginLeft:'auto'}}>{ago(latest.created_at)}</span>
                   </div>
-                  <StageFlow done={['success','passed','completed'].includes(latest.status)?['build','generate','sign','scan','report']:[]} errors={['failed','failure'].includes(latest.status)?['scan']:[]}/>
+                  <StageFlow
+                    done={['success','passed','completed'].includes(latest.status)?['build','generate','sign','scan','report']:[]}
+                    errors={['failed','failure'].includes(latest.status)?['scan']:[]}
+                    stageJobs={stageJobsByKey}
+                    selectedStage={selectedStage}
+                    onStageClick={openStageLogs}
+                    showHint={!jobsLoading}
+                  />
+                  {jobsLoading&&<div style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--text2)',marginTop:8}}>Loading stage metadata…</div>}
+                  {selectedStage&&(
+                    <div className="terminal" style={{marginTop:10}}>
+                      <div className="term-hd" style={{justifyContent:'space-between'}}>
+                        <div style={{display:'flex',alignItems:'center',gap:8}}>
+                          <div className="term-dot" style={{background:'#f43f5e'}}/>
+                          <div className="term-dot" style={{background:'#D29922'}}/>
+                          <div className="term-dot" style={{background:'#22d3a2'}}/>
+                          <span style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--text2)',marginLeft:6,textTransform:'uppercase'}}>{selectedStage} stage logs</span>
+                        </div>
+                        <div style={{display:'flex',gap:6}}>
+                          <button className="btn btn-xs" onClick={()=>openStageLogs(selectedStage)}>↻ Refresh</button>
+                          <button className="btn btn-xs" onClick={()=>{setSelectedStage('');setStageLog('');setStageLogError('');}}>✕ Close</button>
+                        </div>
+                      </div>
+                      <div className="term-body" style={{maxHeight:240,whiteSpace:'pre-wrap'}}>
+                        {stageLogLoading&&<div className="tl-info">Loading logs…</div>}
+                        {!stageLogLoading&&stageLogError&&<div className="tl-err">{stageLogError}</div>}
+                        {!stageLogLoading&&!stageLogError&&<div className="tl-cmd">{stageLog||'No logs returned yet.'}</div>}
+                      </div>
+                    </div>
+                  )}
                 </>
                 :<div className="empty"><div className="empty-icon">🔭</div><div className="empty-msg">No pipelines found for this source</div><button className="btn btn-sm" onClick={onConnect}>Configure source</button></div>
             }
