@@ -870,6 +870,20 @@ function DashboardPage({config,onConnect,onNav}){
     setReportDownloadBusy(scanner);
     setReportDownloadDiag('');
     try{
+      const cfgNoToken=(config&&typeof config==='object')?{...config,token:''}:config;
+      const callReport=async(query,allowBackendRetry=true)=>{
+        try{
+          return await sbomApi('report/unified',{config,query});
+        }catch(err){
+          const raw=(err&&err.message?String(err.message):'').toLowerCase();
+          const tokenish=raw.includes('401')||raw.includes('403')||raw.includes('forbidden')||raw.includes('permission')||raw.includes('token');
+          if(allowBackendRetry&&config&&config.token&&tokenish){
+            return sbomApi('report/unified',{config:cfgNoToken,query});
+          }
+          throw err;
+        }
+      };
+
       let data=null;
       let usedLocalFallback=false;
       if(latest&&latest.id){
@@ -877,16 +891,16 @@ function DashboardPage({config,onConnect,onNav}){
         if(config&&config.provider==='gitlab')pinnedQuery.pipeline_id=latest.id;
         else pinnedQuery.run_id=latest.id;
         try{
-          data=await sbomApi('report/unified',{config,query:pinnedQuery});
+          data=await callReport(pinnedQuery,true);
         }catch(_e){
           data=null;
         }
       }
       if(!data){
         try{
-          data=await sbomApi('report/unified',{config,query:{scanner,source:'ci'}});
+          data=await callReport({scanner,source:'ci'},true);
         }catch(_e){
-          data=await sbomApi('report/unified',{config,query:{scanner,source:'auto'}});
+          data=await callReport({scanner,source:'auto'},true);
           usedLocalFallback=true;
         }
       }
@@ -918,7 +932,7 @@ function DashboardPage({config,onConnect,onNav}){
       const msgLower=raw.toLowerCase();
       let friendly='Download failed. '+raw;
       if(msgLower.includes('token')||msgLower.includes('401')||msgLower.includes('403')||msgLower.includes('forbidden')||msgLower.includes('permission')){
-        friendly='Download failed: CI token/permission issue. Reconnect source with valid token or set backend token env vars.';
+        friendly='Download failed: CI access denied while reading artifacts. If backend env token is configured, clear the token in Connect and retry.';
       }else if(msgLower.includes('no matching vulnerability report')||msgLower.includes('no vulnerability report yet')||msgLower.includes('artifacts')){
         friendly='Download failed: report artifact not available yet for the selected/current run. Wait for artifact upload, then retry.';
       }
