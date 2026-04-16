@@ -807,6 +807,7 @@ function DashboardPage({config,onConnect,onNav}){
   const[stageLogLoading,setStageLogLoading]=useState(false);
   const[stageLogError,setStageLogError]=useState('');
   const[reportDownloadBusy,setReportDownloadBusy]=useState('');
+  const[reportDownloadDiag,setReportDownloadDiag]=useState('');
 
   useEffect(()=>{
     setLoading(true);
@@ -867,6 +868,7 @@ function DashboardPage({config,onConnect,onNav}){
     scanner=(scanner||'grype').toLowerCase();
     if(reportDownloadBusy)return;
     setReportDownloadBusy(scanner);
+    setReportDownloadDiag('');
     try{
       let data=null;
       let usedLocalFallback=false;
@@ -902,10 +904,26 @@ function DashboardPage({config,onConnect,onNav}){
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      if(usedLocalFallback)toast('Downloaded '+scanner.toUpperCase()+' report (local fallback)','info');
-      else toast('Downloaded '+scanner.toUpperCase()+' report artifact','ok');
+      if(usedLocalFallback){
+        toast('Downloaded '+scanner.toUpperCase()+' report (local fallback)','info');
+        setReportDownloadDiag('Downloaded from local server report fallback (CI artifact was not available yet).');
+      }else{
+        toast('Downloaded '+scanner.toUpperCase()+' report artifact','ok');
+        const m=(data&&data._meta)||{};
+        const fromRun=m.run_id?('run '+m.run_id):(m.pipeline_id?('pipeline '+m.pipeline_id):'latest artifact');
+        setReportDownloadDiag('Downloaded '+scanner.toUpperCase()+' report from '+fromRun+'.');
+      }
     }catch(e){
-      toast('Download failed: '+(e.message||'Unknown error'),'err');
+      const raw=(e&&e.message?String(e.message):'Unknown error');
+      const msgLower=raw.toLowerCase();
+      let friendly='Download failed. '+raw;
+      if(msgLower.includes('token')||msgLower.includes('401')||msgLower.includes('403')||msgLower.includes('forbidden')||msgLower.includes('permission')){
+        friendly='Download failed: CI token/permission issue. Reconnect source with valid token or set backend token env vars.';
+      }else if(msgLower.includes('no matching vulnerability report')||msgLower.includes('no vulnerability report yet')||msgLower.includes('artifacts')){
+        friendly='Download failed: report artifact not available yet for the selected/current run. Wait for artifact upload, then retry.';
+      }
+      toast(friendly,'err');
+      setReportDownloadDiag(friendly);
     }
     setReportDownloadBusy('');
   }
@@ -964,6 +982,7 @@ function DashboardPage({config,onConnect,onNav}){
                       {reportDownloadBusy==='trivy'?<><Spin/> Downloading…</>:'⬇ Trivy Report'}
                     </button>
                   </div>
+                  {reportDownloadDiag&&<div style={{marginBottom:10,fontSize:10,fontFamily:'var(--mono)',color:'var(--text2)'}}>{reportDownloadDiag}</div>}
                   <StageFlow
                     done={['success','passed','completed'].includes(latest.status)?['build','generate','sign','scan','report']:[]}
                     errors={['failed','failure'].includes(latest.status)?['scan']:[]}
