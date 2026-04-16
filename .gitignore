@@ -28,3 +28,6 @@ _test_litert/
 .ui_uploads/
 sbom_ui/__pycache__/
 *.pyc
+
+# Accidental nested repo copy
+SBOM-ATTESTATION/
