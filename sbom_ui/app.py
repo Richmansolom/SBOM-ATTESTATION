@@ -2298,6 +2298,8 @@ def gitlab_api_binary(path, token=""):
 
 def fetch_github_report_from_artifacts(repo, scanner, token="", run_id=None):
     run_ids = []
+    attempted_runs = []
+    attempted_artifacts = []
     if run_id:
         run_ids.append(int(run_id))
         # If a pinned run is still in progress or has no uploaded artifacts yet,
@@ -2335,6 +2337,7 @@ def fetch_github_report_from_artifacts(repo, scanner, token="", run_id=None):
         return None, "No GitHub workflow runs found"
 
     for rid in run_ids[:8]:
+        attempted_runs.append(rid)
         status, out = github_rest_request(f"repos/{repo}/actions/runs/{rid}/artifacts?per_page=30", "GET", token)
         if status >= 300:
             continue
@@ -2343,6 +2346,9 @@ def fetch_github_report_from_artifacts(repo, scanner, token="", run_id=None):
         for artifact in artifacts:
             if artifact.get("expired"):
                 continue
+            aname = (artifact.get("name") or "").strip()
+            if aname and aname not in attempted_artifacts and len(attempted_artifacts) < 12:
+                attempted_artifacts.append(aname)
             archive_url = artifact.get("archive_download_url")
             if not archive_url:
                 continue
@@ -2357,12 +2363,19 @@ def fetch_github_report_from_artifacts(repo, scanner, token="", run_id=None):
                     "artifact_name": artifact.get("name") or "",
                     "zip_entry": entry or "",
                 }, None
-    return None, "No matching vulnerability report found in GitHub artifacts"
+    msg = "No matching vulnerability report found in GitHub artifacts"
+    if attempted_runs:
+        msg += f" (runs tried: {', '.join(str(x) for x in attempted_runs[:8])})"
+    if attempted_artifacts:
+        msg += f"; artifact names seen: {', '.join(attempted_artifacts)}"
+    return None, msg
 
 
 def fetch_gitlab_report_from_artifacts(project, scanner, token="", pipeline_id=None):
     encoded_project = quote(project, safe="")
     pipeline_ids = []
+    attempted_pipelines = []
+    attempted_artifacts = []
     if pipeline_id:
         pipeline_ids.append(int(pipeline_id))
         # If pinned pipeline has no artifacts yet, fallback to recent successful pipelines.
@@ -2388,6 +2401,7 @@ def fetch_gitlab_report_from_artifacts(project, scanner, token="", pipeline_id=N
         return None, "No GitLab successful pipelines found"
 
     for pid in pipeline_ids[:8]:
+        attempted_pipelines.append(pid)
         status, out = gitlab_api(f"projects/{encoded_project}/pipelines/{pid}/jobs?per_page=100", token=token)
         if status >= 300:
             continue
@@ -2396,6 +2410,9 @@ def fetch_gitlab_report_from_artifacts(project, scanner, token="", pipeline_id=N
             artifacts_file = (job.get("artifacts_file") or {}).get("filename")
             if not artifacts_file:
                 continue
+            afile = str(artifacts_file).strip()
+            if afile and afile not in attempted_artifacts and len(attempted_artifacts) < 12:
+                attempted_artifacts.append(afile)
             jid = job.get("id")
             if not jid:
                 continue
@@ -2411,7 +2428,12 @@ def fetch_gitlab_report_from_artifacts(project, scanner, token="", pipeline_id=N
                     "job_name": job.get("name") or "",
                     "zip_entry": entry or "",
                 }, None
-    return None, "No matching vulnerability report found in GitLab artifacts"
+    msg = "No matching vulnerability report found in GitLab artifacts"
+    if attempted_pipelines:
+        msg += f" (pipelines tried: {', '.join(str(x) for x in attempted_pipelines[:8])})"
+    if attempted_artifacts:
+        msg += f"; artifact files seen: {', '.join(attempted_artifacts)}"
+    return None, msg
 
 
 def fetch_github_sbom_from_artifacts(repo, token="", run_id=None):
@@ -3186,6 +3208,7 @@ def get_unified_report():
         "trivy": REPORT_DIR / "trivy-sbom-report.json",
     }
     local_path = local_paths[scanner]
+    ci_error = None
 
     if source == "local":
         if not local_path.exists():
@@ -3273,7 +3296,10 @@ def get_unified_report():
         return jsonify(
             {
                 "status": "error",
-                "message": "No vulnerability report yet. Run CI or upload + Generate on this server, then refresh.",
+                "message": (
+                    "No vulnerability report yet. Run CI or upload + Generate on this server, then refresh."
+                    + (f" CI detail: {ci_error}" if ci_error else "")
+                ),
             }
         ), 404
 
