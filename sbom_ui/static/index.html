@@ -399,7 +399,7 @@ function StageFlow({current,done,errors,stageJobs,selectedStage,onStageClick,sho
       <div className="stage-flow">
         {items.map((s,i)=>{
           const info=stageJobs&&stageJobs[s.k]?stageJobs[s.k]:null;
-          const clickable=!!(onStageClick&&info&&info.jobId);
+         const clickable = !!onStageClick;
           return(
             <React.Fragment key={s.k}>
               {i>0&&<div className="stage-arrow">→</div>}
