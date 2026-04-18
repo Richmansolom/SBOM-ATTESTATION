@@ -1,4 +1,4 @@
-ï»¿<#
+<#
 .SYNOPSIS
   Generate holistic SBOMs for native or containerized C/C++ applications.
 
@@ -54,6 +54,15 @@ function Resolve-ContainerRuntime([string]$requested) {
   throw "Missing: docker or podman"
 }
 
+# merge-sbom.ps1 / check-ntia.ps1 are invoked via PowerShell — prefer pwsh (7+) if installed.
+function Get-PowerShellForScripts {
+  if (Get-Command pwsh -ErrorAction SilentlyContinue) { return (Get-Command pwsh).Source }
+  $ps = Get-Command powershell.exe -ErrorAction SilentlyContinue
+  if ($ps) { return $ps.Source }
+  throw "Neither pwsh nor powershell.exe found on PATH. Install PowerShell 7 (https://aka.ms/powershell) or ensure Windows PowerShell is available."
+}
+$PowerShellForScripts = Get-PowerShellForScripts
+
 $containerCmd = Resolve-ContainerRuntime $ContainerRuntime
 
 # After clearing images, Docker must pull again. Using a pinned tag avoids occasional
@@ -96,6 +105,21 @@ $distroLeaf = Split-Path $distroSbom -Leaf
 
 Write-Host "==> Mode: $runMode | Runtime: $containerCmd"
 Write-Host "==> Trivy image: $trivyImage"
+Write-Host "==> Check container engine ($containerCmd)"
+$diagInfo = & $containerCmd info 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0 -and $diagInfo -notmatch "Server Version") {
+  throw @"
+Container engine '$containerCmd' is not running or not reachable.
+
+Windows: Start Docker Desktop and wait until it is fully started, then retry.
+If you use WSL2 backend, ensure the Docker Desktop service is running.
+Linux: e.g. sudo systemctl start docker
+Alternative: install Podman and run with -ContainerRuntime podman
+
+Diagnostic (docker info):
+$diagInfo
+"@
+}
 Write-Host "==> Pull COTS SBOM tool images (Syft, Trivy, CycloneDX, Hoppr)"
 & $containerCmd pull anchore/syft:latest 2>&1 | Out-Host
 & $containerCmd pull $trivyImage 2>&1 | Out-Host
@@ -123,7 +147,7 @@ if ($runMode -eq "container") {
 
   Write-Host "==> Generate COTS SBOM from image (Trivy)"
   & $containerCmd save $image -o $imageTar 2>&1 | Out-Host
-if ($LASTEXITCODE -ne 0) { throw "Failed to export image tar for $image" }
+if ($LASTEXITCODE -ne 0 -and $diagInfo -notmatch "Server Version") { throw "Failed to export image tar for $image" }
 & $containerCmd run --rm -v "${sbomPath}:/data" $trivyImage @trivyQuiet image --input "/data/image.tar" --format cyclonedx --output "/data/$trivyLeaf" 2>&1 | Out-Host
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $trivySbom)) { throw "Trivy failed to generate image SBOM ($trivySbom)." }
 } else {
@@ -143,14 +167,14 @@ Write-Host "==> Merge Syft + Trivy + Distro2SBOM via CycloneDX-CLI"
 & $containerCmd run --rm -v "${repoRoot}:/data" cyclonedx/cyclonedx-cli:latest merge --input-files "/data/$SbomDir/$syftLeaf" "/data/$SbomDir/$trivyLeaf" "/data/$SbomDir/$distroLeaf" --output-file "/data/$SbomDir/$rawLeaf" --output-format json 2>&1 | Out-Host
 
 Write-Host "==> Enrich SBOM with app metadata"
-& pwsh -ExecutionPolicy Bypass -File $mergeScript -InputSbom $rawSbom -AppMetadata $appMeta -OutputSbom $enrichedSbom 2>&1 | Out-Host
+& $PowerShellForScripts -ExecutionPolicy Bypass -File $mergeScript -InputSbom $rawSbom -AppMetadata $appMeta -OutputSbom $enrichedSbom 2>&1 | Out-Host
 
 Write-Host "==> Validate CycloneDX schema (CycloneDX-CLI)"
 & $containerCmd run --rm -v "${repoRoot}:/data" cyclonedx/cyclonedx-cli:latest validate --input-file "/data/$SbomDir/$enrichedLeaf" 2>&1 | Tee-Object -FilePath (Join-Path $reportPath "cyclonedx-validate.txt")
 $cyclonedxExit = $LASTEXITCODE
 
 Write-Host "==> NTIA Minimum Elements (check-ntia.ps1)"
-& pwsh -ExecutionPolicy Bypass -File $ntiaScript -SbomFile $enrichedSbom 2>&1 | Out-Host
+& $PowerShellForScripts -ExecutionPolicy Bypass -File $ntiaScript -SbomFile $enrichedSbom 2>&1 | Out-Host
 $ntiaExit = $LASTEXITCODE
 
 Write-Host "==> NTIA validation with Hoppr"
@@ -162,9 +186,9 @@ Write-Host ""
 Write-Host "========================="
 Write-Host "SBOM Requirements Summary"
 Write-Host "========================="
-Write-Host "CycloneDX schema:      $([int]$cyclonedxExit -eq 0 ? 'PASS' : 'FAIL')"
-Write-Host "NTIA (check-ntia.ps1): $([int]$ntiaExit -eq 0 ? 'PASS' : 'FAIL')"
-Write-Host "Hoppr NTIA:           $([int]$hopprExit -eq 0 ? 'PASS' : 'WARN')"
+Write-Host "CycloneDX schema:      $(if ([int]$cyclonedxExit -eq 0) { 'PASS' } else { 'FAIL' })"
+Write-Host "NTIA (check-ntia.ps1): $(if ([int]$ntiaExit -eq 0) { 'PASS' } else { 'FAIL' })"
+Write-Host "Hoppr NTIA:           $(if ([int]$hopprExit -eq 0) { 'PASS' } else { 'WARN' })"
 Write-Host ""
 Write-Host "Outputs:"
 Write-Host "  Syft SBOM:       $syftSbom"
@@ -192,7 +216,7 @@ $grypeDbVol = @("-e", "GRYPE_DB_CACHE_DIR=/grype-db", "-v", "${grypeCacheDir}:/g
 & $containerCmd run --rm -v "${repoRoot}:/data" @grypeDbVol $grypeImage "sbom:/data/$SbomDir/$unsignedV16Leaf" -o json 2> (Join-Path $reportPath "grype-report.stderr.log") | Set-Content -Path (Join-Path $reportPath "grype-report.json") -Encoding UTF8
 & $containerCmd run --rm -v "${repoRoot}:/data" @grypeDbVol $grypeImage "sbom:/data/$SbomDir/$unsignedV16Leaf" -o table 2>&1 | Set-Content -Path (Join-Path $reportPath "grype-report.txt") -Encoding UTF8
 
-Write-Host "==> Secondary vulnerability scan with Trivy SBOM (NVD/GHSA/OSV sources) â€” image: $trivyImage"
+Write-Host "==> Secondary vulnerability scan with Trivy SBOM (NVD/GHSA/OSV sources) — image: $trivyImage"
 & $containerCmd run --rm -v "${repoRoot}:/data" $trivyImage sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format json --output "/data/$ReportDir/trivy-sbom-report.json" "/data/$SbomDir/$unsignedV16Leaf" 2>&1 | Out-Host
 & $containerCmd run --rm -v "${repoRoot}:/data" $trivyImage sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format table --output "/data/$ReportDir/trivy-sbom-report.txt" "/data/$SbomDir/$unsignedV16Leaf" 2>&1 | Out-Host
 
