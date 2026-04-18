@@ -12,6 +12,22 @@ Enable another engineer or team to clone this repo, point it at their own C/C++ 
 - Vulnerability evidence from Grype and Trivy (with DB freshness artifacts)
 - CI/CD pipeline artifacts from both GitHub and GitLab
 
+## Clone this repository
+
+Primary (GitHub):
+
+```bash
+git clone https://github.com/Richmansolom/SBOM-ATTESTATION.git
+cd SBOM-ATTESTATION
+```
+
+Mirror (GitLab):
+
+```bash
+git clone https://gitlab.com/Richmansolom/SBOM-ATTESTATION.git
+cd SBOM-ATTESTATION
+```
+
 ## Project description
 
 This work supports **trusted SBOM** practice for **C/C++** software: combine **Syft, Trivy, Distro2SBOM, CycloneDX-CLI, Hoppr, Grype**, and **repository-maintained application metadata** (JSON, CSV, or XML via `merge-sbom.ps1`) into **holistic CycloneDX** documents. **NTIA minimum elements** are checked with `check-ntia.ps1` and **Hoppr**. **Embedded signing** uses `scripts/sign-sbom.sh` (OpenSSL), with optional PKI hierarchy bootstrapping from `scripts/setup-pki.sh`. **GitHub Actions** and **GitLab CI** run the **same pipeline shape**: clean outputs → build → generate → enrich → validate → sign → scan → report → upload artifacts.
