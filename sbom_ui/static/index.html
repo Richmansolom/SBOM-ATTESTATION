@@ -441,7 +441,10 @@ function StageFlow({current,done,errors,stageJobs,selectedStage,onStageClick,sho
                   className={'stage-box '+cls(s.k)+(clickable?' clickable':'')+(selectedStage===s.k?' selected':'')}
                   role={clickable?'button':undefined}
                   tabIndex={clickable?0:undefined}
-                  onClick={clickable?()=>onStageClick(s.k):undefined}
+                 onClick={clickable ? () => {
+  alert(s.k);
+  onStageClick(s.k);
+} : undefined}
                   onKeyDown={clickable?(e=>{if(e.key==='Enter'||e.key===' ')onStageClick(s.k);}):undefined}
                   title={clickable?'Click to view stage logs':'No logs for this stage'}
                 >{s.i} {s.l}</div>
