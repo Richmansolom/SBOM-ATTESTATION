@@ -21,9 +21,9 @@
   --text0:#e8edf5; --text1:#96a6be; --text2:#4a5a72; --text3:#2a3548;
   --border:rgba(255,255,255,.07); --border2:rgba(255,255,255,.04);
   --mono:'IBM Plex Mono',monospace; --sans:'Manrope',sans-serif;
-  --r:6px; --r2:10px; --r3:16px;
-  --sh:0 8px 32px rgba(0,0,0,.5);
-  --hh:54px; --tbh:56px;
+  --r:8px; --r2:12px; --r3:18px;
+  --sh:0 10px 36px rgba(0,0,0,.42);
+  --hh:58px; --tbh:58px;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body,#root{height:100%}
@@ -37,12 +37,12 @@ a{color:inherit;text-decoration:none}
 
 /* Layout */
 .root{display:flex;flex-direction:column;height:100%}
-.header{height:var(--hh);background:var(--bg1);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:12px;flex-shrink:0;z-index:30}
+.header{height:var(--hh);background:var(--bg1);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 18px;gap:12px;flex-shrink:0;z-index:30}
 .logo{width:30px;height:30px;background:var(--gold);border-radius:var(--r);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .logo-txt{font-family:var(--mono);font-size:11px;font-weight:700;color:#000;letter-spacing:-.5px}
 .brand{display:flex;flex-direction:column;min-width:0}
-.brand-title{font-size:14px;font-weight:700;color:var(--text0);white-space:nowrap}
-.brand-sub{font-size:9px;font-family:var(--mono);color:var(--text2);letter-spacing:1.5px;text-transform:uppercase;margin-top:1px}
+.brand-title{font-size:14px;font-weight:800;color:var(--text0);white-space:nowrap;letter-spacing:.2px}
+.brand-sub{font-size:9px;font-family:var(--mono);color:var(--text2);letter-spacing:1.6px;text-transform:uppercase;margin-top:1px}
 .hdr-sp{flex:1}
 .hdr-r{display:flex;align-items:center;gap:10px;flex-shrink:0}
 .hdr-link{font-size:11px;font-family:var(--mono);color:var(--text2);padding:4px 9px;border:1px solid var(--border);border-radius:var(--r);transition:.2s;white-space:nowrap}
@@ -55,7 +55,7 @@ a{color:inherit;text-decoration:none}
 @keyframes dpulse{0%,100%{opacity:1}50%{opacity:.3}}
 .shell{display:flex;flex:1;overflow:hidden}
 .main{flex:1;overflow-y:auto;overflow-x:hidden;background:var(--bg0)}
-.page{padding:clamp(14px,3vw,24px);display:flex;flex-direction:column;gap:16px;max-width:1440px}
+.page{padding:clamp(16px,3.1vw,28px);display:flex;flex-direction:column;gap:18px;max-width:1440px;margin:0 auto;width:100%}
 .tabbar{display:none;height:var(--tbh);background:var(--bg1);border-top:1px solid var(--border);flex-shrink:0;z-index:20;padding-bottom:env(safe-area-inset-bottom)}
 @media(max-width:768px){.tabbar{display:flex}.sidebar{display:none}}
 .tab-btn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:9.5px;font-weight:600;letter-spacing:.5px;color:var(--text2);cursor:pointer;border-top:2px solid transparent;transition:.15s}
@@ -63,9 +63,9 @@ a{color:inherit;text-decoration:none}
 .tab-icon{font-size:17px;line-height:1}
 
 /* Sidebar */
-.sidebar{width:200px;flex-shrink:0;background:var(--bg1);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
-.nav-sec{padding:14px 12px 5px;font-size:9px;font-family:var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--text3)}
-.nav-item{display:flex;align-items:center;gap:9px;padding:8px 14px;cursor:pointer;color:var(--text1);font-size:12.5px;font-weight:500;transition:.15s;border-left:2px solid transparent}
+.sidebar{width:214px;flex-shrink:0;background:var(--bg1);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.nav-sec{padding:15px 12px 6px;font-size:9px;font-family:var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--text3)}
+.nav-item{display:flex;align-items:center;gap:9px;padding:9px 14px;cursor:pointer;color:var(--text1);font-size:12.5px;font-weight:600;transition:.15s;border-left:2px solid transparent}
 .nav-item:hover{color:var(--text0);background:var(--bg2)}
 .nav-item.active{color:var(--gold);background:var(--gold-dim);border-left-color:var(--gold)}
 .nav-icon{font-size:14px;width:18px;text-align:center;flex-shrink:0}
@@ -75,38 +75,38 @@ a{color:inherit;text-decoration:none}
 .sidebar-foot-info{font-size:9px;font-family:var(--mono);color:var(--text3);line-height:1.9}
 
 /* Cards */
-.card{background:var(--bg1);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden}
-.card-hd{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 10px;border-bottom:1px solid var(--border2);gap:10px;flex-wrap:wrap}
-.card-title{font-size:11px;font-weight:600;font-family:var(--mono);letter-spacing:1.5px;text-transform:uppercase;color:var(--text1);display:flex;align-items:center;gap:6px}
-.card-body{padding:16px}
+.card{background:linear-gradient(180deg,var(--bg1) 0%,rgba(15,21,32,.96) 100%);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;box-shadow:var(--sh)}
+.card-hd{display:flex;align-items:center;justify-content:space-between;padding:13px 17px 11px;border-bottom:1px solid var(--border2);gap:10px;flex-wrap:wrap}
+.card-title{font-size:11px;font-weight:700;font-family:var(--mono);letter-spacing:1.55px;text-transform:uppercase;color:var(--text1);display:flex;align-items:center;gap:6px}
+.card-body{padding:17px}
 
 /* Analyzer */
-.analyzer{background:var(--bg1);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden;position:relative}
+.analyzer{background:var(--bg1);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden;position:relative;box-shadow:var(--sh)}
 .analyzer::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--gold),var(--teal),var(--purple));opacity:.8}
-.analyzer-hd{padding:20px 24px 16px;border-bottom:1px solid var(--border2)}
-.analyzer-title{font-size:clamp(18px,3vw,22px);font-weight:800;color:var(--text0);margin-bottom:4px}
-.analyzer-sub{font-size:12px;font-family:var(--mono);color:var(--text2)}
-.analyzer-body{padding:20px 24px 24px;display:flex;flex-direction:column;gap:16px}
-.field{display:flex;flex-direction:column;gap:5px}
-.flbl{font-size:10px;font-weight:700;font-family:var(--mono);letter-spacing:1.5px;text-transform:uppercase;color:var(--text2)}
-.finput{width:100%;padding:10px 14px;background:var(--bg0);border:1px solid var(--border);border-radius:var(--r);color:var(--text0);font-size:13px;font-family:var(--mono);transition:.2s}
+.analyzer-hd{padding:22px 26px 18px;border-bottom:1px solid var(--border2)}
+.analyzer-title{font-size:clamp(19px,3vw,24px);font-weight:800;color:var(--text0);margin-bottom:5px;letter-spacing:.1px}
+.analyzer-sub{font-size:12px;font-family:var(--mono);color:var(--text2);line-height:1.6}
+.analyzer-body{padding:22px 26px 26px;display:flex;flex-direction:column;gap:16px}
+.field{display:flex;flex-direction:column;gap:6px}
+.flbl{font-size:10px;font-weight:700;font-family:var(--mono);letter-spacing:1.45px;text-transform:uppercase;color:var(--text2)}
+.finput{width:100%;padding:11px 14px;background:var(--bg0);border:1px solid var(--border);border-radius:var(--r);color:var(--text0);font-size:13px;font-family:var(--mono);transition:.2s}
 .finput:focus{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-dim)}
 .finput::placeholder{color:var(--text3)}
 select.finput option{background:var(--bg2)}
-.meta-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:10px}
+.meta-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(165px,100%),1fr));gap:11px}
 .mode-toggle{display:flex;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--bg0)}
 .mode-btn{flex:1;padding:9px 8px;font-size:11px;font-family:var(--mono);font-weight:600;color:var(--text2);transition:.15s;border:none;background:none;cursor:pointer}
 .mode-btn.active{background:var(--bg3);color:var(--gold)}
-.scan-btn{padding:11px 28px;background:var(--gold);border-radius:var(--r);font-size:13px;font-weight:800;color:#000;transition:.2s;white-space:nowrap;display:flex;align-items:center;gap:8px;border:none;cursor:pointer}
+.scan-btn{padding:11px 28px;background:var(--gold);border-radius:var(--r);font-size:13px;font-weight:800;color:#000;transition:.2s;white-space:nowrap;display:flex;align-items:center;gap:8px;border:none;cursor:pointer;letter-spacing:.2px}
 .scan-btn:hover:not(:disabled){background:var(--gold2);color:#000}
 .scan-btn:disabled{opacity:.4;cursor:not-allowed}
 .scan-btn.running{background:var(--bg3);color:var(--text1);border:1px solid var(--border)}
 
 /* Stage flow */
-.stage-flow{display:flex;align-items:center;gap:6px;overflow-x:auto;padding:2px 0}
+.stage-flow{display:flex;align-items:center;gap:7px;overflow-x:auto;padding:3px 0}
 .stage-flow::-webkit-scrollbar{display:none}
 .stage-node{display:flex;flex-direction:column;align-items:center;gap:4px;flex-shrink:0}
-.stage-box{padding:7px 14px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg2);font-size:9.5px;font-family:var(--mono);font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);white-space:nowrap;transition:.3s;min-width:76px;text-align:center}
+.stage-box{padding:8px 14px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg2);font-size:9.5px;font-family:var(--mono);font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);white-space:nowrap;transition:.3s;min-width:82px;text-align:center}
 .stage-box.active{border-color:rgba(240,165,0,.4);color:var(--gold);background:var(--gold-dim)}
 .stage-box.done{border-color:rgba(34,211,162,.3);color:var(--green);background:var(--green-dim)}
 .stage-box.error{border-color:rgba(244,63,94,.3);color:var(--red);background:var(--red-dim)}
@@ -117,10 +117,10 @@ select.finput option{background:var(--bg2)}
 .stage-time{font-size:9px;font-family:var(--mono);color:var(--text3)}
 
 /* Terminal */
-.terminal{background:#050810;border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.terminal{background:#050810;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,.02)}
 .term-hd{display:flex;align-items:center;gap:5px;padding:7px 12px;background:var(--bg2);border-bottom:1px solid var(--border)}
 .term-dot{width:8px;height:8px;border-radius:50%}
-.term-body{padding:12px;font-family:var(--mono);font-size:clamp(10px,1.4vw,11.5px);line-height:1.7;overflow-y:auto;max-height:220px;color:#6E7F8D}
+.term-body{padding:12px;font-family:var(--mono);font-size:clamp(10px,1.35vw,11.5px);line-height:1.72;overflow-y:auto;max-height:220px;color:#6E7F8D}
 .tl-ok{color:var(--green)}.tl-err{color:var(--red)}.tl-warn{color:var(--amber)}.tl-info{color:var(--teal)}.tl-cmd{color:var(--text0)}
 .cursor{display:inline-block;width:7px;height:13px;background:var(--gold);vertical-align:middle;animation:blink .8s step-end infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
@@ -136,7 +136,7 @@ select.finput option{background:var(--bg2)}
 .bdot{width:4px;height:4px;border-radius:50%;background:currentColor;animation:dpulse 1.5s ease-in-out infinite}
 
 /* Buttons */
-.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:var(--r);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;transition:.18s;white-space:nowrap;border:1px solid var(--border);background:var(--bg3);color:var(--text1)}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:var(--r);font-family:var(--sans);font-size:12px;font-weight:700;cursor:pointer;transition:.18s;white-space:nowrap;border:1px solid var(--border);background:var(--bg3);color:var(--text1)}
 .btn:hover{border-color:var(--text2);color:var(--text0)}
 .btn-sm{padding:4px 10px;font-size:11px}
 .btn-xs{padding:3px 8px;font-size:10px}
@@ -146,17 +146,17 @@ select.finput option{background:var(--bg2)}
 .btn-red{background:var(--red-dim);border-color:rgba(244,63,94,.25);color:var(--red)}
 
 /* Severity bars */
-.sev-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:pointer}
+.sev-row{display:flex;align-items:center;gap:10px;margin-bottom:9px;cursor:pointer}
 .sev-lbl{font-size:10px;font-family:var(--mono);font-weight:600;width:76px;flex-shrink:0;text-transform:uppercase;letter-spacing:.5px}
-.sev-track{flex:1;height:22px;background:var(--bg3);border-radius:4px;overflow:hidden}
+.sev-track{flex:1;height:22px;background:var(--bg3);border-radius:5px;overflow:hidden}
 .sev-fill{height:100%;border-radius:4px;display:flex;align-items:center;padding-left:8px;transition:width 1.2s cubic-bezier(.4,0,.2,1)}
 .sev-cnt{font-size:10px;font-weight:700;color:#000;font-family:var(--mono)}
 
 /* Table */
-.tbl-wrap{overflow-x:auto}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--border2);border-radius:var(--r);background:rgba(0,0,0,.08)}
 table{width:100%;border-collapse:collapse;min-width:360px}
-th{font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text2);font-family:var(--mono);padding:9px 12px;text-align:left;border-bottom:1px solid var(--border);background:var(--bg2);white-space:nowrap}
-td{padding:9px 12px;border-bottom:1px solid var(--border2);font-size:12px;vertical-align:middle}
+th{font-size:9px;font-weight:700;letter-spacing:1.45px;text-transform:uppercase;color:var(--text2);font-family:var(--mono);padding:10px 12px;text-align:left;border-bottom:1px solid var(--border);background:var(--bg2);white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--border2);font-size:12px;vertical-align:middle}
 tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--bg2)}
 .mono{font-family:var(--mono)}
@@ -200,10 +200,10 @@ tr:hover td{background:var(--bg2)}
 .text-mono{font-family:var(--mono)}.text-muted{color:var(--text2)}
 .text-gold{color:var(--gold)}.text-green{color:var(--green)}.text-red{color:var(--red)}
 .truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:14px}
+.grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:14px}
 .fade-in{animation:fi .25s ease-out}
 @keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:clamp(28px,6vw,52px) 20px;color:var(--text3);text-align:center;gap:10px}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:clamp(30px,6.5vw,54px) 20px;color:var(--text3);text-align:center;gap:11px}
 .empty-icon{font-size:clamp(28px,5vw,40px);opacity:.3}
 .empty-msg{font-size:12.5px}
 .copy-btn{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;font-size:10px;font-family:var(--mono);background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);color:var(--text2);cursor:pointer;transition:.2s}
@@ -213,6 +213,36 @@ tr:hover td{background:var(--bg2)}
 .boot-error-title{font-size:14px;font-weight:800;color:#fca5b7;margin-bottom:8px}
 .boot-error-text{font-size:12px;color:var(--text1);line-height:1.55}
 .boot-error-detail{margin-top:10px;font-size:11px;font-family:var(--mono);color:var(--amber);background:var(--amber-dim);border:1px solid rgba(251,146,60,.2);border-radius:var(--r);padding:8px 10px;white-space:pre-wrap}
+
+@media(max-width:1180px){
+  .sidebar{width:198px}
+  .page{padding:18px 18px 22px}
+  .analyzer-hd{padding:20px 22px 16px}
+  .analyzer-body{padding:20px 22px 22px}
+}
+
+@media(max-width:900px){
+  .header{padding:0 12px;gap:8px}
+  .brand-title{font-size:13px}
+  .hdr-link{padding:4px 7px;font-size:10px}
+  .page{padding:14px 12px 18px;gap:14px}
+  .card-body{padding:14px}
+  .card-hd{padding:11px 13px 9px}
+  .grid-2{grid-template-columns:1fr;gap:12px}
+  .meta-row{grid-template-columns:1fr 1fr}
+  .stage-box{min-width:74px;padding:7px 11px}
+}
+
+@media(max-width:640px){
+  .hdr-link{display:none}
+  .conn-pill{padding:4px 8px;font-size:10px}
+  .analyzer-title{font-size:18px}
+  .analyzer-hd,.analyzer-body{padding:14px}
+  .meta-row{grid-template-columns:1fr}
+  .scan-btn{width:100%;justify-content:center}
+  .term-body{max-height:190px}
+  .table{font-size:11px}
+}
 </style>
 </head>
 <body>
@@ -225,6 +255,7 @@ const ago=d=>{if(!d)return'—';const s=Math.round((Date.now()-new Date(d))/1000
 const sha7=s=>s?s.slice(0,7):'';
 const SEV_COL={Critical:'#f43f5e',High:'#fb923c',Medium:'#D29922',Low:'#22d3a2',Negligible:'#2a3548',Unknown:'#2a3548'};
 const SEV_ORD=['Critical','High','Medium','Low','Negligible'];
+const PIPELINE_STAGES=['build','generate','validate','sign','scan','report'];
 
 function sbomApi(path,{method='GET',body=null,config=null,query={}}={}){
   const cleanPath=String(path||'').replace(/^\/+/, '');
@@ -256,6 +287,7 @@ function toUiStageKey(stage){
   const s=String(stage||'').toLowerCase();
   if(s==='build')return'build';
   if(s==='generate'||s==='sbom_generate'||s==='sbom-generate')return'generate';
+  if(s==='validate'||s==='sbom_validate'||s==='sbom-validate')return'validate';
   if(s==='sign'||s==='sbom_sign'||s==='sbom-sign')return'sign';
   if(s==='scan'||s==='sbom_scan'||s==='sbom-scan')return'scan';
   if(s==='report')return'report';
@@ -383,7 +415,8 @@ function ConnectModal({onConnect,onClose,initialConfig}){
 /* ── STAGE FLOW ── */
 function StageFlow({current,done,errors,stageJobs,selectedStage,onStageClick,showHint}){
   done=done||[];errors=errors||[];
-  const items=[{k:'build',i:'🔨',l:'Build'},{k:'generate',i:'📄',l:'Generate'},{k:'sign',i:'✍️',l:'Sign'},{k:'scan',i:'🔍',l:'Scan'},{k:'report',i:'📦',l:'Report'}];
+  const stageIcon={build:'🔨',generate:'📄',validate:'✅',sign:'✍️',scan:'🔍',report:'📦'};
+  const items=PIPELINE_STAGES.map((k)=>({k,i:stageIcon[k]||'•',l:k.charAt(0).toUpperCase()+k.slice(1)}));
   function cls(k){
     if(stageJobs&&stageJobs[k]){
       const mapped=stageStatusClass(stageJobs[k].status);
@@ -423,6 +456,39 @@ function StageFlow({current,done,errors,stageJobs,selectedStage,onStageClick,sho
   );
 }
 
+function LocalRunPlaybook(){
+  const cmdBashDry='make ci-local-dry-run';
+  const cmdBashSmoke='make ci-local-smoke';
+  const cmdPsDry='powershell -ExecutionPolicy Bypass -File .\\scripts\\gitlab-ci-local-dry-run.ps1 -Mode dry-run';
+  const cmdPsSmoke='powershell -ExecutionPolicy Bypass -File .\\scripts\\gitlab-ci-local-dry-run.ps1 -Mode smoke';
+  return(
+    <div className="card" style={{marginTop:4}}>
+      <div className="card-hd">
+        <div className="card-title">🧪 Local CI Emulation</div>
+        <span className="badge badge-purple">Build → Generate → Validate → Sign → Scan → Report</span>
+      </div>
+      <div className="card-body" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(320px,100%),1fr))',gap:10}}>
+        <div style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'var(--r)',padding:10}}>
+          <div className="flex items-center justify-between" style={{marginBottom:8}}>
+            <span className="text-mono" style={{fontSize:10,color:'var(--text2)',letterSpacing:'.8px'}}>BASH / MAKE</span>
+            <CopyBtn text={cmdBashDry}/>
+          </div>
+          <div className="mono" style={{fontSize:11,color:'var(--text0)',marginBottom:6}}>$ {cmdBashDry}</div>
+          <div className="mono" style={{fontSize:11,color:'var(--text1)'}}>$ {cmdBashSmoke}</div>
+        </div>
+        <div style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'var(--r)',padding:10}}>
+          <div className="flex items-center justify-between" style={{marginBottom:8}}>
+            <span className="text-mono" style={{fontSize:10,color:'var(--text2)',letterSpacing:'.8px'}}>WINDOWS POWERSHELL</span>
+            <CopyBtn text={cmdPsDry}/>
+          </div>
+          <div className="mono" style={{fontSize:11,color:'var(--text0)',marginBottom:6,wordBreak:'break-word'}}>{cmdPsDry}</div>
+          <div className="mono" style={{fontSize:11,color:'var(--text1)',wordBreak:'break-word'}}>{cmdPsSmoke}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ══════════════════════════════════════
    ANALYZE PAGE
 ══════════════════════════════════════ */
@@ -450,10 +516,13 @@ function AnalyzePage(){
   const[logs,setLogs]=useState([]);
   const[sbomResult,setSbomResult]=useState(null);
   const[vulnResult,setVulnResult]=useState(null);
+  const[vulnScanner,setVulnScanner]=useState('grype');
   const[sevFilter,setSevFilter]=useState('All');
   const[compSearch,setCompSearch]=useState('');
   const[tab,setTab]=useState('components');
   const logRef=useRef(null);
+
+  useEffect(()=>{setSevFilter('All');},[vulnScanner]);
 
   function pickPreset(v){
     setRepoUrl(v);
@@ -553,24 +622,73 @@ function AnalyzePage(){
     });
   }
 
+  function parseTrivyVulns(raw){
+    const results=Array.isArray((raw||{}).Results)?raw.Results:[];
+    const out=[];
+    for(const block of results){
+      const vulns=Array.isArray(block.Vulnerabilities)?block.Vulnerabilities:[];
+      for(const v of vulns){
+        out.push({
+          id:String(v.VulnerabilityID||v.VulnerabilityId||v.ID||'UNKNOWN'),
+          sev:formatSeverity(v.Severity),
+          comp:String(v.PkgName||'(unknown)'),
+          ver:String(v.InstalledVersion||'-'),
+          fix:String(v.FixedVersion||'—')||'—',
+          desc:'',
+        });
+      }
+    }
+    return out;
+  }
+
+  function stripSbomMeta(raw){
+    if(!raw||typeof raw!=='object')return{};
+    const o={...raw};
+    delete o._meta;
+    return o;
+  }
+
+  async function fetchJsonOptional(url){
+    const res=await fetch(url);
+    const payload=await res.json().catch(()=>({}));
+    if(!res.ok)return{ok:false,status:res.status,message:payload.message||payload.status||String(res.status),data:payload};
+    return{ok:true,data:payload};
+  }
+
+  function computeAnalyzeStages({sourcePath,gen,sbomCore,grypeLoaded,trivyLoaded,valSum}){
+    const done=[];
+    if(sourcePath&&gen&&gen.status==='ok')done.push('build','generate');
+    const cx=valSum&&valSum.cyclonedx_schema;
+    const hp=valSum&&valSum.hoppr_ntia;
+    if((cx&&cx.pass===true)||(hp&&hp.pass===true)){
+      done.push('validate');
+    }else if(sourcePath&&gen&&gen.status==='ok'&&((cx&&cx.available)||(hp&&hp.available))){
+      done.push('validate');
+    }
+    if(sbomCore&&sbomCore.signature&&sbomCore.signature.value)done.push('sign');
+    if(grypeLoaded||trivyLoaded)done.push('scan');
+    if(sbomCore)done.push('report');
+    return done;
+  }
+
   async function runScan(){
-    if(!repoUrl){toast('Enter a repository URL first','err');return;}
+    if(!repoUrl){toast('Enter a local source path or repository URL','err');return;}
     setStatus('running');setDoneStages([]);setCurrentStage('');setLogs([]);
-    setSbomResult(null);setVulnResult(null);setTab('components');
-    const stages=['build','generate','sign','scan','report'];
-    const markStage=(stage)=>{setCurrentStage(stage);addLog('\n[STAGE '+(stages.indexOf(stage)+1)+'/5] '+stage.toUpperCase(),'cmd');};
-    const markDone=(stage)=>setDoneStages(d=>d.includes(stage)?d:[...d,stage]);
+    setSbomResult(null);setVulnResult(null);setTab('components');setVulnScanner('grype');
+    const stages=[...PIPELINE_STAGES];
+    const markStage=(stage)=>{setCurrentStage(stage);addLog('\n[STAGE '+(stages.indexOf(stage)+1)+'/'+stages.length+'] '+stage.toUpperCase(),'cmd');};
+    let gen=null;
 
     try{
       const sourcePath=sourcePathFromInput(repoUrl);
       const parsed=inferProjectFromInput(repoUrl);
       const qs=parsed.project?('?source=auto&provider='+encodeURIComponent(parsed.provider)+'&project='+encodeURIComponent(parsed.project)):'?source=local';
+      const reportSuffix=qs.includes('?')?('&'+qs.slice(1)):'';
 
       if(sourcePath){
         markStage('build');
         addLog('$ source_path='+sourcePath,'cmd');
-        addLog('Starting backend generate pipeline...','info');
-        markDone('build');
+        addLog('Starting backend generate pipeline (Syft, Trivy, Distro2SBOM, merge, validate, scan)…','info');
 
         markStage('generate');
         const payload={
@@ -581,42 +699,69 @@ function AnalyzePage(){
           mode:mode==='native'?'native':'container',
           container_runtime:mode==='podman'?'podman':(mode==='container'?'docker':'auto'),
         };
-        const gen=await apiJson('/api/generate',{
+        gen=await apiJson('/api/generate',{
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify(payload),
         });
+        if(gen.status==='error'){
+          throw new Error(gen.message||'SBOM generate pipeline failed');
+        }
         (String(gen.log||'').split(/\r?\n/).filter(Boolean).slice(-120)).forEach((line)=>{
           const low=line.toLowerCase();
           const type=low.includes('error')?'err':(line.includes('==>')?'cmd':'info');
           addLog(line,type);
         });
-        markDone('generate');markDone('sign');markDone('scan');markDone('report');
       }else{
-        addLog('No local source path detected; skipping /api/generate and loading latest unified reports.','warn');
+        addLog('No local source path — skipping POST /api/generate. Loading unified SBOM + reports (CI artifacts or last server run for this query).','warn');
       }
 
-      const [sbomRaw,grypeRaw]=await Promise.all([
-        apiJson('/api/sbom/unified'+qs),
-        apiJson('/api/report/unified?scanner=grype'+(qs.includes('?')?'&'+qs.slice(1):'')),
+      markStage('report');
+      const sbomRaw=await apiJson('/api/sbom/unified'+qs);
+      const [gRes,tRes,valRes]=await Promise.all([
+        fetchJsonOptional('/api/report/unified?scanner=grype'+reportSuffix),
+        fetchJsonOptional('/api/report/unified?scanner=trivy'+reportSuffix),
+        fetchJsonOptional('/api/validation-summary'+qs),
       ]);
 
-      const components=parseComponents(sbomRaw);
-      const matches=parseVulns(grypeRaw);
+      const sbomCore=stripSbomMeta(sbomRaw);
+      const components=parseComponents(sbomCore);
+      const grypeData=gRes.ok?gRes.data:null;
+      const trivyData=tRes.ok?tRes.data:null;
+      const grypeMatches=parseVulns(grypeData||{});
+      const trivyMatches=parseTrivyVulns(trivyData||{});
+      const grypeLoaded=gRes.ok;
+      const trivyLoaded=tRes.ok;
+
       setSbomResult({
         components,
-        timestamp:((sbomRaw.metadata||{}).timestamp||new Date().toISOString()),
+        timestamp:((sbomCore.metadata||{}).timestamp||new Date().toISOString()),
         target:repoUrl,
+        meta:sbomRaw._meta||null,
+        hasSignature:!!(sbomCore.signature&&sbomCore.signature.value),
+        signatureAlg:String((sbomCore.signature||{}).algorithm||''),
       });
       setVulnResult({
-        matches,
+        grype:{matches:grypeMatches,loadError:gRes.ok?null:(gRes.message||'Report unavailable')},
+        trivy:{matches:trivyMatches,loadError:tRes.ok?null:(tRes.message||'Report unavailable')},
+        evidence:valRes.ok?valRes.data:{},
         dbDate:new Date().toLocaleDateString(),
       });
+      setDoneStages(computeAnalyzeStages({
+        sourcePath,
+        gen,
+        sbomCore,
+        grypeLoaded,
+        trivyLoaded,
+        valSum:valRes.ok?valRes.data:null,
+      }));
+      if(trivyMatches.length>0&&grypeMatches.length===0)setVulnScanner('trivy');
+
       setCurrentStage('');
       setStatus('done');
-      const total=matches.length;
       const compCount=components.length;
-      toast(total===0?'✓ '+compCount+' components found — 0 CVEs detected':'⚠ '+compCount+' components · '+total+' CVEs found',total===0?'ok':'err');
+      const msg='✓ '+compCount+' components · Grype: '+grypeMatches.length+' · Trivy: '+trivyMatches.length;
+      toast((grypeMatches.length+trivyMatches.length)===0?msg+' (no CVEs)':msg, (grypeMatches.length+trivyMatches.length)===0?'ok':'err');
     }catch(err){
       addLog('ERROR: '+err.message,'err');
       setCurrentStage('');
@@ -631,13 +776,18 @@ function AnalyzePage(){
     return sbomResult.components.filter(c=>!q||c.name.toLowerCase().includes(q)||c.license.toLowerCase().includes(q));
   },[sbomResult,compSearch]);
 
+  const activeVulnMatches=useMemo(()=>{
+    if(!vulnResult)return[];
+    return vulnScanner==='grype'?vulnResult.grype.matches:vulnResult.trivy.matches;
+  },[vulnResult,vulnScanner]);
+
   const sevCounts=useMemo(()=>{
     if(!vulnResult)return{};
-    return vulnResult.matches.reduce((a,m)=>{a[m.sev]=(a[m.sev]||0)+1;return a;},{});
-  },[vulnResult]);
+    return activeVulnMatches.reduce((a,m)=>{a[m.sev]=(a[m.sev]||0)+1;return a;},{});
+  },[vulnResult,activeVulnMatches]);
 
   const maxSev=Math.max(...Object.values(sevCounts),1);
-  const filteredVulns=vulnResult?(sevFilter==='All'?vulnResult.matches:vulnResult.matches.filter(m=>m.sev===sevFilter)):[];
+  const filteredVulns=vulnResult?(sevFilter==='All'?activeVulnMatches:activeVulnMatches.filter(m=>m.sev===sevFilter)):[];
 
   return(
     <div className="page fade-in">
@@ -645,7 +795,7 @@ function AnalyzePage(){
       <div className="analyzer">
         <div className="analyzer-hd">
           <div className="analyzer-title">⚡ Analyze Any C/C++ Application</div>
-          <div className="analyzer-sub">Submit any C/C++ repository — the pipeline auto-detects components, generates a signed CycloneDX SBOM, and scans for vulnerabilities using Grype + Trivy.</div>
+          <div className="analyzer-sub">Use a <strong>local source path</strong> (e.g. after upload) to run the full generator on this server: Syft, Trivy, Distro2SBOM, CycloneDX merge, NTIA/Hoppr checks, then Grype and Trivy SBOM scans. Use a <strong>repository URL</strong> to load the latest unified SBOM and reports from CI or the last local run—no clone here. Signing appears when the SBOM JSON includes an embedded signature (for example from CI or a signing step).</div>
         </div>
         <div className="analyzer-body">
           {/* Preset */}
@@ -686,7 +836,7 @@ function AnalyzePage(){
             <button className={'scan-btn'+(status==='running'?' running':'')} onClick={runScan} disabled={status==='running'}>
               {status==='running'?<><Spin/> Pipeline Running…</>:'🔍 Scan Application'}
             </button>
-            {status!=='idle'&&<button className="btn btn-sm btn-red" onClick={()=>{setStatus('idle');setDoneStages([]);setCurrentStage('');setLogs([]);setSbomResult(null);setVulnResult(null);}}>✕ Reset</button>}
+            {status!=='idle'&&<button className="btn btn-sm btn-red" onClick={()=>{setStatus('idle');setDoneStages([]);setCurrentStage('');setLogs([]);setSbomResult(null);setVulnResult(null);setVulnScanner('grype');}}>✕ Reset</button>}
           </div>
           {/* Stage progress */}
           {status!=='idle'&&(
@@ -715,21 +865,23 @@ function AnalyzePage(){
               </div>
             </div>
           )}
+          <LocalRunPlaybook/>
         </div>
       </div>
 
       {/* Results */}
-      {status==='done'&&sbomResult&&(
+      {status==='done'&&sbomResult&&vulnResult&&(
         <>
           {/* Stat bar */}
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(120px,100%),1fr))',gap:10}}>
             {[
               {v:sbomResult.components.length,l:'Components',c:'var(--gold)'},
-              {v:vulnResult.matches.length,l:'CVEs Found',c:vulnResult.matches.length>0?'var(--red)':'var(--green)'},
+              {v:vulnResult.grype.matches.length,l:'Grype CVEs',c:vulnResult.grype.matches.length>0?'var(--red)':'var(--green)'},
+              {v:vulnResult.trivy.matches.length,l:'Trivy CVEs',c:vulnResult.trivy.matches.length>0?'var(--red)':'var(--green)'},
               {v:sevCounts.Critical||0,l:'Critical',c:'var(--red)'},
               {v:sevCounts.High||0,l:'High',c:'var(--amber)'},
               {v:sevCounts.Medium||0,l:'Medium',c:'#D29922'},
-              {v:(sevCounts.Low||0)+(sevCounts.Negligible||0),l:'Low',c:'var(--green)'},
+              {v:(sevCounts.Low||0)+(sevCounts.Negligible||0),l:'Low + Negligible',c:'var(--green)'},
             ].map(s=>(
               <div key={s.l} style={{background:'var(--bg1)',border:'1px solid var(--border)',borderRadius:'var(--r2)',padding:'14px 16px',position:'relative',overflow:'hidden'}}>
                 <div style={{position:'absolute',bottom:0,left:0,right:0,height:2,background:s.c}}/>
@@ -739,17 +891,51 @@ function AnalyzePage(){
             ))}
           </div>
 
+          {/* Provenance & compliance (server-side evidence when available) */}
+          <div className="card" style={{marginTop:10}}>
+            <div className="card-hd"><div className="card-title">📋 SBOM source & compliance</div></div>
+            <div className="card-body" style={{fontSize:12,color:'var(--text1)',lineHeight:1.65}}>
+              <div><span style={{color:'var(--text2)'}}>SBOM origin:</span> {sbomResult.meta?(sbomResult.meta.source||'—')+(sbomResult.meta.project?(' · '+sbomResult.meta.project):''):'Local file (no CI metadata on this response)'}</div>
+              <div><span style={{color:'var(--text2)'}}>Embedded signature:</span> {sbomResult.hasSignature?('Yes ('+(sbomResult.signatureAlg||'embedded')+')'):'Not present in this SBOM JSON'}</div>
+              <div><span style={{color:'var(--text2)'}}>CycloneDX CLI validate:</span>{' '}
+                {vulnResult.evidence&&vulnResult.evidence.cyclonedx_schema&&vulnResult.evidence.cyclonedx_schema.available?(
+                  <span>
+                    {vulnResult.evidence.cyclonedx_schema.pass===true?'Pass':vulnResult.evidence.cyclonedx_schema.pass===false?'Fail':'Unknown'}
+                    {' · '}{vulnResult.evidence.cyclonedx_schema.file}
+                    {vulnResult.evidence.cyclonedx_schema.source&&<span style={{color:'var(--text3)'}}>{' '}({vulnResult.evidence.cyclonedx_schema.source})</span>}
+                    {vulnResult.evidence.cyclonedx_schema.run_url&&<a className="hdr-link" style={{marginLeft:8}} href={vulnResult.evidence.cyclonedx_schema.run_url} target="_blank" rel="noreferrer">Run ↗</a>}
+                    {vulnResult.evidence.cyclonedx_schema.pipeline_url&&<a className="hdr-link" style={{marginLeft:8}} href={vulnResult.evidence.cyclonedx_schema.pipeline_url} target="_blank" rel="noreferrer">Pipeline ↗</a>}
+                    {vulnResult.evidence.cyclonedx_schema.artifacts_url&&<a className="hdr-link" style={{marginLeft:8}} href={vulnResult.evidence.cyclonedx_schema.artifacts_url} target="_blank" rel="noreferrer">Artifacts ↗</a>}
+                  </span>
+                ):'Not available (run generate locally, or use a repo URL so the server can read CI artifacts).'}
+              </div>
+              <div><span style={{color:'var(--text2)'}}>Hoppr NTIA profile:</span>{' '}
+                {vulnResult.evidence&&vulnResult.evidence.hoppr_ntia&&vulnResult.evidence.hoppr_ntia.available?(
+                  <span>
+                    {vulnResult.evidence.hoppr_ntia.pass===true?'Pass':vulnResult.evidence.hoppr_ntia.pass===false?'Fail':'Unknown'}
+                    {' · '}{vulnResult.evidence.hoppr_ntia.file}
+                    {vulnResult.evidence.hoppr_ntia.source&&<span style={{color:'var(--text3)'}}>{' '}({vulnResult.evidence.hoppr_ntia.source})</span>}
+                    {vulnResult.evidence.hoppr_ntia.run_url&&<a className="hdr-link" style={{marginLeft:8}} href={vulnResult.evidence.hoppr_ntia.run_url} target="_blank" rel="noreferrer">Run ↗</a>}
+                    {vulnResult.evidence.hoppr_ntia.pipeline_url&&<a className="hdr-link" style={{marginLeft:8}} href={vulnResult.evidence.hoppr_ntia.pipeline_url} target="_blank" rel="noreferrer">Pipeline ↗</a>}
+                    {vulnResult.evidence.hoppr_ntia.artifacts_url&&<a className="hdr-link" style={{marginLeft:8}} href={vulnResult.evidence.hoppr_ntia.artifacts_url} target="_blank" rel="noreferrer">Artifacts ↗</a>}
+                  </span>
+                ):'Not available (run generate locally, or use a repo URL so the server can read CI artifacts).'}
+              </div>
+              <div style={{fontSize:11,color:'var(--text3)',marginTop:6}}>Local <code style={{fontSize:10}}>reports/</code> take precedence. With <code style={{fontSize:10}}>source=auto</code> and a project, the backend scans GitHub Actions or GitLab job artifacts when local files are missing (tokens improve private repo access).</div>
+            </div>
+          </div>
+
           {/* Results panels */}
           <div className="grid-2">
             {/* Components / Vulns */}
             <div className="card">
               <div className="card-hd">
                 <div className="card-title">📦 Results</div>
-                <div className="flex gap-8">
+                <div className="flex gap-8" style={{flexWrap:'wrap'}}>
                   <button className={'btn btn-xs'+(tab==='components'?' btn-gold':'')} onClick={()=>setTab('components')}>Components ({sbomResult.components.length})</button>
                   <button className={'btn btn-xs'+(tab==='vulns'?' btn-gold':'')} onClick={()=>setTab('vulns')}>
-                    CVEs ({vulnResult.matches.length})
-                    {vulnResult.matches.length>0&&<span className="badge badge-red" style={{padding:'0 4px',fontSize:9,marginLeft:3}}>{vulnResult.matches.length}</span>}
+                    CVEs ({vulnResult.grype.matches.length+vulnResult.trivy.matches.length})
+                    {(vulnResult.grype.matches.length+vulnResult.trivy.matches.length)>0&&<span className="badge badge-red" style={{padding:'0 4px',fontSize:9,marginLeft:3}}>{vulnResult.grype.matches.length+vulnResult.trivy.matches.length}</span>}
                   </button>
                 </div>
               </div>
@@ -775,26 +961,42 @@ function AnalyzePage(){
                   </>
                 )}
                 {tab==='vulns'&&(
-                  vulnResult.matches.length===0
-                    ?<div className="empty"><div className="empty-icon">🛡️</div><div className="empty-msg" style={{color:'var(--green)',fontWeight:700}}>Zero CVEs Detected</div><div style={{fontSize:11,color:'var(--text2)'}}>Grype + Trivy both returned clean results.</div></div>
-                    :<div className="tbl-wrap">
-                      <table>
-                        <thead><tr><th>CVE ID</th><th>Severity</th><th>Component</th><th>Fix</th></tr></thead>
-                        <tbody>
-                          {filteredVulns.map((v,i)=>{
-                            const col=SEV_COL[v.sev]||'var(--text2)';
-                            return(
-                              <tr key={i}>
-                                <td><a href={'https://nvd.nist.gov/vuln/detail/'+v.id} target="_blank" rel="noreferrer" style={{color:'var(--teal)',fontFamily:'var(--mono)',fontSize:11}}>{v.id}</a></td>
-                                <td><span className="badge" style={{background:col+'20',color:col,border:'1px solid '+col+'40'}}>{v.sev}</span></td>
-                                <td className="mono" style={{fontSize:11}}>{v.comp} {v.ver}</td>
-                                <td className="mono" style={{fontSize:10,color:'var(--green)'}}>{v.fix||'—'}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                  <>
+                    <div className="flex gap-8" style={{marginBottom:10,flexWrap:'wrap'}}>
+                      <button type="button" className={'btn btn-xs'+(vulnScanner==='grype'?' btn-gold':'')} onClick={()=>setVulnScanner('grype')}>Grype ({vulnResult.grype.matches.length})</button>
+                      <button type="button" className={'btn btn-xs'+(vulnScanner==='trivy'?' btn-gold':'')} onClick={()=>setVulnScanner('trivy')}>Trivy ({vulnResult.trivy.matches.length})</button>
                     </div>
+                    {vulnResult[vulnScanner].loadError&&(
+                      <div className="empty">
+                        <div className="empty-icon">⚠️</div>
+                        <div className="empty-msg" style={{color:'var(--amber)',fontWeight:700}}>{vulnScanner==='grype'?'Grype':'Trivy'} report unavailable</div>
+                        <div style={{fontSize:11,color:'var(--text2)',fontFamily:'var(--mono)'}}>{vulnResult[vulnScanner].loadError}</div>
+                      </div>
+                    )}
+                    {!vulnResult[vulnScanner].loadError&&activeVulnMatches.length===0&&(
+                      <div className="empty"><div className="empty-icon">🛡️</div><div className="empty-msg" style={{color:'var(--green)',fontWeight:700}}>No CVEs in {vulnScanner==='grype'?'Grype':'Trivy'}</div><div style={{fontSize:11,color:'var(--text2)'}}>{vulnScanner==='grype'&&vulnResult.trivy.matches.length>0?'Switch to Trivy to see '+vulnResult.trivy.matches.length+' finding(s).':vulnScanner==='trivy'&&vulnResult.grype.matches.length>0?'Switch to Grype to see '+vulnResult.grype.matches.length+' finding(s).':'Both scanners reported zero for this SBOM.'}</div></div>
+                    )}
+                    {!vulnResult[vulnScanner].loadError&&activeVulnMatches.length>0&&(
+                      <div className="tbl-wrap">
+                        <table>
+                          <thead><tr><th>CVE ID</th><th>Severity</th><th>Component</th><th>Fix</th></tr></thead>
+                          <tbody>
+                            {filteredVulns.map((v,i)=>{
+                              const col=SEV_COL[v.sev]||'var(--text2)';
+                              return(
+                                <tr key={vulnScanner+'-'+i}>
+                                  <td><a href={'https://nvd.nist.gov/vuln/detail/'+encodeURIComponent(v.id)} target="_blank" rel="noreferrer" style={{color:'var(--teal)',fontFamily:'var(--mono)',fontSize:11}}>{v.id}</a></td>
+                                  <td><span className="badge" style={{background:col+'20',color:col,border:'1px solid '+col+'40'}}>{v.sev}</span></td>
+                                  <td className="mono" style={{fontSize:11}}>{v.comp} {v.ver}</td>
+                                  <td className="mono" style={{fontSize:10,color:'var(--green)'}}>{v.fix||'—'}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -802,15 +1004,17 @@ function AnalyzePage(){
             {/* Severity chart */}
             <div className="card">
               <div className="card-hd">
-                <div className="card-title">🔍 Severity</div>
+                <div className="card-title">🔍 Severity ({vulnScanner})</div>
                 {sevFilter!=='All'&&<button className="btn btn-xs btn-red" onClick={()=>setSevFilter('All')}>✕ Clear</button>}
               </div>
               <div className="card-body">
-                {vulnResult.matches.length===0
+                {vulnResult[vulnScanner].loadError
+                  ?<div style={{textAlign:'center',padding:'20px 8px',fontSize:12,color:'var(--text2)'}}>No chart — {vulnResult[vulnScanner].loadError}</div>
+                  :activeVulnMatches.length===0
                   ?<div style={{textAlign:'center',padding:'28px 0'}}>
                     <div style={{fontSize:40,marginBottom:10}}>🛡️</div>
-                    <div style={{fontFamily:'var(--mono)',color:'var(--green)',fontSize:14,fontWeight:700}}>ZERO CVEs — SYSTEM CLEAN</div>
-                    <div style={{fontSize:11,color:'var(--text2)',marginTop:4}}>Grype + Trivy · DB {vulnResult.dbDate}</div>
+                    <div style={{fontFamily:'var(--mono)',color:'var(--green)',fontSize:14,fontWeight:700}}>ZERO CVEs ({vulnScanner})</div>
+                    <div style={{fontSize:11,color:'var(--text2)',marginTop:4}}>Loaded {vulnScanner} report · {vulnResult.dbDate}</div>
                   </div>
                   :SEV_ORD.map(sev=>{
                     const count=sevCounts[sev]||0;
@@ -840,7 +1044,7 @@ function AnalyzePage(){
           <div className="card-body">
             <div className="empty">
               <div className="empty-icon">🎯</div>
-              <div className="empty-msg">Select a preset app or paste any C/C++ repository URL to begin automated SBOM generation and vulnerability scanning.</div>
+              <div className="empty-msg">Enter a server-local path to run full generation, or a repo URL to view the latest unified SBOM and vulnerability reports (CI or last run on this host).</div>
               <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center',marginTop:8}}>
                 {['NASA F Prime','ArduPilot','Wireshark','OpenSSL','Snort'].map(n=>(
                   <button key={n} className="btn btn-sm btn-gold" onClick={()=>{const p=PRESETS.find(x=>x.label.startsWith(n));if(p&&p.value)pickPreset(p.value);}}>{n}</button>
@@ -1058,7 +1262,7 @@ function DashboardPage({config,onConnect,onNav}){
                   </div>
                   {reportDownloadDiag&&<div style={{marginBottom:10,fontSize:10,fontFamily:'var(--mono)',color:'var(--text2)'}}>{reportDownloadDiag}</div>}
                   <StageFlow
-                    done={['success','passed','completed'].includes(latest.status)?['build','generate','sign','scan','report']:[]}
+                    done={['success','passed','completed'].includes(latest.status)?['build','generate','validate','sign','scan','report']:[]}
                     errors={['failed','failure'].includes(latest.status)?['scan']:[]}
                     stageJobs={stageJobsByKey}
                     selectedStage={selectedStage}
@@ -1198,7 +1402,7 @@ function PipelinePage({config,onConnect}){
               {launching?<><Spin/> Launching…</>:'▶ Launch'}
             </button>
           </div>
-          <div style={{marginTop:8,fontSize:10,fontFamily:'var(--mono)',color:'var(--text3)'}}>build → generate → sign → scan → report</div>
+          <div style={{marginTop:8,fontSize:10,fontFamily:'var(--mono)',color:'var(--text3)'}}>build → generate → validate → sign → scan → report</div>
         </div>
       </div>
 
