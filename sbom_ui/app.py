@@ -3188,7 +3188,26 @@ def get_report():
     if payload is None:
         return jsonify({"status": "error", "message": f"Report exists but is not valid JSON for scanner '{scanner}'"}), 500
     return jsonify(payload)
+@app.route("/api/report/download")
+def download_report():
+    scanner = (request.args.get("scanner") or "grype").strip().lower()
+    report_map = {
+        "grype": REPORT_DIR / "grype-report.json",
+        "trivy": REPORT_DIR / "trivy-sbom-report.json",
+    }
 
+    path = report_map.get(scanner)
+    if not path or not path.exists():
+        return jsonify({
+            "status": "error",
+            "message": f"No downloadable report found for scanner '{scanner}'"
+        }), 404
+
+    return send_from_directory(
+        str(path.parent),
+        path.name,
+        as_attachment=True
+    )
 
 @app.route("/api/report/unified")
 def get_unified_report():
