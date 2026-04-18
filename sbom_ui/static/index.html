@@ -639,7 +639,17 @@ function AnalyzePage(){
             {status!=='idle'&&<button className="btn btn-sm btn-red" onClick={()=>{setStatus('idle');setDoneStages([]);setCurrentStage('');setLogs([]);setSbomResult(null);setVulnResult(null);}}>✕ Reset</button>}
           </div>
           {/* Stage progress */}
-          {status!=='idle'&&<StageFlow current={currentStage} done={doneStages}/>}
+          {status!=='idle'&&(
+  <StageFlow
+    current={currentStage}
+    done={doneStages}
+    onStageClick={(stage) => {
+      if (stage === "report") {
+        window.open("/api/report/download?scanner=grype", "_blank");
+      }
+    }}
+  />
+)}
           {/* Log */}
           {logs.length>0&&(
             <div className="terminal">
