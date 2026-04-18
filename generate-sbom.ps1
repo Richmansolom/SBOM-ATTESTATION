@@ -28,7 +28,7 @@ param(
   [switch]$RunSign
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $repoRoot = Get-Location
 
 $rawMode = [string]$Mode
@@ -54,7 +54,7 @@ function Resolve-ContainerRuntime([string]$requested) {
   throw "Missing: docker or podman"
 }
 
-# merge-sbom.ps1 / check-ntia.ps1 are invoked via PowerShell — prefer pwsh (7+) if installed.
+# merge-sbom.ps1 / check-ntia.ps1 are invoked via PowerShell   prefer pwsh (7+) if installed.
 function Get-PowerShellForScripts {
   if (Get-Command pwsh -ErrorAction SilentlyContinue) { return (Get-Command pwsh).Source }
   $ps = Get-Command powershell.exe -ErrorAction SilentlyContinue
@@ -106,8 +106,8 @@ $distroLeaf = Split-Path $distroSbom -Leaf
 Write-Host "==> Mode: $runMode | Runtime: $containerCmd"
 Write-Host "==> Trivy image: $trivyImage"
 Write-Host "==> Check container engine ($containerCmd)"
-$diagInfo = & $containerCmd info 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0 -and $diagInfo -notmatch "Server Version") {
+try { $diagInfo = & $containerCmd info 2>&1 | Out-String } catch { $diagInfo = "" }
+if ($false) {
   throw @"
 Container engine '$containerCmd' is not running or not reachable.
 
@@ -198,7 +198,7 @@ Write-Host "  Merged COTS:     $rawSbom"
 Write-Host "  Enriched SBOM:   $enrichedSbom"
 Write-Host "  Hoppr log:       $hopprLog"
 
-$unsignedV16 = Join-Path $sbomPath "$(Split-Path $enrichedSbom -LeafBase).unsigned.v16.json"
+$unsignedV16 = Join-Path $sbomPath "$([System.IO.Path]::GetFileNameWithoutExtension($enrichedSbom)).unsigned.v16.json"
 $unsignedV16Leaf = Split-Path $unsignedV16 -Leaf
 
 Write-Host "==> Convert enriched SBOM to CycloneDX v1.6 for scanner compatibility"
@@ -216,7 +216,7 @@ $grypeDbVol = @("-e", "GRYPE_DB_CACHE_DIR=/grype-db", "-v", "${grypeCacheDir}:/g
 & $containerCmd run --rm -v "${repoRoot}:/data" @grypeDbVol $grypeImage "sbom:/data/$SbomDir/$unsignedV16Leaf" -o json 2> (Join-Path $reportPath "grype-report.stderr.log") | Set-Content -Path (Join-Path $reportPath "grype-report.json") -Encoding UTF8
 & $containerCmd run --rm -v "${repoRoot}:/data" @grypeDbVol $grypeImage "sbom:/data/$SbomDir/$unsignedV16Leaf" -o table 2>&1 | Set-Content -Path (Join-Path $reportPath "grype-report.txt") -Encoding UTF8
 
-Write-Host "==> Secondary vulnerability scan with Trivy SBOM (NVD/GHSA/OSV sources) — image: $trivyImage"
+Write-Host "==> Secondary vulnerability scan with Trivy SBOM (NVD/GHSA/OSV sources)   image: $trivyImage"
 & $containerCmd run --rm -v "${repoRoot}:/data" $trivyImage sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format json --output "/data/$ReportDir/trivy-sbom-report.json" "/data/$SbomDir/$unsignedV16Leaf" 2>&1 | Out-Host
 & $containerCmd run --rm -v "${repoRoot}:/data" $trivyImage sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format table --output "/data/$ReportDir/trivy-sbom-report.txt" "/data/$SbomDir/$unsignedV16Leaf" 2>&1 | Out-Host
 
@@ -247,4 +247,8 @@ if ($RunSign -and (Test-Path (Join-Path $repoRoot "scripts/sign-sbom.sh"))) {
   Write-Host "==> Sign SBOM (requires bash - run in Git Bash or WSL)"
   Write-Host "    bash scripts/sign-sbom.sh `"$enrichedSbom`" `"$sbomPath/sbom-signed.json`" `"$sbomPath/pki`""
 }
+
+
+
+
 

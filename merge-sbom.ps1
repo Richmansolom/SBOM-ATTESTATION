@@ -208,7 +208,7 @@ function Read-AppMetadataFile([string]$path) {
     '.json' { return Read-AppMetadataJson (Get-Content -Path $path -Raw -Encoding UTF8) }
     '.csv'  { return Read-AppMetadataCsv $path }
     '.xml'  { return Read-AppMetadataXml $path }
-    default { throw "Unsupported app metadata extension '$ext' for $path — use .json, .csv, or .xml" }
+    default { throw "Unsupported app metadata extension '$ext' for $path - use .json, .csv, or .xml" }
   }
 }
 
@@ -521,3 +521,4 @@ $sbom.dependencies = $newDeps
 $sbomJson = $sbom | ConvertTo-Json -Depth 40
 Write-Utf8NoBom -path $OutputSbom -content $sbomJson
 Write-Host "Enriched SBOM written to $OutputSbom"
+
