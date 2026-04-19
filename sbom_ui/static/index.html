@@ -509,6 +509,10 @@ const PRESETS=[
 
 function AnalyzePage(){
   const[repoUrl,setRepoUrl]=useState('');
+  const[localApps,setLocalApps]=useState([]);
+  const[localAppsLoading,setLocalAppsLoading]=useState(true);
+  const[localAppChoice,setLocalAppChoice]=useState('');
+  const[pickFolderBusy,setPickFolderBusy]=useState(false);
   const[appName,setAppName]=useState('');
   const[appVer,setAppVer]=useState('1.0.0');
   const[supplier,setSupplier]=useState('');
@@ -527,7 +531,39 @@ function AnalyzePage(){
 
   useEffect(()=>{setSevFilter('All');},[vulnScanner]);
 
+  useEffect(()=>{
+    fetch('/api/local-apps')
+      .then(r=>r.json())
+      .then(d=>{setLocalApps(Array.isArray(d.apps)?d.apps:[]);setLocalAppsLoading(false);})
+      .catch(()=>{setLocalApps([]);setLocalAppsLoading(false);});
+  },[]);
+
+  function pickLocalAppFolder(rel){
+    if(!rel){setLocalAppChoice('');return;}
+    setLocalAppChoice(rel);
+    setRepoUrl(rel);
+    const seg=String(rel).split('/').filter(Boolean);
+    const leaf=seg.length?seg[seg.length-1]:'app';
+    setAppName(String(leaf).replace(/[-_]+/g,' '));
+  }
+
+  async function browseLocalFolder(){
+    setPickFolderBusy(true);
+    try{
+      const res=await fetch('/api/pick-folder',{method:'POST'});
+      const d=await res.json().catch(()=>({}));
+      if(!res.ok)throw new Error(d.message||'Folder selection failed');
+      const p=String(d.source_path||'').replace(/\\/g,'/');
+      setRepoUrl(p);
+      setLocalAppChoice('');
+      if(d.detected_app_name)setAppName(d.detected_app_name);
+      toast('Folder selected — click Scan to run the pipeline','ok');
+    }catch(e){toast(e.message||'Browse failed','err');}
+    finally{setPickFolderBusy(false);}
+  }
+
   function pickPreset(v){
+    setLocalAppChoice('');
     setRepoUrl(v);
     if(v){
       const name=v.split('/').pop().replace(/[-_]/g,' ');
@@ -798,20 +834,44 @@ function AnalyzePage(){
       <div className="analyzer">
         <div className="analyzer-hd">
           <div className="analyzer-title">⚡ Analyze Any C/C++ Application</div>
-          <div className="analyzer-sub">Use a <strong>local source path</strong> (e.g. after upload) to run the full generator on this server: Syft, Trivy, Distro2SBOM, CycloneDX merge, NTIA/Hoppr checks, then Grype and Trivy SBOM scans. Use a <strong>repository URL</strong> to load the latest unified SBOM and reports from CI or the last local run—no clone here. Signing appears when the SBOM JSON includes an embedded signature (for example from CI or a signing step).</div>
+          <div className="analyzer-sub">Select a <strong>folder in this repo</strong> (e.g. <code style={{fontSize:11}}>example-app</code>, test samples, uploads) or <strong>browse</strong> any cloned project on disk to run the full pipeline. Or paste a <strong>repository URL</strong> to load unified SBOM/reports from CI or the last run on this host. Signing shows when the SBOM JSON includes an embedded signature.</div>
         </div>
         <div className="analyzer-body">
-          {/* Preset */}
+          {/* Local repo folders */}
           <div className="field">
-            <span className="flbl">Quick Select</span>
+            <span className="flbl">Local project (this repo or upload)</span>
+            <div className="flex gap-8" style={{flexWrap:'wrap',alignItems:'center'}}>
+              <select
+                className="finput"
+                style={{minWidth:Math.min(420,typeof window!=='undefined'?window.innerWidth-48:420)}}
+                disabled={localAppsLoading}
+                value={localAppChoice}
+                onChange={e=>pickLocalAppFolder(e.target.value)}
+              >
+                <option value="">{localAppsLoading?'Loading folders…':'— Select example-app, test-apps/…, or upload —'}</option>
+                {localApps.map(a=>(
+                  <option key={a.path} value={a.path}>
+                    {a.label}{a.has_app_metadata?' ✓ metadata':''}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="btn btn-sm" disabled={pickFolderBusy} onClick={browseLocalFolder}>
+                {pickFolderBusy?<><Spin/> Opening…</>:'📁 Browse folder…'}
+              </button>
+            </div>
+            <div style={{fontSize:10,color:'var(--text3)',marginTop:6}}>Browse uses a desktop folder picker (Windows). Choose a tree with C/C++ sources; <code style={{fontSize:9}}>app-metadata.json</code> is optional but recommended.</div>
+          </div>
+          {/* Remote URL presets */}
+          <div className="field">
+            <span className="flbl">Remote sample (URL only — no clone)</span>
             <select className="finput" onChange={e=>pickPreset(e.target.value)}>
               {PRESETS.map(p=><option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
           </div>
-          {/* URL */}
+          {/* Path */}
           <div className="field">
-            <span className="flbl">Local Source Path or Repo URL</span>
-            <input className="finput" value={repoUrl} onChange={e=>setRepoUrl(e.target.value)} placeholder="e.g. uploads/src-123/src/my-app or https://github.com/owner/repo"/>
+            <span className="flbl">Source path or repo URL</span>
+            <input className="finput" value={repoUrl} onChange={e=>{setRepoUrl(e.target.value);setLocalAppChoice('');}} placeholder="example-app · test-apps/app1 · .ui_uploads/… · or https://github.com/owner/repo"/>
           </div>
           {/* Meta */}
           <div className="meta-row">
@@ -839,7 +899,7 @@ function AnalyzePage(){
             <button className={'scan-btn'+(status==='running'?' running':'')} onClick={runScan} disabled={status==='running'}>
               {status==='running'?<><Spin/> Pipeline Running…</>:'🔍 Scan Application'}
             </button>
-            {status!=='idle'&&<button className="btn btn-sm btn-red" onClick={()=>{setStatus('idle');setDoneStages([]);setCurrentStage('');setLogs([]);setSbomResult(null);setVulnResult(null);setVulnScanner('grype');}}>✕ Reset</button>}
+            {status!=='idle'&&<button className="btn btn-sm btn-red" onClick={()=>{setStatus('idle');setDoneStages([]);setCurrentStage('');setLogs([]);setSbomResult(null);setVulnResult(null);setVulnScanner('grype');setLocalAppChoice('');}}>✕ Reset</button>}
           </div>
           {/* Stage progress */}
           {status!=='idle'&&(

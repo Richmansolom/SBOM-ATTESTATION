@@ -3146,6 +3146,64 @@ def validation_summary():
     return jsonify(out)
 
 
+@app.route("/api/local-apps")
+def list_local_apps():
+    """Folders under this repo for Analyze: example-app, test-apps/*, recent UI uploads."""
+    ensure_dirs()
+    apps = []
+    seen = set()
+
+    def add(rel, label):
+        rel = str(rel).replace("\\", "/").strip("/")
+        if not rel or rel in seen:
+            return
+        p = (REPO_ROOT / rel).resolve()
+        try:
+            p.relative_to(REPO_ROOT.resolve())
+        except ValueError:
+            return
+        if not p.is_dir():
+            return
+        seen.add(rel)
+        apps.append(
+            {
+                "path": rel,
+                "label": label,
+                "has_app_metadata": (p / "app-metadata.json").exists(),
+            }
+        )
+
+    add("example-app", "example-app — reference C++ demo")
+
+    test_root = REPO_ROOT / "test-apps"
+    if test_root.is_dir():
+        for child in sorted(test_root.iterdir(), key=lambda x: x.name.lower()):
+            if child.is_dir():
+                rel = f"test-apps/{child.name}".replace("\\", "/")
+                add(rel, rel)
+
+    upload_root = REPO_ROOT / ".ui_uploads"
+    if upload_root.is_dir():
+        candidates = [
+            d
+            for d in upload_root.iterdir()
+            if d.is_dir() and d.name.startswith("src-")
+        ]
+        candidates.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        for child in candidates[:15]:
+            src_dir = child / "src"
+            if not src_dir.is_dir():
+                continue
+            try:
+                picked = pick_source_root(src_dir)
+                rel = os.path.relpath(str(picked), str(REPO_ROOT)).replace("\\", "/")
+            except Exception:
+                rel = os.path.relpath(str(src_dir), str(REPO_ROOT)).replace("\\", "/")
+            add(rel, f"{child.name} (upload)")
+
+    return jsonify({"apps": apps})
+
+
 @app.route("/api/github")
 def github():
     return jsonify(get_github_snapshot())
