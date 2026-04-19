@@ -743,9 +743,13 @@ function AnalyzePage(){
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify(payload),
         });
-        const gen=await genRes.json().catch(()=>({}));
+        const genText=await genRes.text();
+        let gen=null;
+        try{gen=JSON.parse(genText);}catch(_){gen=null;}
+        if(!gen||typeof gen!=='object')gen={};
         if(!genRes.ok){
-          throw new Error(gen.message||gen.log||('Request failed: '+genRes.status));
+          const hint=(gen.message||gen.log||'').trim()||genText.trim().slice(0,600)||('HTTP '+genRes.status);
+          throw new Error(hint);
         }
         (String(gen.log||'').split(/\r?\n/).filter(Boolean).slice(-120)).forEach((line)=>{
           const low=line.toLowerCase();
