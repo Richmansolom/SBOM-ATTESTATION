@@ -2024,15 +2024,19 @@ def promote_upload_to_ci_app_dir(src_root: Path) -> Path:
 
 @app.after_request
 def add_no_cache_headers(response):
-    # Prevent stale cached JS/HTML so UI updates are immediately visible.
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    # Allow hosted frontends (e.g., GitHub Pages) to call this API.
-    response.headers["Access-Control-Allow-Origin"] = os.getenv("CORS_ALLOW_ORIGIN", "*")
-    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
-    # Include X-SBOM-TOKEN — browsers will not send custom headers on cross-origin fetches without this on preflight.
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,X-SBOM-TOKEN"
+    # Never let header tweaks fail the request (would bypass JSON error handlers and yield HTML 500).
+    try:
+        # Prevent stale cached JS/HTML so UI updates are immediately visible.
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        # Allow hosted frontends (e.g., GitHub Pages) to call this API.
+        response.headers["Access-Control-Allow-Origin"] = os.getenv("CORS_ALLOW_ORIGIN", "*")
+        response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+        # Include X-SBOM-TOKEN — browsers will not send custom headers on cross-origin fetches without this on preflight.
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,X-SBOM-TOKEN"
+    except Exception:
+        pass
     return response
 
 
@@ -2056,15 +2060,39 @@ def favicon():
 
 @app.errorhandler(Exception)
 def handle_unexpected_error(err):
-    # Keep normal HTTP behavior (404/405/etc.) for non-API routes.
-    if isinstance(err, HTTPException):
+    """API routes use HTTP 200 + JSON for fault bodies so reverse proxies (e.g. Render) do not replace JSON with HTML."""
+    try:
+        if isinstance(err, HTTPException):
+            if has_request_context() and (request.path or "").startswith("/api/"):
+                return jsonify({"status": "error", "message": err.description or str(err)}), int(err.code or 500)
+            return err
         if has_request_context() and (request.path or "").startswith("/api/"):
-            return jsonify({"status": "error", "message": err.description or str(err)}), int(err.code or 500)
-        return err
-    # Ensure API callers always receive JSON on unexpected server faults.
-    if has_request_context() and (request.path or "").startswith("/api/"):
-        return jsonify({"status": "error", "message": f"Internal server error: {err}"}), 500
-    return "Internal Server Error", 500
+            payload = _json_safe_for_api(
+                {
+                    "status": "error",
+                    "message": f"Internal server error: {err}",
+                    "exit_code": 1,
+                    "log": "",
+                }
+            )
+            return Response(
+                json.dumps(payload, ensure_ascii=False, default=str),
+                mimetype="application/json; charset=utf-8",
+                status=200,
+            )
+        return "Internal Server Error", 500
+    except Exception as wrap_err:
+        emergency = json.dumps(
+            {
+                "status": "error",
+                "message": f"Error while reporting failure: {wrap_err}",
+                "exit_code": 1,
+                "log": "",
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+        return Response(emergency, mimetype="application/json; charset=utf-8", status=200)
 
 
 def get_local_snapshot():
