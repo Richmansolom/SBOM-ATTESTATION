@@ -707,14 +707,14 @@ function AnalyzePage(){
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify(payload),
         });
-        if(gen.status==='error'){
-          throw new Error(gen.message||'SBOM generate pipeline failed');
-        }
         (String(gen.log||'').split(/\r?\n/).filter(Boolean).slice(-120)).forEach((line)=>{
           const low=line.toLowerCase();
           const type=low.includes('error')?'err':(line.includes('==>')?'cmd':'info');
           addLog(line,type);
         });
+        if(gen.status==='error'){
+          throw new Error(gen.message||'SBOM generate pipeline failed');
+        }
       }else{
         addLog('No local source path — skipping POST /api/generate. Loading unified SBOM + reports (CI artifacts or last server run for this query).','warn');
       }
