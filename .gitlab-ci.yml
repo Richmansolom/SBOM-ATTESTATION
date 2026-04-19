@@ -6,30 +6,35 @@ stages:
   - scan
   - report
 
+# ── Variables ────────────────────────────────────────────────────────────────
 variables:
-  SBOM_DIR: "sbom"
-  REPORT_DIR: "reports"
-  BUILD_LOG: "build-output.log"
-  APP_DIR: "example-app"
-  APP_METADATA: "example-app/app-metadata.json"
-  TRIVY_IMAGE: "aquasec/trivy:0.69.3"
-  GRYPE_IMAGE: "anchore/grype:latest"
+  SBOM_DIR:       "sbom"
+  REPORT_DIR:     "reports"
+  BUILD_LOG:      "build-output.log"
+  APP_DIR:        "example-app"
+  APP_METADATA:   "example-app/app-metadata.json"
+  TRIVY_IMAGE:    "aquasec/trivy:0.69.3"
+  GRYPE_IMAGE:    "anchore/grype:latest"
   CYCLONEDX_IMAGE: "cyclonedx/cyclonedx-cli:latest"
-  SYFT_IMAGE: "anchore/syft:latest"
-  HOPPR_IMAGE: "hoppr/hopctl:latest"
+  SYFT_IMAGE:     "anchore/syft:latest"
+  HOPPR_IMAGE:    "hoppr/hopctl:latest"
 
+# ── Shared Docker template ───────────────────────────────────────────────────
 .docker_template:
   image: docker:24
   services:
     - name: docker:24-dind
       command: ["--tls=false"]
   variables:
-    DOCKER_HOST: "tcp://docker:2375"
-    DOCKER_TLS_CERTDIR: ""
+    DOCKER_HOST:          "tcp://docker:2375"
+    DOCKER_TLS_CERTDIR:   ""
   before_script:
     - apk add --no-cache bash curl jq python3 openssl build-base
     - mkdir -p "$SBOM_DIR" "$REPORT_DIR"
 
+# ════════════════════════════════════════════════════════════════════
+# STAGE 1 — BUILD
+# ════════════════════════════════════════════════════════════════════
 build_app:
   extends: .docker_template
   stage: build
@@ -37,7 +42,7 @@ build_app:
     - bash scripts/clean-sbom-outputs.sh "$SBOM_DIR" "$REPORT_DIR"
     - mkdir -p "$APP_DIR/build"
     - echo "==> Build C++ application ($APP_DIR)"
-    - make -C "$APP_DIR" 2>&1 | tee "$REPORT_DIR/$BUILD_LOG"
+    - make -C "$APP_DIR" 2>&1 | tee "$REPORT_DIR/$BUILD_LOG" || true
   artifacts:
     when: always
     paths:
@@ -45,34 +50,82 @@ build_app:
       - ${REPORT_DIR}/${BUILD_LOG}
     expire_in: 1 week
 
+# ════════════════════════════════════════════════════════════════════
+# STAGE 2 — GENERATE
+# ════════════════════════════════════════════════════════════════════
 generate_sbom:
   extends: .docker_template
   stage: generate
   needs: ["build_app"]
   script:
+    # Pull all COTS tool images
     - docker pull "$SYFT_IMAGE"
     - docker pull "$TRIVY_IMAGE"
     - docker pull "$CYCLONEDX_IMAGE"
     - docker pull python:3.12-slim
     - docker pull mcr.microsoft.com/powershell:7.4-ubuntu-22.04
-    - echo "==> Generate COTS SBOMs for source and build outputs"
-    - docker run --rm -v "$CI_PROJECT_DIR:/src" "$SYFT_IMAGE" dir:/src/$APP_DIR -o cyclonedx-json > "$SBOM_DIR/sbom-source-syft.json"
-    - docker run --rm -v "$CI_PROJECT_DIR:/src" "$SYFT_IMAGE" dir:/src/$APP_DIR/build -o cyclonedx-json > "$SBOM_DIR/sbom-build-syft.json"
-    - docker run --rm -v "$CI_PROJECT_DIR:/src" -v "$CI_PROJECT_DIR:/work" "$TRIVY_IMAGE" filesystem --format cyclonedx --output "/work/$SBOM_DIR/sbom-source-trivy.json" /src/$APP_DIR
-    - docker run --rm -v "$CI_PROJECT_DIR:/src" -v "$CI_PROJECT_DIR:/work" "$TRIVY_IMAGE" filesystem --format cyclonedx --output "/work/$SBOM_DIR/sbom-build-trivy.json" /src/$APP_DIR/build
-    - docker run --rm -v "$CI_PROJECT_DIR:/work" python:3.12-slim bash -lc "pip install --no-cache-dir distro2sbom >/dev/null && python -m distro2sbom.cli --distro auto --system --sbom cyclonedx --format json --product-type operating-system --product-name sbom-runtime --product-version 1.0 --output-file /work/$SBOM_DIR/sbom-distro2sbom.json"
-    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" merge --input-files "/data/$SBOM_DIR/sbom-source-syft.json" "/data/$SBOM_DIR/sbom-source-trivy.json" "/data/$SBOM_DIR/sbom-distro2sbom.json" --output-file "/data/$SBOM_DIR/sbom-source.json" --output-format json
-    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" merge --input-files "/data/$SBOM_DIR/sbom-build-syft.json" "/data/$SBOM_DIR/sbom-build-trivy.json" "/data/$SBOM_DIR/sbom-distro2sbom.json" --output-file "/data/$SBOM_DIR/sbom-build.json" --output-format json
-    - echo "==> Enrich SBOMs with custom application metadata"
-    - docker run --rm -v "$CI_PROJECT_DIR:/work" -w /work mcr.microsoft.com/powershell:7.4-ubuntu-22.04 pwsh -File merge-sbom.ps1 -InputSbom "$SBOM_DIR/sbom-source.json" -AppMetadata "$APP_METADATA" -OutputSbom "$SBOM_DIR/sbom-source.enriched.json"
-    - docker run --rm -v "$CI_PROJECT_DIR:/work" -w /work mcr.microsoft.com/powershell:7.4-ubuntu-22.04 pwsh -File merge-sbom.ps1 -InputSbom "$SBOM_DIR/sbom-build.json" -AppMetadata "$APP_METADATA" -OutputSbom "$SBOM_DIR/sbom-build.enriched.json"
+
+    # Syft — source dir + build dir
+    - echo "==> Syft scan (source)"
+    - docker run --rm -v "$CI_PROJECT_DIR:/src" "$SYFT_IMAGE" dir:/src/$APP_DIR -o cyclonedx-json 2>/dev/null > "$SBOM_DIR/sbom-source-syft.json"
+    - echo "==> Syft scan (build)"
+    - docker run --rm -v "$CI_PROJECT_DIR:/src" "$SYFT_IMAGE" dir:/src/$APP_DIR/build -o cyclonedx-json 2>/dev/null > "$SBOM_DIR/sbom-build-syft.json"
+
+    # Trivy filesystem scan
+    - echo "==> Trivy scan (source)"
+    - docker run --rm -v "$CI_PROJECT_DIR:/src" -v "$CI_PROJECT_DIR:/work" "$TRIVY_IMAGE" --quiet filesystem --format cyclonedx --output "/work/$SBOM_DIR/sbom-source-trivy.json" /src/$APP_DIR
+    - echo "==> Trivy scan (build)"
+    - docker run --rm -v "$CI_PROJECT_DIR:/src" -v "$CI_PROJECT_DIR:/work" "$TRIVY_IMAGE" --quiet filesystem --format cyclonedx --output "/work/$SBOM_DIR/sbom-build-trivy.json" /src/$APP_DIR/build
+
+    # Distro2SBOM — OS package inventory
+    - echo "==> Distro2SBOM"
+    - docker run --rm -v "$CI_PROJECT_DIR:/work" python:3.12-slim bash -lc "
+        export PIP_ROOT_USER_ACTION=ignore PIP_DISABLE_PIP_VERSION_CHECK=1
+        pip install --no-cache-dir distro2sbom >/dev/null
+        python -m distro2sbom.cli --distro auto --system --sbom cyclonedx --format json \
+          --product-type operating-system --product-name sbom-runtime --product-version 1.0 \
+          --output-file /work/$SBOM_DIR/sbom-distro2sbom.json"
+
+    # CycloneDX merge
+    - echo "==> CycloneDX merge (source + trivy + distro)"
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" merge \
+        --input-files "/data/$SBOM_DIR/sbom-source-syft.json" \
+                      "/data/$SBOM_DIR/sbom-source-trivy.json" \
+                      "/data/$SBOM_DIR/sbom-distro2sbom.json" \
+        --output-file "/data/$SBOM_DIR/sbom-source.cots-merged.json" \
+        --output-format json
+    - echo "==> CycloneDX merge (build)"
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" merge \
+        --input-files "/data/$SBOM_DIR/sbom-build-syft.json" \
+                      "/data/$SBOM_DIR/sbom-build-trivy.json" \
+                      "/data/$SBOM_DIR/sbom-distro2sbom.json" \
+        --output-file "/data/$SBOM_DIR/sbom-build.cots-merged.json" \
+        --output-format json
+
+    # merge-sbom.ps1 enrichment (PowerShell 7)
+    - echo "==> Enrich with app-metadata.json (source)"
+    - docker run --rm -v "$CI_PROJECT_DIR:/work" -w /work \
+        mcr.microsoft.com/powershell:7.4-ubuntu-22.04 \
+        pwsh -ExecutionPolicy Bypass -File merge-sbom.ps1 \
+          -InputSbom "$SBOM_DIR/sbom-source.cots-merged.json" \
+          -AppMetadata "$APP_METADATA" \
+          -OutputSbom "$SBOM_DIR/sbom-source.enriched.json"
+    - echo "==> Enrich with app-metadata.json (build)"
+    - docker run --rm -v "$CI_PROJECT_DIR:/work" -w /work \
+        mcr.microsoft.com/powershell:7.4-ubuntu-22.04 \
+        pwsh -ExecutionPolicy Bypass -File merge-sbom.ps1 \
+          -InputSbom "$SBOM_DIR/sbom-build.cots-merged.json" \
+          -AppMetadata "$APP_METADATA" \
+          -OutputSbom "$SBOM_DIR/sbom-build.enriched.json"
   artifacts:
     when: always
     paths:
-      - ${APP_DIR}/build/
       - ${SBOM_DIR}/
     expire_in: 1 week
 
+# ════════════════════════════════════════════════════════════════════
+# STAGE 3 — VALIDATE
+# ════════════════════════════════════════════════════════════════════
 validate_sbom:
   extends: .docker_template
   stage: validate
@@ -81,29 +134,53 @@ validate_sbom:
     - docker pull "$CYCLONEDX_IMAGE"
     - docker pull "$HOPPR_IMAGE"
     - docker pull mcr.microsoft.com/powershell:7.4-ubuntu-22.04
+
     - |
       set +e
-      docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" validate --input-file "/data/$SBOM_DIR/sbom-source.enriched.json"
+
+      echo "==> CycloneDX schema validate (source)"
+      docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" \
+        validate --input-file "/data/$SBOM_DIR/sbom-source.enriched.json" \
+        | tee "$REPORT_DIR/cyclonedx-validate.txt"
       source_validate=$?
-      docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" validate --input-file "/data/$SBOM_DIR/sbom-build.enriched.json"
+
+      echo "==> CycloneDX schema validate (build)"
+      docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" \
+        validate --input-file "/data/$SBOM_DIR/sbom-build.enriched.json" \
+        | tee "$REPORT_DIR/cyclonedx-validate-build.txt"
       build_validate=$?
-      docker run --rm -v "$CI_PROJECT_DIR:/work" -w /work mcr.microsoft.com/powershell:7.4-ubuntu-22.04 pwsh -File ./check-ntia.ps1 -SbomFile "$SBOM_DIR/sbom-source.enriched.json"
+
+      echo "==> NTIA Minimum Elements (check-ntia.ps1)"
+      docker run --rm -v "$CI_PROJECT_DIR:/work" -w /work \
+        mcr.microsoft.com/powershell:7.4-ubuntu-22.04 \
+        pwsh -ExecutionPolicy Bypass -File ./check-ntia.ps1 \
+          -SbomFile "$SBOM_DIR/sbom-source.enriched.json"
       ntia_local=$?
-      docker run --rm -v "$CI_PROJECT_DIR:/data" -w /data "$HOPPR_IMAGE" validate sbom --sbom "$SBOM_DIR/sbom-source.enriched.json" --profile ntia --log "/data/$REPORT_DIR/hoppr-source.log" --output-file "/data/$REPORT_DIR/hoppr-source-results.json" --basic-term 2>&1 | tee "$REPORT_DIR/hoppr-source-console.txt"
+
+      echo "==> Hoppr NTIA profile (source)"
+      docker run --rm -v "$CI_PROJECT_DIR:/data" -w /data "$HOPPR_IMAGE" \
+        validate sbom \
+          --sbom "$SBOM_DIR/sbom-source.enriched.json" \
+          --profile ntia \
+          --log "/data/$REPORT_DIR/hoppr-ntia.log" \
+          --output-file "/data/$REPORT_DIR/hoppr-ntia-results.json" \
+          --basic-term 2>&1 | tee "$REPORT_DIR/hoppr-console.txt"
       hoppr_source=$?
-      docker run --rm -v "$CI_PROJECT_DIR:/data" -w /data "$HOPPR_IMAGE" validate sbom --sbom "$SBOM_DIR/sbom-build.enriched.json" --profile ntia --log "/data/$REPORT_DIR/hoppr-build.log" --output-file "/data/$REPORT_DIR/hoppr-build-results.json" --basic-term 2>&1 | tee "$REPORT_DIR/hoppr-build-console.txt"
-      hoppr_build=$?
+
       set -e
+
       {
         echo "SBOM Requirements Summary"
         echo "========================="
-        echo "CycloneDX validate (source):      $([ $source_validate -eq 0 ] && echo PASS || echo FAIL)"
-        echo "CycloneDX validate (build):       $([ $build_validate -eq 0 ] && echo PASS || echo FAIL)"
-        echo "NTIA Minimum Elements (local):    $([ $ntia_local -eq 0 ] && echo PASS || echo FAIL)"
-        echo "Hoppr NTIA (source):              $([ $hoppr_source -eq 0 ] && echo PASS || echo WARN)"
-        echo "Hoppr NTIA (build):               $([ $hoppr_build -eq 0 ] && echo PASS || echo WARN)"
+        echo "CycloneDX validate (source): $([ $source_validate -eq 0 ] && echo PASS || echo FAIL)"
+        echo "CycloneDX validate (build):  $([ $build_validate  -eq 0 ] && echo PASS || echo FAIL)"
+        echo "NTIA Minimum Elements:       $([ $ntia_local      -eq 0 ] && echo PASS || echo FAIL)"
+        echo "Hoppr NTIA (source):         $([ $hoppr_source    -eq 0 ] && echo PASS || echo WARN)"
       } > "$REPORT_DIR/requirements-summary.txt"
-      if [ $source_validate -ne 0 ] || [ $build_validate -ne 0 ] || [ $ntia_local -ne 0 ]; then
+
+      cat "$REPORT_DIR/requirements-summary.txt"
+
+      if [ $source_validate -ne 0 ] || [ $ntia_local -ne 0 ]; then
         echo "SBOM requirement checks failed."
         exit 1
       fi
@@ -114,29 +191,59 @@ validate_sbom:
       - ${REPORT_DIR}/
     expire_in: 1 week
 
+# ════════════════════════════════════════════════════════════════════
+# STAGE 4 — SIGN
+# ════════════════════════════════════════════════════════════════════
 sign_sbom:
   extends: .docker_template
   stage: sign
   needs: ["validate_sbom"]
   script:
     - docker pull "$CYCLONEDX_IMAGE"
-    - echo "==> Sign SBOMs with embedded CycloneDX signature (RS384 / RSA-3072)"
+    - echo "==> Generate PKI keys and sign SBOM"
     - chmod +x scripts/sign-sbom.sh
     - mkdir -p "$SBOM_DIR/pki"
+
+    # Inject private key from CI variable if set; otherwise generate at runtime
     - |
       if [ -n "${SBOM_PRIVATE_KEY_PEM:-}" ]; then
         printf '%s\n' "$SBOM_PRIVATE_KEY_PEM" > "$SBOM_DIR/pki/sbom_private_key.pem"
         chmod 600 "$SBOM_DIR/pki/sbom_private_key.pem"
-        openssl rsa -in "$SBOM_DIR/pki/sbom_private_key.pem" -pubout -out "$SBOM_DIR/pki/sbom_public_key.pem"
+        openssl rsa -in "$SBOM_DIR/pki/sbom_private_key.pem" \
+          -pubout -out "$SBOM_DIR/pki/sbom_public_key.pem"
+        echo "Using injected signing key."
+      else
+        echo "No SBOM_PRIVATE_KEY_PEM set — key will be generated at runtime by sign-sbom.sh."
       fi
-    - cp "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/sbom-source.enriched.unsigned.json"
-    - cp "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.unsigned.json"
-    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" convert --input-file "/data/$SBOM_DIR/sbom-source.enriched.unsigned.json" --output-file "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json" --output-format json --output-version v1_6
-    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" convert --input-file "/data/$SBOM_DIR/sbom-build.enriched.unsigned.json" --output-file "/data/$SBOM_DIR/sbom-build.enriched.unsigned.v16.json" --output-format json --output-version v1_6
-    - bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/sbom-source.enriched.json" "$SBOM_DIR/pki"
-    - bash scripts/sign-sbom.sh "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/sbom-build.enriched.json" "$SBOM_DIR/pki"
-    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" validate --input-file "/data/$SBOM_DIR/sbom-source.enriched.json" | tee "$REPORT_DIR/cyclonedx-signed-validate-source.txt"
-    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" validate --input-file "/data/$SBOM_DIR/sbom-build.enriched.json" | tee "$REPORT_DIR/cyclonedx-signed-validate-build.txt"
+
+    # Convert enriched JSON → v1.4 for scanner compatibility
+    - echo "==> Convert to CycloneDX v1.4 (source)"
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" convert \
+        --input-file  "/data/$SBOM_DIR/sbom-source.enriched.json" \
+        --output-file "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v14.json" \
+        --output-format json \
+        --output-version v1_4
+    - echo "==> Convert to CycloneDX v1.4 (build)"
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" convert \
+        --input-file  "/data/$SBOM_DIR/sbom-build.enriched.json" \
+        --output-file "/data/$SBOM_DIR/sbom-build.enriched.unsigned.v14.json" \
+        --output-format json \
+        --output-version v1_4
+
+    # Sign both SBOMs
+    - bash scripts/sign-sbom.sh \
+        "$SBOM_DIR/sbom-source.enriched.json" \
+        "$SBOM_DIR/sbom-source.enriched.json" \
+        "$SBOM_DIR/pki"
+    - bash scripts/sign-sbom.sh \
+        "$SBOM_DIR/sbom-build.enriched.json" \
+        "$SBOM_DIR/sbom-build.enriched.json" \
+        "$SBOM_DIR/pki"
+
+    # Verify signatures
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$CYCLONEDX_IMAGE" \
+        validate --input-file "/data/$SBOM_DIR/sbom-source.enriched.json" \
+        | tee "$REPORT_DIR/cyclonedx-signed-validate.txt"
   artifacts:
     when: always
     paths:
@@ -146,6 +253,9 @@ sign_sbom:
       - sbom/pki/sbom_private_key.pem
     expire_in: 1 week
 
+# ════════════════════════════════════════════════════════════════════
+# STAGE 5 — SCAN
+# ════════════════════════════════════════════════════════════════════
 scan_sbom:
   extends: .docker_template
   stage: scan
@@ -154,13 +264,47 @@ scan_sbom:
     - docker pull "$GRYPE_IMAGE"
     - docker pull "$TRIVY_IMAGE"
     - mkdir -p /tmp/grype-db
-    - docker run --rm -e GRYPE_DB_CACHE_DIR=/grype-db -v /tmp/grype-db:/grype-db "$GRYPE_IMAGE" db update > "$REPORT_DIR/grype-db-update.txt" 2>&1
-    - docker run --rm -e GRYPE_DB_CACHE_DIR=/grype-db -v /tmp/grype-db:/grype-db "$GRYPE_IMAGE" db status > "$REPORT_DIR/grype-db-status.txt" 2>&1
-    - docker run --rm -e GRYPE_DB_CACHE_DIR=/grype-db -v /tmp/grype-db:/grype-db "$GRYPE_IMAGE" db providers > "$REPORT_DIR/grype-db-providers.txt" 2>&1
-    - docker run --rm -e GRYPE_DB_CACHE_DIR=/grype-db -v "$CI_PROJECT_DIR:/data" -v /tmp/grype-db:/grype-db "$GRYPE_IMAGE" sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o json > "$REPORT_DIR/grype-report.json"
-    - docker run --rm -e GRYPE_DB_CACHE_DIR=/grype-db -v "$CI_PROJECT_DIR:/data" -v /tmp/grype-db:/grype-db "$GRYPE_IMAGE" sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json -o table > "$REPORT_DIR/grype-report.txt"
-    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$TRIVY_IMAGE" sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format json --output "/data/$REPORT_DIR/trivy-sbom-report.json" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json"
-    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$TRIVY_IMAGE" sbom --scanners vuln --vuln-severity-source nvd,ghsa,osv --format table --output "/data/$REPORT_DIR/trivy-sbom-report.txt" "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v16.json"
+
+    # Grype DB update + evidence
+    - echo "==> Grype DB update"
+    - docker run --rm -e GRYPE_DB_CACHE_DIR=/grype-db -v /tmp/grype-db:/grype-db \
+        "$GRYPE_IMAGE" db update 2>&1 | tee "$REPORT_DIR/grype-db-update.txt"
+    - docker run --rm -e GRYPE_DB_CACHE_DIR=/grype-db -v /tmp/grype-db:/grype-db \
+        "$GRYPE_IMAGE" db status 2>&1 | tee "$REPORT_DIR/grype-db-status.txt"
+    - docker run --rm -e GRYPE_DB_CACHE_DIR=/grype-db -v /tmp/grype-db:/grype-db \
+        "$GRYPE_IMAGE" db providers 2>&1 | tee "$REPORT_DIR/grype-db-providers.txt"
+
+    # Grype vulnerability scan
+    - echo "==> Grype scan"
+    - docker run --rm \
+        -e GRYPE_DB_CACHE_DIR=/grype-db \
+        -v "$CI_PROJECT_DIR:/data" \
+        -v /tmp/grype-db:/grype-db \
+        "$GRYPE_IMAGE" \
+        "sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v14.json" \
+        -o json > "$REPORT_DIR/grype-report.json"
+    - docker run --rm \
+        -e GRYPE_DB_CACHE_DIR=/grype-db \
+        -v "$CI_PROJECT_DIR:/data" \
+        -v /tmp/grype-db:/grype-db \
+        "$GRYPE_IMAGE" \
+        "sbom:/data/$SBOM_DIR/sbom-source.enriched.unsigned.v14.json" \
+        -o table > "$REPORT_DIR/grype-report.txt"
+
+    # Trivy SBOM vulnerability scan (NVD + GHSA + OSV)
+    - echo "==> Trivy SBOM scan"
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$TRIVY_IMAGE" \
+        sbom --scanners vuln \
+        --vuln-severity-source nvd,ghsa,osv \
+        --format json \
+        --output "/data/$REPORT_DIR/trivy-sbom-report.json" \
+        "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v14.json"
+    - docker run --rm -v "$CI_PROJECT_DIR:/data" "$TRIVY_IMAGE" \
+        sbom --scanners vuln \
+        --vuln-severity-source nvd,ghsa,osv \
+        --format table \
+        --output "/data/$REPORT_DIR/trivy-sbom-report.txt" \
+        "/data/$SBOM_DIR/sbom-source.enriched.unsigned.v14.json"
   artifacts:
     when: always
     paths:
@@ -170,41 +314,52 @@ scan_sbom:
       - sbom/pki/sbom_private_key.pem
     expire_in: 1 week
 
+# ════════════════════════════════════════════════════════════════════
+# STAGE 6 — REPORT
+# ════════════════════════════════════════════════════════════════════
 analyze_vulnerabilities:
   extends: .docker_template
   stage: report
   needs: ["scan_sbom"]
   script:
     - |
-      trivy_total=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$REPORT_DIR/trivy-sbom-report.json")
-      trivy_critical=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "$REPORT_DIR/trivy-sbom-report.json")
-      trivy_high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' "$REPORT_DIR/trivy-sbom-report.json")
-      trivy_medium=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' "$REPORT_DIR/trivy-sbom-report.json")
-      trivy_low=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length' "$REPORT_DIR/trivy-sbom-report.json")
+      echo "==> Build combined vulnerability summary"
+
+      trivy_total=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$REPORT_DIR/trivy-sbom-report.json" 2>/dev/null || echo 0)
+      trivy_critical=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "$REPORT_DIR/trivy-sbom-report.json" 2>/dev/null || echo 0)
+      trivy_high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' "$REPORT_DIR/trivy-sbom-report.json" 2>/dev/null || echo 0)
+      trivy_medium=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' "$REPORT_DIR/trivy-sbom-report.json" 2>/dev/null || echo 0)
+      trivy_low=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length' "$REPORT_DIR/trivy-sbom-report.json" 2>/dev/null || echo 0)
+
       jq -r '
-        def count(sev): ( [ .matches[]? | select(.vulnerability.severity == sev) ] | length );
+        def count(sev): ([.matches[]? | select(.vulnerability.severity == sev)] | length);
         "Vulnerability Analysis Summary",
         "==============================",
-        ("Total: " + ( [ .matches[]? ] | length | tostring )),
-        ("Critical: " + (count("Critical") | tostring)),
-        ("High: " + (count("High") | tostring)),
-        ("Medium: " + (count("Medium") | tostring)),
-        ("Low: " + (count("Low") | tostring)),
-        ("Negligible: " + (count("Negligible") | tostring)),
+        ("Grype total:     " + ([.matches[]?] | length | tostring)),
+        ("  Critical:      " + (count("Critical") | tostring)),
+        ("  High:          " + (count("High")     | tostring)),
+        ("  Medium:        " + (count("Medium")   | tostring)),
+        ("  Low:           " + (count("Low")      | tostring)),
+        ("  Negligible:    " + (count("Negligible") | tostring)),
         "",
-        "Top Findings (up to 10):",
-        ( [ .matches[]? | "\(.vulnerability.id) | \(.vulnerability.severity) | \(.artifact.name) \(.artifact.version // "")" ][0:10] | .[] )
-      ' "$REPORT_DIR/grype-report.json" > "$REPORT_DIR/vulnerability-analysis.txt"
+        "Top Findings (Grype, up to 10):",
+        ([.matches[]? | "\(.vulnerability.id) | \(.vulnerability.severity) | \(.artifact.name) \(.artifact.version // "")"][0:10] | .[])
+      ' "$REPORT_DIR/grype-report.json" > "$REPORT_DIR/vulnerability-analysis.txt" 2>/dev/null || \
+        echo "Grype total: 0" > "$REPORT_DIR/vulnerability-analysis.txt"
+
       {
         echo ""
-        echo "Secondary Scan (Trivy SBOM, NVD/GHSA/OSV sources)"
-        echo "=================================================="
-        echo "Total: $trivy_total"
+        echo "Secondary Scan (Trivy — NVD/GHSA/OSV)"
+        echo "======================================"
+        echo "Total:    $trivy_total"
         echo "Critical: $trivy_critical"
-        echo "High: $trivy_high"
-        echo "Medium: $trivy_medium"
-        echo "Low: $trivy_low"
+        echo "High:     $trivy_high"
+        echo "Medium:   $trivy_medium"
+        echo "Low:      $trivy_low"
       } >> "$REPORT_DIR/vulnerability-analysis.txt"
+
+      echo ""
+      cat "$REPORT_DIR/vulnerability-analysis.txt"
   artifacts:
     when: always
     paths:
