@@ -5,7 +5,8 @@
     plan: free
     buildCommand: pip install -r sbom_ui/requirements.txt
     # Single worker: Render free tier has little RAM; two workers duplicate Python memory and often OOM.
-    startCommand: gunicorn --chdir sbom_ui app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    # Image pulls + SBOM merge can exceed 120s on cold starts; avoid worker SIGKILL mid-pipeline.
+    startCommand: gunicorn --chdir sbom_ui app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 300
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION

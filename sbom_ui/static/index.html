@@ -738,11 +738,15 @@ function AnalyzePage(){
           mode:mode==='native'?'native':'container',
           container_runtime:mode==='podman'?'podman':(mode==='container'?'docker':'auto'),
         };
-        gen=await apiJson('/api/generate',{
+        const genRes=await fetch('/api/generate',{
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify(payload),
         });
+        const gen=await genRes.json().catch(()=>({}));
+        if(!genRes.ok){
+          throw new Error(gen.message||gen.log||('Request failed: '+genRes.status));
+        }
         (String(gen.log||'').split(/\r?\n/).filter(Boolean).slice(-120)).forEach((line)=>{
           const low=line.toLowerCase();
           const type=low.includes('error')?'err':(line.includes('==>')?'cmd':'info');

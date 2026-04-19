@@ -1,6 +1,7 @@
 import copy
 import json
 import io
+import math
 import os
 import platform
 import re
@@ -17,7 +18,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
-from flask import Flask, has_request_context, jsonify, request, send_from_directory
+from flask import Flask, Response, has_request_context, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from metadata_parser import app_metadata_to_json_bytes, parse_app_metadata_bytes
@@ -118,6 +119,29 @@ def run_cmd_stream(cmd, on_output=None, env_extra=None):
             except Exception:
                 pass
     return proc.returncode, "".join(chunks)
+
+
+def _json_safe_for_api(obj):
+    """Ensure values are JSON-serializable so Flask never 500s on jsonify."""
+    if obj is None or isinstance(obj, (str, bool)):
+        return obj
+    if isinstance(obj, int):
+        return obj
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {str(k): _json_safe_for_api(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe_for_api(v) for v in obj]
+    return str(obj)
 
 
 def iso_duration_seconds(started_at, completed_at):
@@ -1456,8 +1480,6 @@ def write_osv_vuln_reports_from_sbom(sbom_path):
 
 
 def run_generate_pipeline(body, log_callback=None):
-    ensure_dirs()
-    clear_previous_build_artifacts()
     body = body or {}
 
     source_path = body.get("source_path")
@@ -1469,6 +1491,9 @@ def run_generate_pipeline(body, log_callback=None):
         }
 
     try:
+        ensure_dirs()
+        clear_previous_build_artifacts()
+
         source_dir = (REPO_ROOT / source_path).resolve()
         if not source_dir.exists():
             return {
@@ -1599,10 +1624,14 @@ def run_generate_pipeline(body, log_callback=None):
                 "REPO_ROOT": str(REPO_ROOT),
                 "SOURCE_PATH": str(Path(source_rel).as_posix()),
                 "APP_METADATA_PATH": str(Path(app_meta_rel).as_posix()),
+                "PIPELINE_MODE": "container" if mode == "container" else "native",
+                "IMAGE_REF": (os.getenv("SBOM_IMAGE_REF") or "sbom-demo-app:1.0").strip()
+                or "sbom-demo-app:1.0",
             }
             if log_callback:
                 log_callback(
-                    "==> Docker CI-parity pipeline (scripts/docker-native-sbom.sh) — same tools as GitLab CI\n"
+                    "==> Docker CI-parity pipeline (scripts/docker-native-sbom.sh) — "
+                    f"mode={env_extra['PIPELINE_MODE']} (Syft, Trivy, Distro2SBOM, merge, validate, scan)\n"
                 )
             code, output = run_cmd_stream(
                 [bash_bin, str(docker_script)],
@@ -3216,8 +3245,24 @@ def dashboard():
 
 @app.route("/api/generate", methods=["POST"])
 def generate():
-    result = run_generate_pipeline(request.get_json(silent=True) or {})
-    return jsonify(result)
+    try:
+        result = run_generate_pipeline(request.get_json(silent=True) or {})
+        safe = _json_safe_for_api(result)
+        return Response(
+            json.dumps(safe),
+            mimetype="application/json",
+            status=200,
+        )
+    except Exception as exc:
+        payload = _json_safe_for_api(
+            {
+                "status": "error",
+                "message": str(exc),
+                "exit_code": 1,
+                "log": "",
+            }
+        )
+        return Response(json.dumps(payload), mimetype="application/json", status=500)
 
 
 @app.route("/api/local-run/start", methods=["POST"])
