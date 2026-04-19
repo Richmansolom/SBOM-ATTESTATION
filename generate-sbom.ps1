@@ -129,6 +129,10 @@ Write-Host "==> Pull COTS SBOM tool images (Syft, Trivy, CycloneDX, Hoppr)"
 
 if ($runMode -eq "container") {
   $appDir = Join-Path $repoRoot $SourcePath
+  $dockerfilePath = Join-Path $appDir "Dockerfile"
+  if (-not (Test-Path $dockerfilePath)) {
+    throw "Container mode requires a Dockerfile in '$SourcePath'. Add one (see example-app/Dockerfile) or use -Mode native."
+  }
   $image = "${ImageName}:${ImageTag}"
   $imageTar = Join-Path $sbomPath "image.tar"
   Write-Host "==> Build image: $image (from $SourcePath)"
