@@ -3245,24 +3245,40 @@ def dashboard():
 
 @app.route("/api/generate", methods=["POST"])
 def generate():
+    """Always HTTP 200 + JSON so proxies and fetch() never drop the body on synthetic 'HTTP errors'."""
     try:
         result = run_generate_pipeline(request.get_json(silent=True) or {})
         safe = _json_safe_for_api(result)
-        return Response(
-            json.dumps(safe),
-            mimetype="application/json",
-            status=200,
-        )
+        try:
+            body = json.dumps(safe, ensure_ascii=False, default=str)
+        except (TypeError, ValueError) as ser_exc:
+            body = json.dumps(
+                _json_safe_for_api(
+                    {
+                        "status": "error",
+                        "message": f"Could not serialize pipeline result: {ser_exc}",
+                        "exit_code": 1,
+                        "log": (str(safe.get("log") or ""))[:8000],
+                    }
+                ),
+                ensure_ascii=False,
+                default=str,
+            )
+        return Response(body, mimetype="application/json; charset=utf-8", status=200)
     except Exception as exc:
         payload = _json_safe_for_api(
             {
                 "status": "error",
-                "message": str(exc),
+                "message": str(exc) or "generate pipeline crashed",
                 "exit_code": 1,
                 "log": "",
             }
         )
-        return Response(json.dumps(payload), mimetype="application/json", status=500)
+        return Response(
+            json.dumps(payload, ensure_ascii=False, default=str),
+            mimetype="application/json; charset=utf-8",
+            status=200,
+        )
 
 
 @app.route("/api/local-run/start", methods=["POST"])
