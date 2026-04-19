@@ -1,5 +1,8 @@
 {
   "name": "app1",
   "version": "1.0.0",
-  "description": "Test C++ application using httplib"
+  "description": "Test C++ application using httplib",
+  "supplier": {
+    "name": "Byte Masters"
+  }
 }
