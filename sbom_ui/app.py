@@ -121,6 +121,49 @@ def run_cmd_stream(cmd, on_output=None, env_extra=None):
     return proc.returncode, "".join(chunks)
 
 
+def _container_engine_reachable_for_mode(container_runtime: str):
+    """
+    Preflight for container SBOM builds. Returns (ok, engine_name_or_empty, detail_message).
+    Hosted platforms (e.g. Render web) usually have no Docker daemon — fail fast with a clear reason
+    instead of hanging until the proxy returns an HTML 500.
+    """
+    runtime = (container_runtime or "auto").strip().lower()
+    if runtime not in ("auto", "docker", "podman"):
+        runtime = "auto"
+    order = ["docker", "podman"] if runtime == "auto" else [runtime]
+    last = ""
+    for name in order:
+        bin_path = shutil.which(name)
+        if not bin_path:
+            last = f"'{name}' not found on PATH."
+            continue
+        try:
+            proc = subprocess.run(
+                [bin_path, "info"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=18,
+                shell=False,
+            )
+            if proc.returncode == 0:
+                return True, name, ""
+            tail = ((proc.stderr or "") + (proc.stdout or "")).strip()[-1200:]
+            last = f"{name} is installed but not usable (exit {proc.returncode}). {tail}"
+        except subprocess.TimeoutExpired:
+            last = f"{name} info timed out (daemon may be stopped)."
+        except OSError as exc:
+            last = f"{name}: {exc}"
+    hint = ""
+    if os.getenv("RENDER"):
+        hint = (
+            " Render web services do not provide a Docker/Podman engine to this process — "
+            "use Native build mode here, or run container mode on your laptop/CI with Docker Desktop."
+        )
+    return False, "", (last or "No container engine available.") + hint
+
+
 def _json_safe_for_api(obj):
     """Ensure values are JSON-serializable so Flask never 500s on jsonify."""
     if obj is None or isinstance(obj, (str, bool)):
@@ -1550,6 +1593,26 @@ def run_generate_pipeline(body, log_callback=None):
         runtime = str(body.get("container_runtime") or "auto").strip().lower()
         if runtime not in ("auto", "docker", "podman"):
             runtime = "auto"
+
+        if mode == "container":
+            ok_eng, eng_name, eng_detail = _container_engine_reachable_for_mode(runtime)
+            if not ok_eng:
+                _cleanup_temp_metadata()
+                source_diag.update(
+                    {
+                        "execution_path": "container-preflight",
+                        "status": "error",
+                        "container_engine": eng_name or None,
+                    }
+                )
+                write_source_diagnostics(source_diag)
+                return {
+                    "status": "error",
+                    "message": "Container mode needs a working Docker or Podman daemon.",
+                    "log": eng_detail,
+                    "exit_code": 1,
+                    "source_diagnostics": source_diag,
+                }
 
         pwsh_cmd = shutil.which("pwsh") or shutil.which("powershell")
         if pwsh_cmd:
