@@ -748,7 +748,11 @@ function AnalyzePage(){
         try{gen=JSON.parse(genText);}catch(_){gen=null;}
         if(!gen||typeof gen!=='object')gen={};
         if(!genRes.ok){
-          const hint=(gen.message||gen.log||'').trim()||genText.trim().slice(0,600)||('HTTP '+genRes.status);
+          const raw=genText.trim().slice(0,800);
+          const hint=(gen.message||gen.log||'').trim()||raw||('HTTP '+genRes.status);
+          if(/<html[\s>]/i.test(hint)||/<html[\s>]/i.test(raw)){
+            throw new Error('Server returned an HTML error page instead of JSON (often a proxy in front of the API). Deploy the latest API or check host logs. Status '+genRes.status+'.');
+          }
           throw new Error(hint);
         }
         (String(gen.log||'').split(/\r?\n/).filter(Boolean).slice(-120)).forEach((line)=>{
