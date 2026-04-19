@@ -36,6 +36,9 @@ const generateBtn = document.getElementById("generateBtn");
 const signBtn = document.getElementById("signBtn");
 const scanBtn = document.getElementById("scanBtn");
 const refreshBtn = document.getElementById("refreshBtn");
+let currentSourcePath = "";
+let currentAppMetadataPath = "";
+let currentAppName = "";
 
 function setButtonsDisabled(disabled) {
   [generateBtn, signBtn, scanBtn, refreshBtn].forEach((btn) => {
@@ -199,7 +202,20 @@ async function runAction(name, endpoint, payload = null) {
   }
 }
 
-generateBtn.addEventListener("click", () => runAction("Generate", "/api/generate", { mode: modeSelect.value }));
+generateBtn.addEventListener("click", () => {
+  if (!currentSourcePath) {
+    appendLog("ERROR: No source path. Upload or select an app first.");
+    return;
+  }
+
+  runAction("Generate", "/api/generate", {
+    source_path: currentSourcePath,
+    app_metadata_path: currentAppMetadataPath || "",
+    app_name: currentAppName || "",
+    mode: modeSelect.value,
+    container_runtime: "auto"
+  });
+});
 signBtn.addEventListener("click", () => runAction("Sign", "/api/sign"));
 scanBtn.addEventListener("click", () => runAction("Scan", "/api/scan"));
 refreshBtn.addEventListener("click", async () => {
@@ -254,4 +270,9 @@ if (utcClock) {
   } catch (err) {
     appendLog(`ERROR: ${err.message}`);
   }
+  function setCurrentAppFromResponse(data) {
+  currentSourcePath = data.source_path || "";
+  currentAppMetadataPath = data.app_metadata_path || "";
+  currentAppName = data.detected_app_name || data.app_name || "";
+}
 })();
