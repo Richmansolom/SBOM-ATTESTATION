@@ -79,12 +79,15 @@ generate_sbom:
 
     # Distro2SBOM — OS package inventory
     - echo "==> Distro2SBOM"
-    - docker run --rm -v "$CI_PROJECT_DIR:/work" python:3.12-slim bash -lc "
-        export PIP_ROOT_USER_ACTION=ignore PIP_DISABLE_PIP_VERSION_CHECK=1
+    - |
+      docker run --rm -v "$CI_PROJECT_DIR:/work" python:3.12-slim sh -euc '
+        export PIP_ROOT_USER_ACTION=ignore
+        export PIP_DISABLE_PIP_VERSION_CHECK=1
         pip install --no-cache-dir distro2sbom >/dev/null
         python -m distro2sbom.cli --distro auto --system --sbom cyclonedx --format json \
           --product-type operating-system --product-name sbom-runtime --product-version 1.0 \
-          --output-file /work/$SBOM_DIR/sbom-distro2sbom.json"
+          --output-file /work/'"$SBOM_DIR"'/sbom-distro2sbom.json
+      '
 
     # CycloneDX merge
     - echo "==> CycloneDX merge (source + trivy + distro)"
@@ -330,6 +333,7 @@ analyze_vulnerabilities:
       trivy_high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' "$REPORT_DIR/trivy-sbom-report.json" 2>/dev/null || echo 0)
       trivy_medium=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' "$REPORT_DIR/trivy-sbom-report.json" 2>/dev/null || echo 0)
       trivy_low=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length' "$REPORT_DIR/trivy-sbom-report.json" 2>/dev/null || echo 0)
+
 
       jq -r '
         def count(sev): ([.matches[]? | select(.vulnerability.severity == sev)] | length);
