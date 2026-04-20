@@ -777,6 +777,7 @@ function AnalyzePage(){
           container_runtime:mode==='podman'?'podman':(mode==='container'?'docker':'auto'),
         };
         let usedAsyncLocalRun=false;
+        let asyncStartAccepted=false;
         try{
           const startRes=await fetch('/api/local-run/start',{
             method:'POST',
@@ -788,6 +789,7 @@ function AnalyzePage(){
           try{start=JSON.parse(startTxt);}catch(_){start=null;}
           if(startRes.ok&&start&&start.status==='ok'&&start.id){
             usedAsyncLocalRun=true;
+            asyncStartAccepted=true;
             const runId=String(start.id);
             addLog('Background run started: '+runId,'info');
             const startedMs=Date.now();
@@ -795,7 +797,7 @@ function AnalyzePage(){
             let lastStatus='';
             while(true){
               await new Promise(r=>setTimeout(r,2000));
-              const listRes=await fetch('/api/local-runs');
+              const listRes=await fetch('/api/local-runs?id='+encodeURIComponent(runId)+'&log_tail=250000');
               const listTxt=await listRes.text();
               let runs=[];
               try{runs=JSON.parse(listTxt);}catch(_){runs=[];}
@@ -841,7 +843,10 @@ function AnalyzePage(){
               }
             }
           }
-        }catch(_pollErr){
+        }catch(pollErr){
+          if(asyncStartAccepted){
+            throw pollErr;
+          }
           usedAsyncLocalRun=false;
         }
         if(!usedAsyncLocalRun){

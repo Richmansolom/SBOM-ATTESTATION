@@ -3398,8 +3398,20 @@ def start_local_run():
 
 @app.route("/api/local-runs")
 def list_local_runs():
+    run_id = (request.args.get("id") or "").strip()
+    log_tail = request.args.get("log_tail", type=int)
+
+    def _trim_run_payload(run):
+        item = dict(run or {})
+        if isinstance(log_tail, int) and log_tail >= 0:
+            item["log"] = str(item.get("log") or "")[-log_tail:]
+        return item
+
     with LOCAL_RUNS_LOCK:
-        runs = list(LOCAL_RUNS.values())
+        if run_id:
+            run = LOCAL_RUNS.get(run_id)
+            return jsonify([_trim_run_payload(run)] if run else [])
+        runs = [_trim_run_payload(run) for run in LOCAL_RUNS.values()]
     runs.sort(key=lambda r: (r.get("created_at") or ""), reverse=True)
     return jsonify(runs[:30])
 
