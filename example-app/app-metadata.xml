@@ -14,15 +14,20 @@
     <Component Ref="pkg:generic/scheduler-process@1.0.0" Name="Scheduler Process" Type="library" Version="1.0.0"
       Description="Synthetic process models and random workload generation for scheduling experiments."
       License="MIT" SourceFile="example-app/src/scheduler/process.cpp" />
+    <Component Ref="pkg:generic/scheduler-core@1.0.0" Name="Scheduler Core" Type="library" Version="1.0.0"
+      Description="Shared orchestration layer for process scheduling state and timeline coordination."
+      License="MIT" SourceFile="example-app/src/scheduler/process.cpp">
+      <DependsOn Ref="pkg:generic/scheduler-process@1.0.0" />
+    </Component>
     <Component Ref="pkg:generic/scheduler-algorithms@1.0.0" Name="Scheduler Algorithms" Type="library" Version="1.0.0"
       Description="FIFO, SJF, and SRT scheduling algorithms over process sets."
       License="MIT" SourceFile="example-app/src/scheduler/algorithms.cpp">
-      <DependsOn Ref="pkg:generic/scheduler-process@1.0.0" />
+      <DependsOn Ref="pkg:generic/scheduler-core@1.0.0" />
     </Component>
     <Component Ref="pkg:generic/scheduler-display@1.0.0" Name="Scheduler Display" Type="library" Version="1.0.0"
       Description="Console tables and comparative metrics output."
       License="MIT" SourceFile="example-app/src/scheduler/display.cpp">
-      <DependsOn Ref="pkg:generic/scheduler-process@1.0.0" />
+      <DependsOn Ref="pkg:generic/scheduler-algorithms@1.0.0" />
     </Component>
   </CustomComponents>
 </AppMetadata>

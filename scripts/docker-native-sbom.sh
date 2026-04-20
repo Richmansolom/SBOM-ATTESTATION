@@ -9,6 +9,8 @@ set -euo pipefail
 
 TRIVY_IMAGE="${TRIVY_IMAGE:-aquasec/trivy:0.69.3}"
 GRYPE_IMAGE="${GRYPE_IMAGE:-anchore/grype:latest}"
+PIPELINE_MODE="${PIPELINE_MODE:-native}"
+IMAGE_REF="${IMAGE_REF:-sbom-demo-app:1.0}"
 
 cd "$REPO_ROOT"
 mkdir -p sbom reports ".cache/grype-db"
@@ -25,12 +27,31 @@ if [[ ! -f "$META_ABS" ]]; then
   exit 1
 fi
 
-echo "==> docker-native-sbom: Syft (dir scan)"
-docker run --rm -v "${SRC_ABS}:/src:ro" anchore/syft:latest dir:/src -o cyclonedx-json > sbom/sbom-source-syft.json
+if [[ "${PIPELINE_MODE}" == "container" ]]; then
+  if [[ ! -f "${SRC_ABS}/Dockerfile" ]]; then
+    echo "docker-native-sbom: container mode needs a Dockerfile in ${SRC_ABS} (or use PIPELINE_MODE=native)." >&2
+    exit 1
+  fi
+  echo "==> docker-native-sbom: build image ${IMAGE_REF} from ${SRC_ABS}"
+  docker build -t "${IMAGE_REF}" "${SRC_ABS}"
+  echo "==> docker-native-sbom: export image to sbom/image.tar"
+  docker save "${IMAGE_REF}" -o "${REPO_ROOT}/sbom/image.tar"
 
-echo "==> docker-native-sbom: Trivy filesystem (CycloneDX)"
-docker run --rm -v "${SRC_ABS}:/src:ro" -v "${REPO_ROOT}:/work" "${TRIVY_IMAGE}" \
-  filesystem --quiet --format cyclonedx --output "/work/sbom/sbom-source-trivy.json" /src
+  echo "==> docker-native-sbom: Syft (OCI archive / image)"
+  docker run --rm -v "${REPO_ROOT}/sbom:/data" anchore/syft:latest \
+    "oci-archive:/data/image.tar" -o cyclonedx-json > sbom/sbom-source-syft.json
+
+  echo "==> docker-native-sbom: Trivy image SBOM (CycloneDX)"
+  docker run --rm -v "${REPO_ROOT}/sbom:/data" "${TRIVY_IMAGE}" \
+    image --quiet --input "/data/image.tar" --format cyclonedx --output "/data/sbom-source-trivy.json"
+else
+  echo "==> docker-native-sbom: Syft (dir scan)"
+  docker run --rm -v "${SRC_ABS}:/src:ro" anchore/syft:latest dir:/src -o cyclonedx-json > sbom/sbom-source-syft.json
+
+  echo "==> docker-native-sbom: Trivy filesystem (CycloneDX)"
+  docker run --rm -v "${SRC_ABS}:/src:ro" -v "${REPO_ROOT}:/work" "${TRIVY_IMAGE}" \
+    filesystem --quiet --format cyclonedx --output "/work/sbom/sbom-source-trivy.json" /src
+fi
 
 echo "==> docker-native-sbom: Distro2SBOM"
 docker run --rm -v "${REPO_ROOT}:/work" python:3.12-slim bash -lc \

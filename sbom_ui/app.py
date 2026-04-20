@@ -1,6 +1,7 @@
 import copy
 import json
 import io
+import math
 import os
 import platform
 import re
@@ -17,7 +18,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
-from flask import Flask, has_request_context, jsonify, request, send_from_directory
+from flask import Flask, Response, has_request_context, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from metadata_parser import app_metadata_to_json_bytes, parse_app_metadata_bytes
@@ -43,6 +44,8 @@ app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512 MB
 # Hosted (e.g. Render free): keep memory bounded — each run can carry large pipeline logs.
 MAX_LOCAL_RUNS = max(1, int(os.environ.get("MAX_LOCAL_RUNS", "8")))
 MAX_LOCAL_RUN_LOG_CHARS = max(10_000, int(os.environ.get("MAX_LOCAL_RUN_LOG_CHARS", "200000")))
+GITHUB_RUNS_LOOKUP_PER_PAGE = max(20, int(os.environ.get("GITHUB_RUNS_LOOKUP_PER_PAGE", "100")))
+GITHUB_REPORT_RUN_TRY_LIMIT = max(8, int(os.environ.get("GITHUB_REPORT_RUN_TRY_LIMIT", "30")))
 LOCAL_RUNS = {}
 LOCAL_RUNS_LOCK = threading.Lock()
 
@@ -116,6 +119,72 @@ def run_cmd_stream(cmd, on_output=None, env_extra=None):
             except Exception:
                 pass
     return proc.returncode, "".join(chunks)
+
+
+def _container_engine_reachable_for_mode(container_runtime: str):
+    """
+    Preflight for container SBOM builds. Returns (ok, engine_name_or_empty, detail_message).
+    Hosted platforms (e.g. Render web) usually have no Docker daemon — fail fast with a clear reason
+    instead of hanging until the proxy returns an HTML 500.
+    """
+    runtime = (container_runtime or "auto").strip().lower()
+    if runtime not in ("auto", "docker", "podman"):
+        runtime = "auto"
+    order = ["docker", "podman"] if runtime == "auto" else [runtime]
+    last = ""
+    for name in order:
+        bin_path = shutil.which(name)
+        if not bin_path:
+            last = f"'{name}' not found on PATH."
+            continue
+        try:
+            proc = subprocess.run(
+                [bin_path, "info"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=18,
+                shell=False,
+            )
+            if proc.returncode == 0:
+                return True, name, ""
+            tail = ((proc.stderr or "") + (proc.stdout or "")).strip()[-1200:]
+            last = f"{name} is installed but not usable (exit {proc.returncode}). {tail}"
+        except subprocess.TimeoutExpired:
+            last = f"{name} info timed out (daemon may be stopped)."
+        except OSError as exc:
+            last = f"{name}: {exc}"
+    hint = ""
+    if os.getenv("RENDER"):
+        hint = (
+            " Render web services do not provide a Docker/Podman engine to this process — "
+            "use Native build mode here, or run container mode on your laptop/CI with Docker Desktop."
+        )
+    return False, "", (last or "No container engine available.") + hint
+
+
+def _json_safe_for_api(obj):
+    """Ensure values are JSON-serializable so Flask never 500s on jsonify."""
+    if obj is None or isinstance(obj, (str, bool)):
+        return obj
+    if isinstance(obj, int):
+        return obj
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {str(k): _json_safe_for_api(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe_for_api(v) for v in obj]
+    return str(obj)
 
 
 def iso_duration_seconds(started_at, completed_at):
@@ -204,6 +273,61 @@ def extract_report_from_zip_bytes(zip_bytes, scanner):
     except Exception:
         return None, None
     return None, None
+
+
+def extract_validation_evidence_from_zip_bytes(zip_bytes):
+    """
+    Find CycloneDX validate log and Hoppr NTIA JSON inside a CI artifact zip
+    (paths mirror repo layout: reports/...).
+    """
+    cx_suffixes = (
+        "reports/cyclonedx-validate.txt",
+        "reports/cyclonedx-validate-source.txt",
+        "reports/cyclonedx-validate-build.txt",
+        "cyclonedx-validate.txt",
+        "cyclonedx-validate-source.txt",
+        "cyclonedx-validate-build.txt",
+    )
+    hp_suffixes = (
+        "reports/hoppr-ntia-results.json",
+        "reports/hoppr-source-results.json",
+        "reports/hoppr-build-results.json",
+        "hoppr-ntia-results.json",
+        "hoppr-source-results.json",
+        "hoppr-build-results.json",
+    )
+    out = {"cyclonedx": None, "hoppr": None}
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+            names = zf.namelist()
+            lowered = {n.lower(): n for n in names}
+            for want in cx_suffixes:
+                wlow = want.lower()
+                for lname, original in lowered.items():
+                    if lname.endswith(wlow):
+                        raw = zf.read(original)
+                        try:
+                            text = raw.decode("utf-8", errors="replace")
+                        except Exception:
+                            text = ""
+                        if text.strip():
+                            out["cyclonedx"] = {"text": text, "entry": original}
+                            break
+                if out["cyclonedx"]:
+                    break
+            for want in hp_suffixes:
+                wlow = want.lower()
+                for lname, original in lowered.items():
+                    if lname.endswith(wlow):
+                        payload = parse_json_bytes(zf.read(original))
+                        if isinstance(payload, dict):
+                            out["hoppr"] = {"payload": payload, "entry": original}
+                            break
+                if out["hoppr"]:
+                    break
+    except Exception:
+        return {"cyclonedx": None, "hoppr": None}
+    return out
 
 
 def extract_sbom_from_zip_bytes(zip_bytes):
@@ -1399,8 +1523,6 @@ def write_osv_vuln_reports_from_sbom(sbom_path):
 
 
 def run_generate_pipeline(body, log_callback=None):
-    ensure_dirs()
-    clear_previous_build_artifacts()
     body = body or {}
 
     source_path = body.get("source_path")
@@ -1412,6 +1534,9 @@ def run_generate_pipeline(body, log_callback=None):
         }
 
     try:
+        ensure_dirs()
+        clear_previous_build_artifacts()
+
         source_dir = (REPO_ROOT / source_path).resolve()
         if not source_dir.exists():
             return {
@@ -1468,6 +1593,26 @@ def run_generate_pipeline(body, log_callback=None):
         runtime = str(body.get("container_runtime") or "auto").strip().lower()
         if runtime not in ("auto", "docker", "podman"):
             runtime = "auto"
+
+        if mode == "container":
+            ok_eng, eng_name, eng_detail = _container_engine_reachable_for_mode(runtime)
+            if not ok_eng:
+                _cleanup_temp_metadata()
+                source_diag.update(
+                    {
+                        "execution_path": "container-preflight",
+                        "status": "error",
+                        "container_engine": eng_name or None,
+                    }
+                )
+                write_source_diagnostics(source_diag)
+                return {
+                    "status": "error",
+                    "message": "Container mode needs a working Docker or Podman daemon.",
+                    "log": eng_detail,
+                    "exit_code": 1,
+                    "source_diagnostics": source_diag,
+                }
 
         pwsh_cmd = shutil.which("pwsh") or shutil.which("powershell")
         if pwsh_cmd:
@@ -1542,10 +1687,14 @@ def run_generate_pipeline(body, log_callback=None):
                 "REPO_ROOT": str(REPO_ROOT),
                 "SOURCE_PATH": str(Path(source_rel).as_posix()),
                 "APP_METADATA_PATH": str(Path(app_meta_rel).as_posix()),
+                "PIPELINE_MODE": "container" if mode == "container" else "native",
+                "IMAGE_REF": (os.getenv("SBOM_IMAGE_REF") or "sbom-demo-app:1.0").strip()
+                or "sbom-demo-app:1.0",
             }
             if log_callback:
                 log_callback(
-                    "==> Docker CI-parity pipeline (scripts/docker-native-sbom.sh) — same tools as GitLab CI\n"
+                    "==> Docker CI-parity pipeline (scripts/docker-native-sbom.sh) — "
+                    f"mode={env_extra['PIPELINE_MODE']} (Syft, Trivy, Distro2SBOM, merge, validate, scan)\n"
                 )
             code, output = run_cmd_stream(
                 [bash_bin, str(docker_script)],
@@ -1938,15 +2087,19 @@ def promote_upload_to_ci_app_dir(src_root: Path) -> Path:
 
 @app.after_request
 def add_no_cache_headers(response):
-    # Prevent stale cached JS/HTML so UI updates are immediately visible.
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    # Allow hosted frontends (e.g., GitHub Pages) to call this API.
-    response.headers["Access-Control-Allow-Origin"] = os.getenv("CORS_ALLOW_ORIGIN", "*")
-    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
-    # Include X-SBOM-TOKEN — browsers will not send custom headers on cross-origin fetches without this on preflight.
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,X-SBOM-TOKEN"
+    # Never let header tweaks fail the request (would bypass JSON error handlers and yield HTML 500).
+    try:
+        # Prevent stale cached JS/HTML so UI updates are immediately visible.
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        # Allow hosted frontends (e.g., GitHub Pages) to call this API.
+        response.headers["Access-Control-Allow-Origin"] = os.getenv("CORS_ALLOW_ORIGIN", "*")
+        response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+        # Include X-SBOM-TOKEN — browsers will not send custom headers on cross-origin fetches without this on preflight.
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,X-SBOM-TOKEN"
+    except Exception:
+        pass
     return response
 
 
@@ -1970,15 +2123,39 @@ def favicon():
 
 @app.errorhandler(Exception)
 def handle_unexpected_error(err):
-    # Keep normal HTTP behavior (404/405/etc.) for non-API routes.
-    if isinstance(err, HTTPException):
+    """API routes use HTTP 200 + JSON for fault bodies so reverse proxies (e.g. Render) do not replace JSON with HTML."""
+    try:
+        if isinstance(err, HTTPException):
+            if has_request_context() and (request.path or "").startswith("/api/"):
+                return jsonify({"status": "error", "message": err.description or str(err)}), int(err.code or 500)
+            return err
         if has_request_context() and (request.path or "").startswith("/api/"):
-            return jsonify({"status": "error", "message": err.description or str(err)}), int(err.code or 500)
-        return err
-    # Ensure API callers always receive JSON on unexpected server faults.
-    if has_request_context() and (request.path or "").startswith("/api/"):
-        return jsonify({"status": "error", "message": f"Internal server error: {err}"}), 500
-    return "Internal Server Error", 500
+            payload = _json_safe_for_api(
+                {
+                    "status": "error",
+                    "message": f"Internal server error: {err}",
+                    "exit_code": 1,
+                    "log": "",
+                }
+            )
+            return Response(
+                json.dumps(payload, ensure_ascii=False, default=str),
+                mimetype="application/json; charset=utf-8",
+                status=200,
+            )
+        return "Internal Server Error", 500
+    except Exception as wrap_err:
+        emergency = json.dumps(
+            {
+                "status": "error",
+                "message": f"Error while reporting failure: {wrap_err}",
+                "exit_code": 1,
+                "log": "",
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+        return Response(emergency, mimetype="application/json; charset=utf-8", status=200)
 
 
 def get_local_snapshot():
@@ -2298,10 +2475,34 @@ def gitlab_api_binary(path, token=""):
 
 def fetch_github_report_from_artifacts(repo, scanner, token="", run_id=None):
     run_ids = []
+    attempted_runs = []
+    attempted_artifacts = []
     if run_id:
         run_ids.append(int(run_id))
+        # If a pinned run is still in progress or has no uploaded artifacts yet,
+        # fallback to recent successful runs so UI downloads still work.
+        status, out = github_rest_request(
+            f"repos/{repo}/actions/runs?per_page={GITHUB_RUNS_LOOKUP_PER_PAGE}",
+            "GET",
+            token,
+        )
+        if status < 300:
+            runs_json = parse_json_text(out) or {}
+            runs = runs_json.get("workflow_runs") or []
+            for run in runs:
+                if (run.get("conclusion") or "").lower() != "success":
+                    continue
+                rid = run.get("id")
+                if rid:
+                    rid_int = int(rid)
+                    if rid_int not in run_ids:
+                        run_ids.append(rid_int)
     else:
-        status, out = github_rest_request(f"repos/{repo}/actions/runs?per_page=20", "GET", token)
+        status, out = github_rest_request(
+            f"repos/{repo}/actions/runs?per_page={GITHUB_RUNS_LOOKUP_PER_PAGE}",
+            "GET",
+            token,
+        )
         if status >= 300:
             return None, f"GitHub runs lookup failed ({status})"
         runs_json = parse_json_text(out) or {}
@@ -2320,7 +2521,8 @@ def fetch_github_report_from_artifacts(repo, scanner, token="", run_id=None):
     if not run_ids:
         return None, "No GitHub workflow runs found"
 
-    for rid in run_ids[:8]:
+    for rid in run_ids[:GITHUB_REPORT_RUN_TRY_LIMIT]:
+        attempted_runs.append(rid)
         status, out = github_rest_request(f"repos/{repo}/actions/runs/{rid}/artifacts?per_page=30", "GET", token)
         if status >= 300:
             continue
@@ -2329,6 +2531,9 @@ def fetch_github_report_from_artifacts(repo, scanner, token="", run_id=None):
         for artifact in artifacts:
             if artifact.get("expired"):
                 continue
+            aname = (artifact.get("name") or "").strip()
+            if aname and aname not in attempted_artifacts and len(attempted_artifacts) < 12:
+                attempted_artifacts.append(aname)
             archive_url = artifact.get("archive_download_url")
             if not archive_url:
                 continue
@@ -2343,14 +2548,31 @@ def fetch_github_report_from_artifacts(repo, scanner, token="", run_id=None):
                     "artifact_name": artifact.get("name") or "",
                     "zip_entry": entry or "",
                 }, None
-    return None, "No matching vulnerability report found in GitHub artifacts"
+    msg = "No matching vulnerability report found in GitHub artifacts"
+    if attempted_runs:
+        msg += f" (runs tried: {', '.join(str(x) for x in attempted_runs[:GITHUB_REPORT_RUN_TRY_LIMIT])})"
+    if attempted_artifacts:
+        msg += f"; artifact names seen: {', '.join(attempted_artifacts)}"
+    return None, msg
 
 
 def fetch_gitlab_report_from_artifacts(project, scanner, token="", pipeline_id=None):
     encoded_project = quote(project, safe="")
     pipeline_ids = []
+    attempted_pipelines = []
+    attempted_artifacts = []
     if pipeline_id:
         pipeline_ids.append(int(pipeline_id))
+        # If pinned pipeline has no artifacts yet, fallback to recent successful pipelines.
+        status, out = gitlab_api(f"projects/{encoded_project}/pipelines?status=success&per_page=20", token=token)
+        if status < 300:
+            pipelines = parse_json_text(out) or []
+            for p in pipelines:
+                pid = p.get("id")
+                if pid:
+                    pid_int = int(pid)
+                    if pid_int not in pipeline_ids:
+                        pipeline_ids.append(pid_int)
     else:
         status, out = gitlab_api(f"projects/{encoded_project}/pipelines?status=success&per_page=20", token=token)
         if status >= 300:
@@ -2364,6 +2586,7 @@ def fetch_gitlab_report_from_artifacts(project, scanner, token="", pipeline_id=N
         return None, "No GitLab successful pipelines found"
 
     for pid in pipeline_ids[:8]:
+        attempted_pipelines.append(pid)
         status, out = gitlab_api(f"projects/{encoded_project}/pipelines/{pid}/jobs?per_page=100", token=token)
         if status >= 300:
             continue
@@ -2372,6 +2595,9 @@ def fetch_gitlab_report_from_artifacts(project, scanner, token="", pipeline_id=N
             artifacts_file = (job.get("artifacts_file") or {}).get("filename")
             if not artifacts_file:
                 continue
+            afile = str(artifacts_file).strip()
+            if afile and afile not in attempted_artifacts and len(attempted_artifacts) < 12:
+                attempted_artifacts.append(afile)
             jid = job.get("id")
             if not jid:
                 continue
@@ -2387,7 +2613,244 @@ def fetch_gitlab_report_from_artifacts(project, scanner, token="", pipeline_id=N
                     "job_name": job.get("name") or "",
                     "zip_entry": entry or "",
                 }, None
-    return None, "No matching vulnerability report found in GitLab artifacts"
+    msg = "No matching vulnerability report found in GitLab artifacts"
+    if attempted_pipelines:
+        msg += f" (pipelines tried: {', '.join(str(x) for x in attempted_pipelines[:8])})"
+    if attempted_artifacts:
+        msg += f"; artifact files seen: {', '.join(attempted_artifacts)}"
+    return None, msg
+
+
+def _validation_dict_from_ci_piece(cx, hp, provider, meta):
+    """Build validation-summary fragment from CI artifact file hits."""
+    result = {}
+    meta = meta or {}
+    project = (meta.get("project") or "").strip()
+
+    if cx:
+        result["cyclonedx_schema"] = {
+            "available": True,
+            "pass": _cyclonedx_validate_pass_from_text(cx["text"]),
+            "file": f"ci:{provider}-artifact:{cx['entry']}",
+            "source": f"{provider}-artifact",
+        }
+        if meta.get("run_id") is not None:
+            result["cyclonedx_schema"]["run_id"] = meta["run_id"]
+        if meta.get("pipeline_id") is not None:
+            result["cyclonedx_schema"]["pipeline_id"] = meta["pipeline_id"]
+        if meta.get("artifact_name"):
+            result["cyclonedx_schema"]["artifact_name"] = meta["artifact_name"]
+        if meta.get("job_name"):
+            result["cyclonedx_schema"]["job_name"] = meta["job_name"]
+
+    if hp:
+        result["hoppr_ntia"] = {
+            "available": True,
+            "pass": _hoppr_pass_from_payload(hp["payload"]),
+            "file": f"ci:{provider}-artifact:{hp['entry']}",
+            "source": f"{provider}-artifact",
+        }
+        if meta.get("run_id") is not None:
+            result["hoppr_ntia"]["run_id"] = meta["run_id"]
+        if meta.get("pipeline_id") is not None:
+            result["hoppr_ntia"]["pipeline_id"] = meta["pipeline_id"]
+        if meta.get("artifact_name"):
+            result["hoppr_ntia"]["artifact_name"] = meta["artifact_name"]
+        if meta.get("job_name"):
+            result["hoppr_ntia"]["job_name"] = meta["job_name"]
+
+    if provider == "gitlab" and project and meta.get("pipeline_id"):
+        enc = quote(project, safe="")
+        url = f"https://gitlab.com/{enc}/-/pipelines/{meta['pipeline_id']}"
+        if "cyclonedx_schema" in result:
+            result["cyclonedx_schema"]["pipeline_url"] = url
+        if "hoppr_ntia" in result:
+            result["hoppr_ntia"]["pipeline_url"] = url
+    elif provider == "github" and project and meta.get("run_id"):
+        rid = meta["run_id"]
+        url = f"https://github.com/{project}/actions/runs/{rid}"
+        art = f"https://github.com/{project}/actions/runs/{rid}#artifacts"
+        if "cyclonedx_schema" in result:
+            result["cyclonedx_schema"]["run_url"] = url
+            result["cyclonedx_schema"]["artifacts_url"] = art
+        if "hoppr_ntia" in result:
+            result["hoppr_ntia"]["run_url"] = url
+            result["hoppr_ntia"]["artifacts_url"] = art
+
+    return result
+
+
+def fetch_github_validation_from_artifacts(repo, token="", run_id=None):
+    """Scan GitHub Actions artifact zips for CycloneDX validate log + Hoppr NTIA JSON."""
+    run_ids = []
+    attempted_runs = []
+    attempted_artifacts = []
+    if run_id:
+        run_ids.append(int(run_id))
+        status, out = github_rest_request(
+            f"repos/{repo}/actions/runs?per_page={GITHUB_RUNS_LOOKUP_PER_PAGE}",
+            "GET",
+            token,
+        )
+        if status < 300:
+            runs_json = parse_json_text(out) or {}
+            runs = runs_json.get("workflow_runs") or []
+            for run in runs:
+                if (run.get("conclusion") or "").lower() != "success":
+                    continue
+                rid = run.get("id")
+                if rid:
+                    rid_int = int(rid)
+                    if rid_int not in run_ids:
+                        run_ids.append(rid_int)
+    else:
+        status, out = github_rest_request(
+            f"repos/{repo}/actions/runs?per_page={GITHUB_RUNS_LOOKUP_PER_PAGE}",
+            "GET",
+            token,
+        )
+        if status >= 300:
+            return None, f"GitHub runs lookup failed ({status})"
+        runs_json = parse_json_text(out) or {}
+        runs = runs_json.get("workflow_runs") or []
+        for run in runs:
+            if (run.get("conclusion") or "").lower() == "success":
+                rid = run.get("id")
+                if rid:
+                    run_ids.append(int(rid))
+        if not run_ids:
+            for run in runs[:5]:
+                rid = run.get("id")
+                if rid:
+                    run_ids.append(int(rid))
+    if not run_ids:
+        return None, "No GitHub workflow runs found"
+
+    acc_cx = None
+    acc_hp = None
+    meta = {"project": repo}
+
+    for rid in run_ids[:GITHUB_REPORT_RUN_TRY_LIMIT]:
+        attempted_runs.append(rid)
+        status, out = github_rest_request(f"repos/{repo}/actions/runs/{rid}/artifacts?per_page=30", "GET", token)
+        if status >= 300:
+            continue
+        payload = parse_json_text(out) or {}
+        artifacts = payload.get("artifacts") or []
+        for artifact in artifacts:
+            if artifact.get("expired"):
+                continue
+            aname = (artifact.get("name") or "").strip()
+            if aname and aname not in attempted_artifacts and len(attempted_artifacts) < 12:
+                attempted_artifacts.append(aname)
+            archive_url = artifact.get("archive_download_url")
+            if not archive_url:
+                continue
+            a_status, raw_zip = github_download_bytes(archive_url, token=token)
+            if a_status >= 300:
+                continue
+            ev = extract_validation_evidence_from_zip_bytes(raw_zip)
+            if ev.get("cyclonedx") and not acc_cx:
+                acc_cx = ev["cyclonedx"]
+                meta.update({"run_id": rid, "artifact_name": artifact.get("name") or ""})
+            if ev.get("hoppr") and not acc_hp:
+                acc_hp = ev["hoppr"]
+                meta.update({"run_id": rid, "artifact_name": artifact.get("name") or ""})
+            if acc_cx and acc_hp:
+                return _validation_dict_from_ci_piece(acc_cx, acc_hp, "github", meta), None
+    if acc_cx or acc_hp:
+        return _validation_dict_from_ci_piece(acc_cx, acc_hp, "github", meta), None
+    msg = "No CycloneDX/Hoppr validation files in GitHub artifacts"
+    if attempted_runs:
+        msg += f" (runs tried: {', '.join(str(x) for x in attempted_runs[:GITHUB_REPORT_RUN_TRY_LIMIT])})"
+    if attempted_artifacts:
+        msg += f"; artifact names: {', '.join(attempted_artifacts)}"
+    return None, msg
+
+
+def fetch_gitlab_validation_from_artifacts(project, token="", pipeline_id=None):
+    """Scan GitLab job artifact zips for CycloneDX validate log + Hoppr NTIA JSON."""
+    encoded_project = quote(project, safe="")
+    pipeline_ids = []
+    attempted_pipelines = []
+    attempted_artifacts = []
+    if pipeline_id:
+        pipeline_ids.append(int(pipeline_id))
+        status, out = gitlab_api(f"projects/{encoded_project}/pipelines?status=success&per_page=20", token=token)
+        if status < 300:
+            pipelines = parse_json_text(out) or []
+            for p in pipelines:
+                pid = p.get("id")
+                if pid:
+                    pid_int = int(pid)
+                    if pid_int not in pipeline_ids:
+                        pipeline_ids.append(pid_int)
+    else:
+        status, out = gitlab_api(f"projects/{encoded_project}/pipelines?status=success&per_page=20", token=token)
+        if status >= 300:
+            return None, f"GitLab pipelines lookup failed ({status})"
+        pipelines = parse_json_text(out) or []
+        for p in pipelines:
+            pid = p.get("id")
+            if pid:
+                pipeline_ids.append(int(pid))
+    if not pipeline_ids:
+        return None, "No GitLab successful pipelines found"
+
+    acc_cx = None
+    acc_hp = None
+    meta = {"project": project}
+
+    for pid in pipeline_ids[:8]:
+        attempted_pipelines.append(pid)
+        status, out = gitlab_api(f"projects/{encoded_project}/pipelines/{pid}/jobs?per_page=100", token=token)
+        if status >= 300:
+            continue
+        jobs = parse_json_text(out) or []
+        for job in jobs:
+            artifacts_file = (job.get("artifacts_file") or {}).get("filename")
+            if not artifacts_file:
+                continue
+            afile = str(artifacts_file).strip()
+            if afile and afile not in attempted_artifacts and len(attempted_artifacts) < 12:
+                attempted_artifacts.append(afile)
+            jid = job.get("id")
+            if not jid:
+                continue
+            z_status, raw_zip = gitlab_api_binary(f"projects/{encoded_project}/jobs/{jid}/artifacts", token=token)
+            if z_status >= 300:
+                continue
+            ev = extract_validation_evidence_from_zip_bytes(raw_zip)
+            if ev.get("cyclonedx") and not acc_cx:
+                acc_cx = ev["cyclonedx"]
+                meta.update(
+                    {
+                        "pipeline_id": pid,
+                        "job_id": jid,
+                        "job_name": job.get("name") or "",
+                        "artifact_name": afile,
+                    }
+                )
+            if ev.get("hoppr") and not acc_hp:
+                acc_hp = ev["hoppr"]
+                meta.update(
+                    {
+                        "pipeline_id": pid,
+                        "job_id": jid,
+                        "job_name": job.get("name") or "",
+                        "artifact_name": afile,
+                    }
+                )
+            if acc_cx and acc_hp:
+                return _validation_dict_from_ci_piece(acc_cx, acc_hp, "gitlab", meta), None
+    if acc_cx or acc_hp:
+        return _validation_dict_from_ci_piece(acc_cx, acc_hp, "gitlab", meta), None
+    msg = "No CycloneDX/Hoppr validation files in GitLab artifacts"
+    if attempted_pipelines:
+        msg += f" (pipelines tried: {', '.join(str(x) for x in attempted_pipelines[:8])})"
+    if attempted_artifacts:
+        msg += f"; artifact files seen: {', '.join(attempted_artifacts)}"
+    return None, msg
 
 
 def fetch_github_sbom_from_artifacts(repo, token="", run_id=None):
@@ -2395,7 +2858,11 @@ def fetch_github_sbom_from_artifacts(repo, token="", run_id=None):
     if run_id:
         run_ids.append(int(run_id))
     else:
-        status, out = github_rest_request(f"repos/{repo}/actions/runs?per_page=20", "GET", token)
+        status, out = github_rest_request(
+            f"repos/{repo}/actions/runs?per_page={GITHUB_RUNS_LOOKUP_PER_PAGE}",
+            "GET",
+            token,
+        )
         if status >= 300:
             return None, f"GitHub runs lookup failed ({status})"
         runs_json = parse_json_text(out) or {}
@@ -2407,7 +2874,7 @@ def fetch_github_sbom_from_artifacts(repo, token="", run_id=None):
     if not run_ids:
         return None, "No GitHub workflow runs found"
 
-    for rid in run_ids[:10]:
+    for rid in run_ids[:GITHUB_REPORT_RUN_TRY_LIMIT]:
         status, out = github_rest_request(f"repos/{repo}/actions/runs/{rid}/artifacts?per_page=30", "GET", token)
         if status >= 300:
             continue
@@ -2682,6 +3149,181 @@ def db_status():
     return jsonify(get_db_freshness())
 
 
+def _hoppr_pass_from_payload(payload):
+    """Best-effort pass/fail from Hoppr JSON output (shape varies by hopctl version)."""
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("valid") is True:
+        return True
+    if payload.get("valid") is False:
+        return False
+    for key in ("violations", "issues", "Violations", "Issues", "findings", "Findings"):
+        v = payload.get(key)
+        if isinstance(v, list):
+            return len(v) == 0
+    summary = payload.get("summary") or payload.get("Summary")
+    if isinstance(summary, dict):
+        fc = summary.get("failureCount") or summary.get("failures")
+        if isinstance(fc, int):
+            return fc == 0
+    return None
+
+
+def _cyclonedx_validate_pass_from_text(text):
+    """Infer CycloneDX CLI validate outcome from captured stdout/stderr."""
+    if not text or not str(text).strip():
+        return None
+    tl = str(text).lower()
+    if any(x in tl for x in ("invalid", "not valid", "validation failed")):
+        return False
+    return True
+
+
+def _fill_validation_from_disk(out):
+    """Populate cyclonedx_schema / hoppr_ntia from reports/ on the server host."""
+    for name in (
+        "cyclonedx-validate.txt",
+        "cyclonedx-validate-source.txt",
+        "cyclonedx-validate-build.txt",
+    ):
+        p = REPORT_DIR / name
+        if p.exists():
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                text = ""
+            out["cyclonedx_schema"] = {
+                "available": True,
+                "pass": _cyclonedx_validate_pass_from_text(text),
+                "file": str(p.relative_to(REPO_ROOT)).replace("\\", "/"),
+                "source": "local",
+            }
+            break
+    for name in (
+        "hoppr-ntia-results.json",
+        "hoppr-source-results.json",
+        "hoppr-build-results.json",
+    ):
+        p = REPORT_DIR / name
+        if p.exists():
+            payload = parse_json(p)
+            out["hoppr_ntia"] = {
+                "available": True,
+                "pass": _hoppr_pass_from_payload(payload),
+                "file": str(p.relative_to(REPO_ROOT)).replace("\\", "/"),
+                "source": "local",
+            }
+            break
+
+
+@app.route("/api/validation-summary")
+def validation_summary():
+    """CycloneDX schema + Hoppr NTIA: local reports/, then CI artifacts when source=auto|ci."""
+    ensure_dirs()
+    out = {
+        "cyclonedx_schema": {"available": False, "pass": None, "file": ""},
+        "hoppr_ntia": {"available": False, "pass": None, "file": ""},
+    }
+    _fill_validation_from_disk(out)
+
+    source = (request.args.get("source") or "auto").strip().lower()
+    if source == "local":
+        return jsonify(out)
+
+    if source not in ("auto", "ci"):
+        return jsonify({"status": "error", "message": "source must be 'auto', 'local', or 'ci'"}), 400
+
+    provider = get_requested_provider()
+    repo = get_requested_repo()
+    token = get_requested_token()
+    run_id = (request.args.get("run_id") or "").strip()
+    pipeline_id = (request.args.get("pipeline_id") or "").strip()
+
+    need_cx = not out["cyclonedx_schema"]["available"]
+    need_hp = not out["hoppr_ntia"]["available"]
+    if (need_cx or need_hp) and repo:
+        ci_dict = None
+        if provider == "gitlab":
+            ci_token = token or os.getenv("GITLAB_TOKEN", "").strip()
+            ci_dict, _ci_err = fetch_gitlab_validation_from_artifacts(
+                project=repo,
+                token=ci_token,
+                pipeline_id=pipeline_id or None,
+            )
+        else:
+            ci_token = token or os.getenv("GITHUB_TOKEN", "").strip()
+            ci_dict, _ci_err = fetch_github_validation_from_artifacts(
+                repo=repo,
+                token=ci_token,
+                run_id=run_id or None,
+            )
+        if ci_dict:
+            if need_cx and ci_dict.get("cyclonedx_schema"):
+                out["cyclonedx_schema"] = ci_dict["cyclonedx_schema"]
+            if need_hp and ci_dict.get("hoppr_ntia"):
+                out["hoppr_ntia"] = ci_dict["hoppr_ntia"]
+
+    return jsonify(out)
+
+
+@app.route("/api/local-apps")
+def list_local_apps():
+    """Folders under this repo for Analyze: example-app, test-apps/*, recent UI uploads."""
+    ensure_dirs()
+    apps = []
+    seen = set()
+
+    def add(rel, label):
+        rel = str(rel).replace("\\", "/").strip("/")
+        if not rel or rel in seen:
+            return
+        p = (REPO_ROOT / rel).resolve()
+        try:
+            p.relative_to(REPO_ROOT.resolve())
+        except ValueError:
+            return
+        if not p.is_dir():
+            return
+        seen.add(rel)
+        apps.append(
+            {
+                "path": rel,
+                "label": label,
+                "has_app_metadata": (p / "app-metadata.json").exists(),
+            }
+        )
+
+    add("example-app", "example-app — reference C++ demo")
+
+    test_root = REPO_ROOT / "test-apps"
+    if test_root.is_dir():
+        for child in sorted(test_root.iterdir(), key=lambda x: x.name.lower()):
+            if child.is_dir():
+                rel = f"test-apps/{child.name}".replace("\\", "/")
+                add(rel, rel)
+
+    upload_root = REPO_ROOT / ".ui_uploads"
+    if upload_root.is_dir():
+        candidates = [
+            d
+            for d in upload_root.iterdir()
+            if d.is_dir() and d.name.startswith("src-")
+        ]
+        candidates.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        for child in candidates[:15]:
+            src_dir = child / "src"
+            if not src_dir.is_dir():
+                continue
+            try:
+                picked = pick_source_root(src_dir)
+                rel = os.path.relpath(str(picked), str(REPO_ROOT)).replace("\\", "/")
+            except Exception:
+                rel = os.path.relpath(str(src_dir), str(REPO_ROOT)).replace("\\", "/")
+            add(rel, f"{child.name} (upload)")
+
+    return jsonify({"apps": apps})
+
+
 @app.route("/api/github")
 def github():
     return jsonify(get_github_snapshot())
@@ -2694,8 +3336,40 @@ def dashboard():
 
 @app.route("/api/generate", methods=["POST"])
 def generate():
-    result = run_generate_pipeline(request.get_json(silent=True) or {})
-    return jsonify(result)
+    """Always HTTP 200 + JSON so proxies and fetch() never drop the body on synthetic 'HTTP errors'."""
+    try:
+        result = run_generate_pipeline(request.get_json(silent=True) or {})
+        safe = _json_safe_for_api(result)
+        try:
+            body = json.dumps(safe, ensure_ascii=False, default=str)
+        except (TypeError, ValueError) as ser_exc:
+            body = json.dumps(
+                _json_safe_for_api(
+                    {
+                        "status": "error",
+                        "message": f"Could not serialize pipeline result: {ser_exc}",
+                        "exit_code": 1,
+                        "log": (str(safe.get("log") or ""))[:8000],
+                    }
+                ),
+                ensure_ascii=False,
+                default=str,
+            )
+        return Response(body, mimetype="application/json; charset=utf-8", status=200)
+    except Exception as exc:
+        payload = _json_safe_for_api(
+            {
+                "status": "error",
+                "message": str(exc) or "generate pipeline crashed",
+                "exit_code": 1,
+                "log": "",
+            }
+        )
+        return Response(
+            json.dumps(payload, ensure_ascii=False, default=str),
+            mimetype="application/json; charset=utf-8",
+            status=200,
+        )
 
 
 @app.route("/api/local-run/start", methods=["POST"])
@@ -2724,8 +3398,20 @@ def start_local_run():
 
 @app.route("/api/local-runs")
 def list_local_runs():
+    run_id = (request.args.get("id") or "").strip()
+    log_tail = request.args.get("log_tail", type=int)
+
+    def _trim_run_payload(run):
+        item = dict(run or {})
+        if isinstance(log_tail, int) and log_tail >= 0:
+            item["log"] = str(item.get("log") or "")[-log_tail:]
+        return item
+
     with LOCAL_RUNS_LOCK:
-        runs = list(LOCAL_RUNS.values())
+        if run_id:
+            run = LOCAL_RUNS.get(run_id)
+            return jsonify([_trim_run_payload(run)] if run else [])
+        runs = [_trim_run_payload(run) for run in LOCAL_RUNS.values()]
     runs.sort(key=lambda r: (r.get("created_at") or ""), reverse=True)
     return jsonify(runs[:30])
 
@@ -3142,7 +3828,26 @@ def get_report():
     if payload is None:
         return jsonify({"status": "error", "message": f"Report exists but is not valid JSON for scanner '{scanner}'"}), 500
     return jsonify(payload)
+@app.route("/api/report/download")
+def download_report():
+    scanner = (request.args.get("scanner") or "grype").strip().lower()
+    report_map = {
+        "grype": REPORT_DIR / "grype-report.json",
+        "trivy": REPORT_DIR / "trivy-sbom-report.json",
+    }
 
+    path = report_map.get(scanner)
+    if not path or not path.exists():
+        return jsonify({
+            "status": "error",
+            "message": f"No downloadable report found for scanner '{scanner}'"
+        }), 404
+
+    return send_from_directory(
+        str(path.parent),
+        path.name,
+        as_attachment=True
+    )
 
 @app.route("/api/report/unified")
 def get_unified_report():
@@ -3162,6 +3867,7 @@ def get_unified_report():
         "trivy": REPORT_DIR / "trivy-sbom-report.json",
     }
     local_path = local_paths[scanner]
+    ci_error = None
 
     if source == "local":
         if not local_path.exists():
@@ -3249,7 +3955,10 @@ def get_unified_report():
         return jsonify(
             {
                 "status": "error",
-                "message": "No vulnerability report yet. Run CI or upload + Generate on this server, then refresh.",
+                "message": (
+                    "No vulnerability report yet. Run CI or upload + Generate on this server, then refresh."
+                    + (f" CI detail: {ci_error}" if ci_error else "")
+                ),
             }
         ), 404
 

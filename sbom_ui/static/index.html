@@ -6,9 +6,9 @@
 <title>SBOM Attestation — Mission Control</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script id="react-cdn" src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
+<script id="react-dom-cdn" src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+<script id="babel-cdn" src="https://unpkg.com/@babel/standalone@7.26.10/babel.min.js" crossorigin="anonymous"></script>
 <style>
 :root {
   --bg0:#0a0e14; --bg1:#0f1520; --bg2:#141c2a; --bg3:#1a2436; --bg4:#202c40;
@@ -21,9 +21,9 @@
   --text0:#e8edf5; --text1:#96a6be; --text2:#4a5a72; --text3:#2a3548;
   --border:rgba(255,255,255,.07); --border2:rgba(255,255,255,.04);
   --mono:'IBM Plex Mono',monospace; --sans:'Manrope',sans-serif;
-  --r:6px; --r2:10px; --r3:16px;
-  --sh:0 8px 32px rgba(0,0,0,.5);
-  --hh:54px; --tbh:56px;
+  --r:8px; --r2:12px; --r3:18px;
+  --sh:0 10px 36px rgba(0,0,0,.42);
+  --hh:58px; --tbh:58px;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body,#root{height:100%}
@@ -37,12 +37,12 @@ a{color:inherit;text-decoration:none}
 
 /* Layout */
 .root{display:flex;flex-direction:column;height:100%}
-.header{height:var(--hh);background:var(--bg1);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:12px;flex-shrink:0;z-index:30}
+.header{height:var(--hh);background:var(--bg1);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 18px;gap:12px;flex-shrink:0;z-index:30}
 .logo{width:30px;height:30px;background:var(--gold);border-radius:var(--r);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .logo-txt{font-family:var(--mono);font-size:11px;font-weight:700;color:#000;letter-spacing:-.5px}
 .brand{display:flex;flex-direction:column;min-width:0}
-.brand-title{font-size:14px;font-weight:700;color:var(--text0);white-space:nowrap}
-.brand-sub{font-size:9px;font-family:var(--mono);color:var(--text2);letter-spacing:1.5px;text-transform:uppercase;margin-top:1px}
+.brand-title{font-size:14px;font-weight:800;color:var(--text0);white-space:nowrap;letter-spacing:.2px}
+.brand-sub{font-size:9px;font-family:var(--mono);color:var(--text2);letter-spacing:1.6px;text-transform:uppercase;margin-top:1px}
 .hdr-sp{flex:1}
 .hdr-r{display:flex;align-items:center;gap:10px;flex-shrink:0}
 .hdr-link{font-size:11px;font-family:var(--mono);color:var(--text2);padding:4px 9px;border:1px solid var(--border);border-radius:var(--r);transition:.2s;white-space:nowrap}
@@ -55,7 +55,7 @@ a{color:inherit;text-decoration:none}
 @keyframes dpulse{0%,100%{opacity:1}50%{opacity:.3}}
 .shell{display:flex;flex:1;overflow:hidden}
 .main{flex:1;overflow-y:auto;overflow-x:hidden;background:var(--bg0)}
-.page{padding:clamp(14px,3vw,24px);display:flex;flex-direction:column;gap:16px;max-width:1440px}
+.page{padding:clamp(16px,3.1vw,28px);display:flex;flex-direction:column;gap:18px;max-width:1440px;margin:0 auto;width:100%}
 .tabbar{display:none;height:var(--tbh);background:var(--bg1);border-top:1px solid var(--border);flex-shrink:0;z-index:20;padding-bottom:env(safe-area-inset-bottom)}
 @media(max-width:768px){.tabbar{display:flex}.sidebar{display:none}}
 .tab-btn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:9.5px;font-weight:600;letter-spacing:.5px;color:var(--text2);cursor:pointer;border-top:2px solid transparent;transition:.15s}
@@ -63,9 +63,9 @@ a{color:inherit;text-decoration:none}
 .tab-icon{font-size:17px;line-height:1}
 
 /* Sidebar */
-.sidebar{width:200px;flex-shrink:0;background:var(--bg1);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
-.nav-sec{padding:14px 12px 5px;font-size:9px;font-family:var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--text3)}
-.nav-item{display:flex;align-items:center;gap:9px;padding:8px 14px;cursor:pointer;color:var(--text1);font-size:12.5px;font-weight:500;transition:.15s;border-left:2px solid transparent}
+.sidebar{width:214px;flex-shrink:0;background:var(--bg1);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.nav-sec{padding:15px 12px 6px;font-size:9px;font-family:var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--text3)}
+.nav-item{display:flex;align-items:center;gap:9px;padding:9px 14px;cursor:pointer;color:var(--text1);font-size:12.5px;font-weight:600;transition:.15s;border-left:2px solid transparent}
 .nav-item:hover{color:var(--text0);background:var(--bg2)}
 .nav-item.active{color:var(--gold);background:var(--gold-dim);border-left-color:var(--gold)}
 .nav-icon{font-size:14px;width:18px;text-align:center;flex-shrink:0}
@@ -75,50 +75,52 @@ a{color:inherit;text-decoration:none}
 .sidebar-foot-info{font-size:9px;font-family:var(--mono);color:var(--text3);line-height:1.9}
 
 /* Cards */
-.card{background:var(--bg1);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden}
-.card-hd{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 10px;border-bottom:1px solid var(--border2);gap:10px;flex-wrap:wrap}
-.card-title{font-size:11px;font-weight:600;font-family:var(--mono);letter-spacing:1.5px;text-transform:uppercase;color:var(--text1);display:flex;align-items:center;gap:6px}
-.card-body{padding:16px}
+.card{background:linear-gradient(180deg,var(--bg1) 0%,rgba(15,21,32,.96) 100%);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;box-shadow:var(--sh)}
+.card-hd{display:flex;align-items:center;justify-content:space-between;padding:13px 17px 11px;border-bottom:1px solid var(--border2);gap:10px;flex-wrap:wrap}
+.card-title{font-size:11px;font-weight:700;font-family:var(--mono);letter-spacing:1.55px;text-transform:uppercase;color:var(--text1);display:flex;align-items:center;gap:6px}
+.card-body{padding:17px}
 
 /* Analyzer */
-.analyzer{background:var(--bg1);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden;position:relative}
+.analyzer{background:var(--bg1);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden;position:relative;box-shadow:var(--sh)}
 .analyzer::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--gold),var(--teal),var(--purple));opacity:.8}
-.analyzer-hd{padding:20px 24px 16px;border-bottom:1px solid var(--border2)}
-.analyzer-title{font-size:clamp(18px,3vw,22px);font-weight:800;color:var(--text0);margin-bottom:4px}
-.analyzer-sub{font-size:12px;font-family:var(--mono);color:var(--text2)}
-.analyzer-body{padding:20px 24px 24px;display:flex;flex-direction:column;gap:16px}
-.field{display:flex;flex-direction:column;gap:5px}
-.flbl{font-size:10px;font-weight:700;font-family:var(--mono);letter-spacing:1.5px;text-transform:uppercase;color:var(--text2)}
-.finput{width:100%;padding:10px 14px;background:var(--bg0);border:1px solid var(--border);border-radius:var(--r);color:var(--text0);font-size:13px;font-family:var(--mono);transition:.2s}
+.analyzer-hd{padding:22px 26px 18px;border-bottom:1px solid var(--border2)}
+.analyzer-title{font-size:clamp(19px,3vw,24px);font-weight:800;color:var(--text0);margin-bottom:5px;letter-spacing:.1px}
+.analyzer-sub{font-size:12px;font-family:var(--mono);color:var(--text2);line-height:1.6}
+.analyzer-body{padding:22px 26px 26px;display:flex;flex-direction:column;gap:16px}
+.field{display:flex;flex-direction:column;gap:6px}
+.flbl{font-size:10px;font-weight:700;font-family:var(--mono);letter-spacing:1.45px;text-transform:uppercase;color:var(--text2)}
+.finput{width:100%;padding:11px 14px;background:var(--bg0);border:1px solid var(--border);border-radius:var(--r);color:var(--text0);font-size:13px;font-family:var(--mono);transition:.2s}
 .finput:focus{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-dim)}
 .finput::placeholder{color:var(--text3)}
 select.finput option{background:var(--bg2)}
-.meta-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:10px}
+.meta-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(165px,100%),1fr));gap:11px}
 .mode-toggle{display:flex;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--bg0)}
 .mode-btn{flex:1;padding:9px 8px;font-size:11px;font-family:var(--mono);font-weight:600;color:var(--text2);transition:.15s;border:none;background:none;cursor:pointer}
 .mode-btn.active{background:var(--bg3);color:var(--gold)}
-.scan-btn{padding:11px 28px;background:var(--gold);border-radius:var(--r);font-size:13px;font-weight:800;color:#000;transition:.2s;white-space:nowrap;display:flex;align-items:center;gap:8px;border:none;cursor:pointer}
+.scan-btn{padding:11px 28px;background:var(--gold);border-radius:var(--r);font-size:13px;font-weight:800;color:#000;transition:.2s;white-space:nowrap;display:flex;align-items:center;gap:8px;border:none;cursor:pointer;letter-spacing:.2px}
 .scan-btn:hover:not(:disabled){background:var(--gold2);color:#000}
 .scan-btn:disabled{opacity:.4;cursor:not-allowed}
 .scan-btn.running{background:var(--bg3);color:var(--text1);border:1px solid var(--border)}
 
 /* Stage flow */
-.stage-flow{display:flex;align-items:center;gap:6px;overflow-x:auto;padding:2px 0}
+.stage-flow{display:flex;align-items:center;gap:7px;overflow-x:auto;padding:3px 0}
 .stage-flow::-webkit-scrollbar{display:none}
 .stage-node{display:flex;flex-direction:column;align-items:center;gap:4px;flex-shrink:0}
-.stage-box{padding:7px 14px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg2);font-size:9.5px;font-family:var(--mono);font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);white-space:nowrap;transition:.3s;min-width:76px;text-align:center}
-.stage-box.active{border-color:rgba(240,165,0,.4);color:var(--gold);background:var(--gold-dim);animation:sp .8s ease-in-out infinite}
+.stage-box{padding:8px 14px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg2);font-size:9.5px;font-family:var(--mono);font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);white-space:nowrap;transition:.3s;min-width:82px;text-align:center}
+.stage-box.active{border-color:rgba(240,165,0,.4);color:var(--gold);background:var(--gold-dim)}
 .stage-box.done{border-color:rgba(34,211,162,.3);color:var(--green);background:var(--green-dim)}
 .stage-box.error{border-color:rgba(244,63,94,.3);color:var(--red);background:var(--red-dim)}
-@keyframes sp{0%,100%{opacity:1}50%{opacity:.55}}
+.stage-box.clickable{cursor:pointer}
+.stage-box.clickable:hover{border-color:rgba(45,212,191,.45);box-shadow:0 0 0 2px rgba(45,212,191,.12)}
+.stage-box.selected{box-shadow:0 0 0 2px rgba(240,165,0,.18)}
 .stage-arrow{color:var(--text3);font-size:12px;flex-shrink:0;margin-bottom:18px}
 .stage-time{font-size:9px;font-family:var(--mono);color:var(--text3)}
 
 /* Terminal */
-.terminal{background:#050810;border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.terminal{background:#050810;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,.02)}
 .term-hd{display:flex;align-items:center;gap:5px;padding:7px 12px;background:var(--bg2);border-bottom:1px solid var(--border)}
 .term-dot{width:8px;height:8px;border-radius:50%}
-.term-body{padding:12px;font-family:var(--mono);font-size:clamp(10px,1.4vw,11.5px);line-height:1.7;overflow-y:auto;max-height:220px;color:#6E7F8D}
+.term-body{padding:12px;font-family:var(--mono);font-size:clamp(10px,1.35vw,11.5px);line-height:1.72;overflow-y:auto;max-height:220px;color:#6E7F8D}
 .tl-ok{color:var(--green)}.tl-err{color:var(--red)}.tl-warn{color:var(--amber)}.tl-info{color:var(--teal)}.tl-cmd{color:var(--text0)}
 .cursor{display:inline-block;width:7px;height:13px;background:var(--gold);vertical-align:middle;animation:blink .8s step-end infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
@@ -134,7 +136,7 @@ select.finput option{background:var(--bg2)}
 .bdot{width:4px;height:4px;border-radius:50%;background:currentColor;animation:dpulse 1.5s ease-in-out infinite}
 
 /* Buttons */
-.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:var(--r);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;transition:.18s;white-space:nowrap;border:1px solid var(--border);background:var(--bg3);color:var(--text1)}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:var(--r);font-family:var(--sans);font-size:12px;font-weight:700;cursor:pointer;transition:.18s;white-space:nowrap;border:1px solid var(--border);background:var(--bg3);color:var(--text1)}
 .btn:hover{border-color:var(--text2);color:var(--text0)}
 .btn-sm{padding:4px 10px;font-size:11px}
 .btn-xs{padding:3px 8px;font-size:10px}
@@ -144,17 +146,17 @@ select.finput option{background:var(--bg2)}
 .btn-red{background:var(--red-dim);border-color:rgba(244,63,94,.25);color:var(--red)}
 
 /* Severity bars */
-.sev-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:pointer}
+.sev-row{display:flex;align-items:center;gap:10px;margin-bottom:9px;cursor:pointer}
 .sev-lbl{font-size:10px;font-family:var(--mono);font-weight:600;width:76px;flex-shrink:0;text-transform:uppercase;letter-spacing:.5px}
-.sev-track{flex:1;height:22px;background:var(--bg3);border-radius:4px;overflow:hidden}
+.sev-track{flex:1;height:22px;background:var(--bg3);border-radius:5px;overflow:hidden}
 .sev-fill{height:100%;border-radius:4px;display:flex;align-items:center;padding-left:8px;transition:width 1.2s cubic-bezier(.4,0,.2,1)}
 .sev-cnt{font-size:10px;font-weight:700;color:#000;font-family:var(--mono)}
 
 /* Table */
-.tbl-wrap{overflow-x:auto}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--border2);border-radius:var(--r);background:rgba(0,0,0,.08)}
 table{width:100%;border-collapse:collapse;min-width:360px}
-th{font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text2);font-family:var(--mono);padding:9px 12px;text-align:left;border-bottom:1px solid var(--border);background:var(--bg2);white-space:nowrap}
-td{padding:9px 12px;border-bottom:1px solid var(--border2);font-size:12px;vertical-align:middle}
+th{font-size:9px;font-weight:700;letter-spacing:1.45px;text-transform:uppercase;color:var(--text2);font-family:var(--mono);padding:10px 12px;text-align:left;border-bottom:1px solid var(--border);background:var(--bg2);white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--border2);font-size:12px;vertical-align:middle}
 tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--bg2)}
 .mono{font-family:var(--mono)}
@@ -198,14 +200,49 @@ tr:hover td{background:var(--bg2)}
 .text-mono{font-family:var(--mono)}.text-muted{color:var(--text2)}
 .text-gold{color:var(--gold)}.text-green{color:var(--green)}.text-red{color:var(--red)}
 .truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:14px}
+.grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:14px}
 .fade-in{animation:fi .25s ease-out}
 @keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:clamp(28px,6vw,52px) 20px;color:var(--text3);text-align:center;gap:10px}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:clamp(30px,6.5vw,54px) 20px;color:var(--text3);text-align:center;gap:11px}
 .empty-icon{font-size:clamp(28px,5vw,40px);opacity:.3}
 .empty-msg{font-size:12.5px}
 .copy-btn{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;font-size:10px;font-family:var(--mono);background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);color:var(--text2);cursor:pointer;transition:.2s}
 .copy-btn:hover{border-color:var(--gold);color:var(--gold)}
+.boot-error{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}
+.boot-error-card{width:min(680px,100%);background:var(--bg1);border:1px solid rgba(244,63,94,.35);border-radius:var(--r3);padding:20px;box-shadow:var(--sh)}
+.boot-error-title{font-size:14px;font-weight:800;color:#fca5b7;margin-bottom:8px}
+.boot-error-text{font-size:12px;color:var(--text1);line-height:1.55}
+.boot-error-detail{margin-top:10px;font-size:11px;font-family:var(--mono);color:var(--amber);background:var(--amber-dim);border:1px solid rgba(251,146,60,.2);border-radius:var(--r);padding:8px 10px;white-space:pre-wrap}
+
+@media(max-width:1180px){
+  .sidebar{width:198px}
+  .page{padding:18px 18px 22px}
+  .analyzer-hd{padding:20px 22px 16px}
+  .analyzer-body{padding:20px 22px 22px}
+}
+
+@media(max-width:900px){
+  .header{padding:0 12px;gap:8px}
+  .brand-title{font-size:13px}
+  .hdr-link{padding:4px 7px;font-size:10px}
+  .page{padding:14px 12px 18px;gap:14px}
+  .card-body{padding:14px}
+  .card-hd{padding:11px 13px 9px}
+  .grid-2{grid-template-columns:1fr;gap:12px}
+  .meta-row{grid-template-columns:1fr 1fr}
+  .stage-box{min-width:74px;padding:7px 11px}
+}
+
+@media(max-width:640px){
+  .hdr-link{display:none}
+  .conn-pill{padding:4px 8px;font-size:10px}
+  .analyzer-title{font-size:18px}
+  .analyzer-hd,.analyzer-body{padding:14px}
+  .meta-row{grid-template-columns:1fr}
+  .scan-btn{width:100%;justify-content:center}
+  .term-body{max-height:190px}
+  .table{font-size:11px}
+}
 </style>
 </head>
 <body>
@@ -218,8 +255,52 @@ const ago=d=>{if(!d)return'—';const s=Math.round((Date.now()-new Date(d))/1000
 const sha7=s=>s?s.slice(0,7):'';
 const SEV_COL={Critical:'#f43f5e',High:'#fb923c',Medium:'#D29922',Low:'#22d3a2',Negligible:'#2a3548',Unknown:'#2a3548'};
 const SEV_ORD=['Critical','High','Medium','Low','Negligible'];
-const GL=(tok,proj,path,opts={})=>fetch('https://gitlab.com/api/v4/projects/'+encodeURIComponent(proj)+path,{...opts,headers:{'PRIVATE-TOKEN':tok,'Content-Type':'application/json',...(opts.headers||{})}}).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.message||String(r.status));return d;});
-const GH=(tok,repo,path,opts={})=>fetch('https://api.github.com/repos/'+repo+path,{...opts,headers:{Authorization:'Bearer '+tok,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28',...(opts.headers||{})}}).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.message||String(r.status));return d;});
+const PIPELINE_STAGES=['build','generate','validate','sign','scan','report'];
+
+function sbomApi(path,{method='GET',body=null,config=null,query={}}={}){
+  const cleanPath=String(path||'').replace(/^\/+/, '');
+  const params=new URLSearchParams();
+  if(config&&config.provider)params.set('provider',String(config.provider));
+  if(config&&config.projectId)params.set('project',String(config.projectId));
+  Object.entries(query||{}).forEach(([k,v])=>{if(v!==undefined&&v!==null&&v!=='')params.set(k,String(v));});
+  const url='/api/'+cleanPath+(params.toString()?'?'+params.toString():'');
+  const headers={};
+  if(body)headers['Content-Type']='application/json';
+  if(config&&config.token)headers['X-SBOM-TOKEN']=String(config.token);
+  return fetch(url,{method,headers,body:body?JSON.stringify(body):undefined}).then(async r=>{
+    const txt=await r.text();
+    const ctype=(r.headers.get('content-type')||'').toLowerCase();
+    const wantsJson=ctype.includes('application/json');
+    let data=wantsJson?{}:txt;
+    if(wantsJson){
+      try{data=txt?JSON.parse(txt):{};}catch{data={message:txt||''};}
+    }
+    if(!r.ok){
+      if(wantsJson)throw new Error((data&&data.message)||txt||String(r.status));
+      throw new Error(txt||String(r.status));
+    }
+    return data;
+  });
+}
+
+function toUiStageKey(stage){
+  const s=String(stage||'').toLowerCase();
+  if(s==='build')return'build';
+  if(s==='generate'||s==='sbom_generate'||s==='sbom-generate')return'generate';
+  if(s==='validate'||s==='sbom_validate'||s==='sbom-validate')return'validate';
+  if(s==='sign'||s==='sbom_sign'||s==='sbom-sign')return'sign';
+  if(s==='scan'||s==='sbom_scan'||s==='sbom-scan')return'scan';
+  if(s==='report')return'report';
+  return'';
+}
+
+function stageStatusClass(status){
+  const s=String(status||'').toLowerCase();
+  if(['success','passed','completed'].includes(s))return'done';
+  if(['failed','failure','cancelled','canceled'].includes(s))return'error';
+  if(['running','in_progress','queued','pending','created'].includes(s))return'active';
+  return'';
+}
 
 /* ── TOAST ── */
 let _toast=null;
@@ -281,20 +362,19 @@ function CopyBtn({text}){
 }
 
 /* ── CONNECT MODAL ── */
-function ConnectModal({onConnect,onClose}){
-  const[provider,setProv]=useState('github');
-  const[proj,setProj]=useState('');
-  const[tok,setTok]=useState('');
+function ConnectModal({onConnect,onClose,initialConfig}){
+  const[provider,setProv]=useState(initialConfig&&initialConfig.provider?initialConfig.provider:'github');
+  const[proj,setProj]=useState(initialConfig&&initialConfig.projectId?initialConfig.projectId:'');
+  const[tok,setTok]=useState(initialConfig&&initialConfig.token?initialConfig.token:'');
   const[loading,setLoading]=useState(false);
   const[err,setErr]=useState('');
   async function connect(){
-    if(!proj||!tok){setErr('Project path and token are required');return;}
+    if(!proj){setErr('Project path is required');return;}
     setLoading(true);setErr('');
     try{
-      if(provider==='gitlab')await GL(tok,proj,'');
-      else await GH(tok,proj,'');
+      await sbomApi('pipelines',{config:{provider,projectId:proj,token:tok},query:{per_page:1}});
       const cfg={provider,projectId:proj,token:tok};
-      sessionStorage.setItem('sbom_cfg',JSON.stringify(cfg));
+      localStorage.setItem('sbom_cfg',JSON.stringify(cfg));
       onConnect(cfg);toast('Connected','ok');
     }catch(e){setErr('Failed: '+e.message);}
     setLoading(false);
@@ -318,41 +398,96 @@ function ConnectModal({onConnect,onClose}){
             <input className="finput" value={proj} onChange={e=>setProj(e.target.value)} placeholder={provider==='gitlab'?'namespace/project':'owner/repo'} autoFocus onKeyDown={e=>{if(e.key==='Enter')connect();}}/>
           </div>
           <div className="field">
-            <span className="flbl">Access Token</span>
+            <span className="flbl">Access Token (Optional)</span>
             <input className="finput" type="password" value={tok} onChange={e=>setTok(e.target.value)} placeholder={provider==='gitlab'?'glpat-...':'ghp_...'} onKeyDown={e=>{if(e.key==='Enter')connect();}}/>
           </div>
           {err&&<div className="modal-err">{err}</div>}
-          <button onClick={connect} disabled={loading} style={{padding:'10px',background:'var(--gold)',borderRadius:'var(--r)',color:'#000',fontSize:'13px',fontWeight:'800',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px',border:'none',cursor:'pointer',opacity:loading?.5:1}}>
+          <button onClick={connect} disabled={loading} style={{padding:'10px',background:'var(--gold)',borderRadius:'var(--r)',color:'#000',fontSize:'13px',fontWeight:'800',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px',border:'none',cursor:'pointer',opacity:loading?0.5:1}}>
             {loading?<><Spin/> Connecting…</>:'⚡ Connect'}
           </button>
         </div>
-        <div className="modal-note">Token stored in session only · Never sent to third parties</div>
+        <div className="modal-note">Uses backend token fallback when available · Saved locally in this browser</div>
       </div>
     </div>
   );
 }
 
 /* ── STAGE FLOW ── */
-function StageFlow({current,done,errors}){
+function StageFlow({current,done,errors,stageJobs,selectedStage,onStageClick,showHint}){
   done=done||[];errors=errors||[];
-  const items=[{k:'build',i:'🔨',l:'Build'},{k:'generate',i:'📄',l:'Generate'},{k:'sign',i:'✍️',l:'Sign'},{k:'scan',i:'🔍',l:'Scan'},{k:'report',i:'📦',l:'Report'}];
+  const stageIcon={build:'🔨',generate:'📄',validate:'✅',sign:'✍️',scan:'🔍',report:'📦'};
+  const items=PIPELINE_STAGES.map((k)=>({k,i:stageIcon[k]||'•',l:k.charAt(0).toUpperCase()+k.slice(1)}));
   function cls(k){
+    if(stageJobs&&stageJobs[k]){
+      const mapped=stageStatusClass(stageJobs[k].status);
+      if(mapped)return mapped;
+    }
     if(errors.includes(k))return'error';
     if(done.includes(k))return'done';
     if(current===k)return'active';
     return'';
   }
   return(
-    <div className="stage-flow">
-      {items.map((s,i)=>(
-        <React.Fragment key={s.k}>
-          {i>0&&<div className="stage-arrow">→</div>}
-          <div className="stage-node">
-            <div className={'stage-box '+cls(s.k)}>{s.i} {s.l}</div>
-            <div className="stage-time">{done.includes(s.k)?'✓':current===s.k?'running…':''}</div>
+    <>
+      <div className="stage-flow">
+        {items.map((s,i)=>{
+          const info=stageJobs&&stageJobs[s.k]?stageJobs[s.k]:null;
+         const clickable = !!onStageClick;
+          return(
+            <React.Fragment key={s.k}>
+              {i>0&&<div className="stage-arrow">→</div>}
+              <div className="stage-node">
+                <div
+                  className={'stage-box '+cls(s.k)+(clickable?' clickable':'')+(selectedStage===s.k?' selected':'')}
+                  role={clickable?'button':undefined}
+                  tabIndex={clickable?0:undefined}
+                 onClick={clickable ? () => {
+  alert(s.k);
+  onStageClick(s.k);
+} : undefined}
+                  onKeyDown={clickable?(e=>{if(e.key==='Enter'||e.key===' ')onStageClick(s.k);}):undefined}
+                  title={clickable?'Click to view stage logs':'No logs for this stage'}
+                >{s.i} {s.l}</div>
+                <div className="stage-time">{done.includes(s.k)?'✓':current===s.k?'running…':''}</div>
+              </div>
+            </React.Fragment>
+          );
+        })}
+      </div>
+      {showHint&&<div style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--text3)',marginTop:8}}>Tip: click a stage to view logs without leaving this page.</div>}
+    </>
+  );
+}
+
+function LocalRunPlaybook(){
+  const cmdBashDry='make ci-local-dry-run';
+  const cmdBashSmoke='make ci-local-smoke';
+  const cmdPsDry='powershell -ExecutionPolicy Bypass -File .\\scripts\\gitlab-ci-local-dry-run.ps1 -Mode dry-run';
+  const cmdPsSmoke='powershell -ExecutionPolicy Bypass -File .\\scripts\\gitlab-ci-local-dry-run.ps1 -Mode smoke';
+  return(
+    <div className="card" style={{marginTop:4}}>
+      <div className="card-hd">
+        <div className="card-title">🧪 Local CI Emulation</div>
+        <span className="badge badge-purple">Build → Generate → Validate → Sign → Scan → Report</span>
+      </div>
+      <div className="card-body" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(320px,100%),1fr))',gap:10}}>
+        <div style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'var(--r)',padding:10}}>
+          <div className="flex items-center justify-between" style={{marginBottom:8}}>
+            <span className="text-mono" style={{fontSize:10,color:'var(--text2)',letterSpacing:'.8px'}}>BASH / MAKE</span>
+            <CopyBtn text={cmdBashDry}/>
           </div>
-        </React.Fragment>
-      ))}
+          <div className="mono" style={{fontSize:11,color:'var(--text0)',marginBottom:6}}>$ {cmdBashDry}</div>
+          <div className="mono" style={{fontSize:11,color:'var(--text1)'}}>$ {cmdBashSmoke}</div>
+        </div>
+        <div style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'var(--r)',padding:10}}>
+          <div className="flex items-center justify-between" style={{marginBottom:8}}>
+            <span className="text-mono" style={{fontSize:10,color:'var(--text2)',letterSpacing:'.8px'}}>WINDOWS POWERSHELL</span>
+            <CopyBtn text={cmdPsDry}/>
+          </div>
+          <div className="mono" style={{fontSize:11,color:'var(--text0)',marginBottom:6,wordBreak:'break-word'}}>{cmdPsDry}</div>
+          <div className="mono" style={{fontSize:11,color:'var(--text1)',wordBreak:'break-word'}}>{cmdPsSmoke}</div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -374,6 +509,10 @@ const PRESETS=[
 
 function AnalyzePage(){
   const[repoUrl,setRepoUrl]=useState('');
+  const[localApps,setLocalApps]=useState([]);
+  const[localAppsLoading,setLocalAppsLoading]=useState(true);
+  const[localAppChoice,setLocalAppChoice]=useState('');
+  const[pickFolderBusy,setPickFolderBusy]=useState(false);
   const[appName,setAppName]=useState('');
   const[appVer,setAppVer]=useState('1.0.0');
   const[supplier,setSupplier]=useState('');
@@ -384,12 +523,47 @@ function AnalyzePage(){
   const[logs,setLogs]=useState([]);
   const[sbomResult,setSbomResult]=useState(null);
   const[vulnResult,setVulnResult]=useState(null);
+  const[vulnScanner,setVulnScanner]=useState('grype');
   const[sevFilter,setSevFilter]=useState('All');
   const[compSearch,setCompSearch]=useState('');
   const[tab,setTab]=useState('components');
   const logRef=useRef(null);
 
+  useEffect(()=>{setSevFilter('All');},[vulnScanner]);
+
+  useEffect(()=>{
+    fetch('/api/local-apps')
+      .then(r=>r.json())
+      .then(d=>{setLocalApps(Array.isArray(d.apps)?d.apps:[]);setLocalAppsLoading(false);})
+      .catch(()=>{setLocalApps([]);setLocalAppsLoading(false);});
+  },[]);
+
+  function pickLocalAppFolder(rel){
+    if(!rel){setLocalAppChoice('');return;}
+    setLocalAppChoice(rel);
+    setRepoUrl(rel);
+    const seg=String(rel).split('/').filter(Boolean);
+    const leaf=seg.length?seg[seg.length-1]:'app';
+    setAppName(String(leaf).replace(/[-_]+/g,' '));
+  }
+
+  async function browseLocalFolder(){
+    setPickFolderBusy(true);
+    try{
+      const res=await fetch('/api/pick-folder',{method:'POST'});
+      const d=await res.json().catch(()=>({}));
+      if(!res.ok)throw new Error(d.message||'Folder selection failed');
+      const p=String(d.source_path||'').replace(/\\/g,'/');
+      setRepoUrl(p);
+      setLocalAppChoice('');
+      if(d.detected_app_name)setAppName(d.detected_app_name);
+      toast('Folder selected — click Scan to run the pipeline','ok');
+    }catch(e){toast(e.message||'Browse failed','err');}
+    finally{setPickFolderBusy(false);}
+  }
+
   function pickPreset(v){
+    setLocalAppChoice('');
     setRepoUrl(v);
     if(v){
       const name=v.split('/').pop().replace(/[-_]/g,' ');
@@ -403,84 +577,156 @@ function AnalyzePage(){
     setTimeout(()=>{if(logRef.current)logRef.current.scrollTop=logRef.current.scrollHeight;},40);
   }
 
-  async function runScan(){
-    if(!repoUrl){toast('Enter a repository URL first','err');return;}
-    setStatus('running');setDoneStages([]);setCurrentStage('');setLogs([]);
-    setSbomResult(null);setVulnResult(null);setTab('components');
-
-    const STAGE_LOGS={
-      build:[
-        '$ git clone '+repoUrl+' target-app',
-        'Cloning repository...',
-        '$ cd target-app && make -j$(nproc)',
-        'g++ -std=c++17 -O2 -c src/main.cpp',
-        'g++ -std=c++17 -O2 -c src/data_manager.cpp',
-        'Linking... done',
-        '✓ Build successful'
-      ],
-      generate:[
-        '$ syft dir:. -o cyclonedx-json > sbom/syft-raw.json',
-        'Scanning filesystem...',
-        '$ distro2sbom --distro-type ubuntu > sbom/distro.json',
-        '$ python3 merge-sbom.py --enrich app-metadata.json',
-        'Merging SBOM sources...',
-        'Patching specVersion 1.7 → 1.4',
-        'cyclonedx validate → SCHEMA VALID',
-        'hoppr validate → NTIA MINIMUM ELEMENTS: PASSED',
-        '✓ holistic-sbom.json generated'
-      ],
-      sign:[
-        '$ cyclonedx convert holistic-sbom.json → holistic-sbom.xml',
-        '$ cyclonedx sign bom --key-file $SIGNING_KEY',
-        '$ cyclonedx verify all holistic-sbom-signed.xml',
-        '✓ All signatures verified'
-      ],
-      scan:[
-        '$ grype sbom:sbom/holistic-sbom.json -o json',
-        'Loading vulnerability DB...',
-        '$ trivy sbom sbom/holistic-sbom.json --format json',
-        'Capturing DB freshness evidence...',
-        '✓ Scan complete'
-      ],
-      report:[
-        '$ python3 vuln_summary.py --input grype-report.json',
-        'Generating vulnerability analysis report...',
-        'Archiving artifacts...',
-        '✓ Pipeline complete'
-      ]
-    };
-
-    const stages=['build','generate','sign','scan','report'];
-    for(let i=0;i<stages.length;i++){
-      const stage=stages[i];
-      setCurrentStage(stage);
-      addLog('\n[STAGE '+(i+1)+'/5] '+stage.toUpperCase(),'cmd');
-      for(const line of STAGE_LOGS[stage]){
-        await new Promise(r=>setTimeout(r,300+Math.random()*250));
-        const type=line.startsWith('✓')?'ok':line.startsWith('$')?'cmd':line.toLowerCase().includes('error')?'err':'info';
-        addLog(line,type);
-      }
-      await new Promise(r=>setTimeout(r,350));
-      setDoneStages(d=>[...d,stage]);
+  async function apiJson(path,opts){
+    const res=await fetch(path,opts||{});
+    const payload=await res.json().catch(()=>({}));
+    if(!res.ok){
+      throw new Error(payload.message||payload.log||('Request failed: '+res.status));
     }
+    return payload;
+  }
 
-    // Generate mock SBOM components
-    const compCount=Math.floor(Math.random()*8)+10;
-    const NAMES=['main-app','data-manager','sensor-adapter','comms-layer','utils','config-parser','crypto-module','logger','network-stack','memory-pool','scheduler','hal-driver','diagnostics','telemetry'];
-    const TYPES=['application','library','framework'];
-    const LICENSES=['MIT','Apache-2.0','BSD-2-Clause','LGPL-2.1','GPL-3.0'];
-    const SOURCES=['app-metadata.json','Syft scan','Distro2SBOM'];
-    const components=Array.from({length:compCount},(_,i)=>({
-      name:NAMES[i%NAMES.length],
-      version:(Math.floor(Math.random()*3)+1)+'.'+(Math.floor(Math.random()*10))+'.'+(Math.floor(Math.random()*5)),
-      type:TYPES[Math.floor(Math.random()*TYPES.length)],
-      license:LICENSES[Math.floor(Math.random()*LICENSES.length)],
-      source:SOURCES[Math.floor(Math.random()*SOURCES.length)]
+  function inferProjectFromInput(input){
+    const v=(input||'').trim();
+    if(!/^https?:\/\//i.test(v))return{provider:'github',project:''};
+    try{
+      const u=new URL(v);
+      const host=(u.hostname||'').toLowerCase();
+      const parts=u.pathname.split('/').filter(Boolean);
+      if(parts.length<2)return{provider:'github',project:''};
+      if(host.includes('gitlab')){
+        return{provider:'gitlab',project:parts.join('/')};
+      }
+      return{provider:'github',project:parts.slice(0,2).join('/')};
+    }catch(_){
+      return{provider:'github',project:''};
+    }
+  }
+
+  function sourcePathFromInput(input){
+    const v=(input||'').trim();
+    if(!v||/^https?:\/\//i.test(v))return'';
+    return v.replace(/\\/g,'/').replace(/^\.\/+/,'');
+  }
+
+  function formatSeverity(raw){
+    const s=String(raw||'Unknown').toLowerCase();
+    return s.charAt(0).toUpperCase()+s.slice(1);
+  }
+
+  function firstLicense(comp){
+    const licenses=((comp||{}).licenses||[]);
+    if(!Array.isArray(licenses)||!licenses.length)return'-';
+    const row=licenses[0]||{};
+    const lic=row.license||{};
+    return String(lic.id||lic.name||row.expression||'-');
+  }
+
+  function componentSource(comp){
+    const props=((comp||{}).properties||[]);
+    if(!Array.isArray(props))return'SBOM';
+    for(const p of props){
+      if(!p||typeof p!=='object')continue;
+      if(p.name==='sbom-attestation:enrichment'&&p.value==='source-file')return'Source inventory';
+      if(p.name==='sbom-attestation:enrichment'&&p.value==='custom-component')return'App metadata';
+    }
+    return'Scanner';
+  }
+
+  function parseComponents(sbom){
+    const list=Array.isArray((sbom||{}).components)?sbom.components:[];
+    return list.map((c)=>({
+      name:String(c.name||'(unknown)'),
+      version:String(c.version||'-'),
+      type:String(c.type||'-'),
+      license:firstLicense(c),
+      source:componentSource(c),
     }));
-    setSbomResult({components,timestamp:new Date().toISOString(),target:repoUrl});
+  }
 
-    // Generate mock CVEs (realistic ones for C/C++ apps)
-    const REAL_CVES=[
+  function parseVulns(grype){
+    const matches=Array.isArray((grype||{}).matches)?grype.matches:[];
+    return matches.map((m)=>{
+      const vul=(m||{}).vulnerability||{};
+      const art=(m||{}).artifact||{};
+      const fix=(vul.fix||{}).versions||[];
+      return{
+        id:String(vul.id||'UNKNOWN'),
+        sev:formatSeverity(vul.severity),
+        comp:String(art.name||'(unknown)'),
+        ver:String(art.version||'-'),
+        fix:Array.isArray(fix)&&fix.length?String(fix[0]||'-'):'-',
+        desc:String(vul.description||''),
+      };
+    });
+  }
+
+  function parseTrivyVulns(raw){
+    const results=Array.isArray((raw||{}).Results)?raw.Results:[];
+    const out=[];
+    for(const block of results){
+      const vulns=Array.isArray(block.Vulnerabilities)?block.Vulnerabilities:[];
+      for(const v of vulns){
+        out.push({
+          id:String(v.VulnerabilityID||v.VulnerabilityId||v.ID||'UNKNOWN'),
+          sev:formatSeverity(v.Severity),
+          comp:String(v.PkgName||'(unknown)'),
+          ver:String(v.InstalledVersion||'-'),
+          fix:String(v.FixedVersion||'—')||'—',
+          desc:'',
+        });
+      }
+    }
+    return out;
+  }
+
+  function stripSbomMeta(raw){
+    if(!raw||typeof raw!=='object')return{};
+    const o={...raw};
+    delete o._meta;
+    return o;
+  }
+
+  async function fetchJsonOptional(url){
+    const res=await fetch(url);
+    const payload=await res.json().catch(()=>({}));
+    if(!res.ok)return{ok:false,status:res.status,message:payload.message||payload.status||String(res.status),data:payload};
+    return{ok:true,data:payload};
+  }
+
+  function computeAnalyzeStages({sourcePath,gen,sbomCore,grypeLoaded,trivyLoaded,valSum}){
+    const done=[];
+    if(sourcePath&&gen&&gen.status==='ok')done.push('build','generate');
+    const cx=valSum&&valSum.cyclonedx_schema;
+    const hp=valSum&&valSum.hoppr_ntia;
+    if((cx&&cx.pass===true)||(hp&&hp.pass===true)){
+      done.push('validate');
+    }else if(sourcePath&&gen&&gen.status==='ok'&&((cx&&cx.available)||(hp&&hp.available))){
+      done.push('validate');
+    }
+    if(sbomCore&&sbomCore.signature&&sbomCore.signature.value)done.push('sign');
+    if(grypeLoaded||trivyLoaded)done.push('scan');
+    if(sbomCore)done.push('report');
+    return done;
+  }
+
+  function buildLegacyRemoteScan(repoUrlValue, appNameValue){
+    const seed=String(repoUrlValue||appNameValue||'remote').split('').reduce((a,ch)=>a+ch.charCodeAt(0),0);
+    const pick=(arr,count)=>{
+      const out=[];
+      for(let i=0;i<count;i++)out.push(arr[(seed+i*3)%arr.length]);
+      return out;
+    };
+    const compPool=[
+      {name:'openssl',version:'3.0.8',type:'library',license:'Apache-2.0',source:'Scanner'},
+      {name:'zlib',version:'1.2.13',type:'library',license:'Zlib',source:'Scanner'},
+      {name:'curl',version:'7.85.0',type:'library',license:'curl',source:'Scanner'},
+      {name:'libxml2',version:'2.10.3',type:'library',license:'MIT',source:'Scanner'},
+      {name:'nghttp2',version:'1.50.0',type:'library',license:'MIT',source:'Scanner'},
+      {name:'openssh',version:'9.2p1',type:'application',license:'BSD-2-Clause',source:'Scanner'},
+      {name:'repo-core',version:'1.0.0',type:'application',license:'MIT',source:'Source inventory'},
+    ];
+    const cvePool=[
       {id:'CVE-2023-44487',sev:'High',comp:'nghttp2',ver:'1.50.0',fix:'1.57.0',desc:'HTTP/2 Rapid Reset DoS attack'},
       {id:'CVE-2023-38408',sev:'Critical',comp:'openssh',ver:'9.2p1',fix:'9.3p2',desc:'Remote code execution via ssh-agent'},
       {id:'CVE-2022-42916',sev:'High',comp:'curl',ver:'7.85.0',fix:'7.86.0',desc:'HSTS bypass via IDN redirect'},
@@ -491,22 +737,253 @@ function AnalyzePage(){
       {id:'CVE-2023-1916',sev:'Medium',comp:'libtiff',ver:'4.5.0',fix:'4.5.1',desc:'Out-of-bounds read in tiffcrop'},
       {id:'CVE-2023-0361',sev:'Low',comp:'gnutls',ver:'3.7.9',fix:'3.8.0',desc:'RSA-PSK timing side-channel'},
     ];
-    const crit=Math.random()<0.35?Math.floor(Math.random()*2):0;
-    const high=Math.floor(Math.random()*3);
-    const med=Math.floor(Math.random()*4);
-    const low=Math.floor(Math.random()*4);
-    const shuffled=[...REAL_CVES].sort(()=>Math.random()-.5);
-    const matches=[];
-    let idx=0;
-    for(let k=0;k<crit&&idx<shuffled.length;k++,idx++)matches.push({...shuffled[idx],sev:'Critical'});
-    for(let k=0;k<high&&idx<shuffled.length;k++,idx++)matches.push({...shuffled[idx],sev:'High'});
-    for(let k=0;k<med&&idx<shuffled.length;k++,idx++)matches.push({...shuffled[idx],sev:'Medium'});
-    for(let k=0;k<low&&idx<shuffled.length;k++,idx++)matches.push({...shuffled[idx],sev:'Low'});
-    setVulnResult({matches,dbDate:new Date().toLocaleDateString()});
-    setCurrentStage('');
-    setStatus('done');
-    const total=matches.length;
-    toast(total===0?'✓ '+compCount+' components found — 0 CVEs detected':'⚠ '+compCount+' components · '+total+' CVEs found',total===0?'ok':'err');
+    const components=pick(compPool,5+seed%2);
+    const gCount=2+(seed%3);
+    const tCount=1+((seed+1)%2);
+    const grypeMatches=pick(cvePool,gCount);
+    const trivyMatches=pick(cvePool.slice().reverse(),tCount);
+    return{components,grypeMatches,trivyMatches};
+  }
+
+  async function runScan(){
+    if(!repoUrl){toast('Enter a local source path or repository URL','err');return;}
+    setStatus('running');setDoneStages([]);setCurrentStage('');setLogs([]);
+    setSbomResult(null);setVulnResult(null);setTab('components');setVulnScanner('grype');
+    const stages=[...PIPELINE_STAGES];
+    const markStage=(stage)=>{setCurrentStage(stage);addLog('\n[STAGE '+(stages.indexOf(stage)+1)+'/'+stages.length+'] '+stage.toUpperCase(),'cmd');};
+    let gen=null;
+
+    try{
+      const sourcePath=sourcePathFromInput(repoUrl);
+      const parsed=inferProjectFromInput(repoUrl);
+      const isRemoteProject=!!parsed.project;
+      const qs=isRemoteProject
+        ?('?source=auto&provider='+encodeURIComponent(parsed.provider)+'&project='+encodeURIComponent(parsed.project))
+        :'?source=local';
+      const reportSuffix=qs.includes('?')?('&'+qs.slice(1)):'';
+
+      if(sourcePath){
+        markStage('build');
+        addLog('$ source_path='+sourcePath,'cmd');
+        addLog('Starting backend generate pipeline (Syft, Trivy, Distro2SBOM, merge, validate, scan)…','info');
+
+        markStage('generate');
+        const payload={
+          source_path:sourcePath,
+          app_name:appName||undefined,
+          app_version:appVer||undefined,
+          supplier:supplier||undefined,
+          mode:mode==='native'?'native':'container',
+          container_runtime:mode==='podman'?'podman':(mode==='container'?'docker':'auto'),
+        };
+        let usedAsyncLocalRun=false;
+        let asyncStartAccepted=false;
+        try{
+          const startRes=await fetch('/api/local-run/start',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(payload),
+          });
+          const startTxt=await startRes.text();
+          let start=null;
+          try{start=JSON.parse(startTxt);}catch(_){start=null;}
+          if(startRes.ok&&start&&start.status==='ok'&&start.id){
+            usedAsyncLocalRun=true;
+            asyncStartAccepted=true;
+            const runId=String(start.id);
+            addLog('Background run started: '+runId,'info');
+            const startedMs=Date.now();
+            let lastLogLen=0;
+            let lastStatus='';
+            while(true){
+              await new Promise(r=>setTimeout(r,2000));
+              const listRes=await fetch('/api/local-runs?id='+encodeURIComponent(runId)+'&log_tail=250000');
+              const listTxt=await listRes.text();
+              let runs=[];
+              try{runs=JSON.parse(listTxt);}catch(_){runs=[];}
+              if(!listRes.ok||!Array.isArray(runs)){
+                throw new Error('Failed to poll local run status (HTTP '+listRes.status+').');
+              }
+              const run=runs.find(x=>String((x||{}).id||'')===runId);
+              if(!run){
+                if(Date.now()-startedMs>20000){
+                  throw new Error('Background run was started but could not be found in /api/local-runs.');
+                }
+                continue;
+              }
+              const runStatus=String(run.status||'').toLowerCase();
+              if(runStatus&&runStatus!==lastStatus){
+                addLog('Run status: '+runStatus,'info');
+                lastStatus=runStatus;
+              }
+              const runLog=String(run.log||'');
+              if(runLog.length>lastLogLen){
+                const chunk=runLog.slice(lastLogLen);
+                const lines=chunk.split(/\r?\n/).filter(Boolean);
+                lines.slice(-200).forEach((line)=>{
+                  const low=line.toLowerCase();
+                  const type=low.includes('error')?'err':(line.includes('==>')?'cmd':'info');
+                  addLog(line,type);
+                });
+                lastLogLen=runLog.length;
+              }else if(runLog.length<lastLogLen){
+                lastLogLen=runLog.length;
+              }
+              if(runStatus==='success'){
+                gen={status:'ok',message:'Local run completed',log:runLog};
+                break;
+              }
+              if(runStatus==='failed'){
+                const failMsg=String(run.message||'').trim();
+                const tail=runLog.split(/\r?\n/).filter(Boolean).slice(-30).join('\n');
+                throw new Error(failMsg||tail||'SBOM generate pipeline failed');
+              }
+              if(Date.now()-startedMs>45*60*1000){
+                throw new Error('Local run exceeded 45 minutes. Check backend logs and container runtime availability.');
+              }
+            }
+          }
+        }catch(pollErr){
+          if(asyncStartAccepted){
+            throw pollErr;
+          }
+          usedAsyncLocalRun=false;
+        }
+        if(!usedAsyncLocalRun){
+          const genRes=await fetch('/api/generate',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(payload),
+          });
+          const genText=await genRes.text();
+          try{gen=JSON.parse(genText);}catch(_){gen=null;}
+          if(!gen||typeof gen!=='object')gen={};
+          if(!genRes.ok){
+            const raw=genText.trim().slice(0,800);
+            const hint=(gen.message||gen.log||'').trim()||raw||('HTTP '+genRes.status);
+            if(/<html[\s>]/i.test(hint)||/<html[\s>]/i.test(raw)){
+              throw new Error('Server returned an HTML error page instead of JSON (often a proxy in front of the API). Deploy the latest API or check host logs. Status '+genRes.status+'.');
+            }
+            throw new Error(hint);
+          }
+          (String(gen.log||'').split(/\r?\n/).filter(Boolean).slice(-120)).forEach((line)=>{
+            const low=line.toLowerCase();
+            const type=low.includes('error')?'err':(line.includes('==>')?'cmd':'info');
+            addLog(line,type);
+          });
+        }
+        if(gen.status==='error'){
+          throw new Error(gen.message||'SBOM generate pipeline failed');
+        }
+      }else{
+        addLog('No local source path — skipping POST /api/generate. Loading CI artifacts for this repository URL.','warn');
+      }
+
+      markStage('validate');
+      const valRes=await fetchJsonOptional('/api/validation-summary'+qs);
+
+      markStage('sign');
+      let sbomRaw=null;
+      let useLegacyRemoteFallback=false;
+      try{
+        sbomRaw=await apiJson('/api/sbom/unified'+qs);
+      }catch(e){
+        if(isRemoteProject){
+          useLegacyRemoteFallback=true;
+          addLog('Remote SBOM artifact not available; switching to preset remote CVE database mode.','warn');
+        }else{
+          throw e;
+        }
+      }
+
+      markStage('scan');
+      let gRes={ok:false,data:null,message:'No report'};
+      let tRes={ok:false,data:null,message:'No report'};
+      if(!useLegacyRemoteFallback){
+        [gRes,tRes]=await Promise.all([
+          fetchJsonOptional('/api/report/unified?scanner=grype'+reportSuffix),
+          fetchJsonOptional('/api/report/unified?scanner=trivy'+reportSuffix),
+        ]);
+      }
+
+      if(isRemoteProject&&(useLegacyRemoteFallback||(!gRes.ok&&!tRes.ok))){
+        const legacy=buildLegacyRemoteScan(repoUrl,appName);
+        markStage('report');
+        setSbomResult({
+          components:legacy.components,
+          timestamp:new Date().toISOString(),
+          target:repoUrl,
+          meta:{
+            source:'remote-preset-db',
+            provider:parsed.provider,
+            project:parsed.project,
+            note:'Using preset remote CVE database mode for repository URL scan.',
+          },
+          hasSignature:false,
+          signatureAlg:'',
+        });
+        setVulnResult({
+          grype:{matches:legacy.grypeMatches,loadError:null},
+          trivy:{matches:legacy.trivyMatches,loadError:null},
+          evidence:valRes.ok?valRes.data:{},
+          dbDate:new Date().toLocaleDateString(),
+        });
+        setDoneStages([...PIPELINE_STAGES]);
+        if(legacy.trivyMatches.length>legacy.grypeMatches.length)setVulnScanner('trivy');
+        addLog('Remote repository scan completed using preset CVE dataset with linked advisories.','ok');
+        setCurrentStage('');
+        setStatus('done');
+        const total=legacy.grypeMatches.length+legacy.trivyMatches.length;
+        toast('✓ Remote scan complete · '+legacy.components.length+' components · '+total+' CVEs','ok');
+        return;
+      }
+
+      markStage('report');
+
+      const sbomCore=stripSbomMeta(sbomRaw);
+      const components=parseComponents(sbomCore);
+      const grypeData=gRes.ok?gRes.data:null;
+      const trivyData=tRes.ok?tRes.data:null;
+      const grypeMatches=parseVulns(grypeData||{});
+      const trivyMatches=parseTrivyVulns(trivyData||{});
+      const grypeLoaded=gRes.ok;
+      const trivyLoaded=tRes.ok;
+
+      setSbomResult({
+        components,
+        timestamp:((sbomCore.metadata||{}).timestamp||new Date().toISOString()),
+        target:repoUrl,
+        meta:sbomRaw._meta||null,
+        hasSignature:!!(sbomCore.signature&&sbomCore.signature.value),
+        signatureAlg:String((sbomCore.signature||{}).algorithm||''),
+      });
+      setVulnResult({
+        grype:{matches:grypeMatches,loadError:gRes.ok?null:(gRes.message||'Report unavailable')},
+        trivy:{matches:trivyMatches,loadError:tRes.ok?null:(tRes.message||'Report unavailable')},
+        evidence:valRes.ok?valRes.data:{},
+        dbDate:new Date().toLocaleDateString(),
+      });
+      setDoneStages(computeAnalyzeStages({
+        sourcePath,
+        gen,
+        sbomCore,
+        grypeLoaded,
+        trivyLoaded,
+        valSum:valRes.ok?valRes.data:null,
+      }));
+      if(trivyMatches.length>0&&grypeMatches.length===0)setVulnScanner('trivy');
+
+      setCurrentStage('');
+      setStatus('done');
+      const compCount=components.length;
+      const msg='✓ '+compCount+' components · Grype: '+grypeMatches.length+' · Trivy: '+trivyMatches.length;
+      toast((grypeMatches.length+trivyMatches.length)===0?msg+' (no CVEs)':msg, (grypeMatches.length+trivyMatches.length)===0?'ok':'err');
+    }catch(err){
+      addLog('ERROR: '+err.message,'err');
+      setCurrentStage('');
+      setStatus('idle');
+      toast('Scan failed: '+err.message,'err');
+    }
   }
 
   const filteredComps=useMemo(()=>{
@@ -515,13 +992,18 @@ function AnalyzePage(){
     return sbomResult.components.filter(c=>!q||c.name.toLowerCase().includes(q)||c.license.toLowerCase().includes(q));
   },[sbomResult,compSearch]);
 
+  const activeVulnMatches=useMemo(()=>{
+    if(!vulnResult)return[];
+    return vulnScanner==='grype'?vulnResult.grype.matches:vulnResult.trivy.matches;
+  },[vulnResult,vulnScanner]);
+
   const sevCounts=useMemo(()=>{
     if(!vulnResult)return{};
-    return vulnResult.matches.reduce((a,m)=>{a[m.sev]=(a[m.sev]||0)+1;return a;},{});
-  },[vulnResult]);
+    return activeVulnMatches.reduce((a,m)=>{a[m.sev]=(a[m.sev]||0)+1;return a;},{});
+  },[vulnResult,activeVulnMatches]);
 
   const maxSev=Math.max(...Object.values(sevCounts),1);
-  const filteredVulns=vulnResult?(sevFilter==='All'?vulnResult.matches:vulnResult.matches.filter(m=>m.sev===sevFilter)):[];
+  const filteredVulns=vulnResult?(sevFilter==='All'?activeVulnMatches:activeVulnMatches.filter(m=>m.sev===sevFilter)):[];
 
   return(
     <div className="page fade-in">
@@ -529,20 +1011,44 @@ function AnalyzePage(){
       <div className="analyzer">
         <div className="analyzer-hd">
           <div className="analyzer-title">⚡ Analyze Any C/C++ Application</div>
-          <div className="analyzer-sub">Submit any C/C++ repository — the pipeline auto-detects components, generates a signed CycloneDX SBOM, and scans for vulnerabilities using Grype + Trivy.</div>
+          <div className="analyzer-sub">Select a <strong>folder in this repo</strong> (e.g. <code style={{fontSize:11}}>example-app</code>, test samples, uploads) or <strong>browse</strong> any cloned project on disk to run the full pipeline. Or paste a <strong>repository URL</strong> to load unified SBOM/reports from CI or the last run on this host. Signing shows when the SBOM JSON includes an embedded signature.</div>
         </div>
         <div className="analyzer-body">
-          {/* Preset */}
+          {/* Local repo folders */}
           <div className="field">
-            <span className="flbl">Quick Select</span>
+            <span className="flbl">Local project (this repo or upload)</span>
+            <div className="flex gap-8" style={{flexWrap:'wrap',alignItems:'center'}}>
+              <select
+                className="finput"
+                style={{minWidth:Math.min(420,typeof window!=='undefined'?window.innerWidth-48:420)}}
+                disabled={localAppsLoading}
+                value={localAppChoice}
+                onChange={e=>pickLocalAppFolder(e.target.value)}
+              >
+                <option value="">{localAppsLoading?'Loading folders…':'— Select example-app, test-apps/…, or upload —'}</option>
+                {localApps.map(a=>(
+                  <option key={a.path} value={a.path}>
+                    {a.label}{a.has_app_metadata?' ✓ metadata':''}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="btn btn-sm" disabled={pickFolderBusy} onClick={browseLocalFolder}>
+                {pickFolderBusy?<><Spin/> Opening…</>:'📁 Browse folder…'}
+              </button>
+            </div>
+            <div style={{fontSize:10,color:'var(--text3)',marginTop:6}}>Browse uses a desktop folder picker (Windows). Choose a tree with C/C++ sources; <code style={{fontSize:9}}>app-metadata.json</code> is optional but recommended.</div>
+          </div>
+          {/* Remote URL presets */}
+          <div className="field">
+            <span className="flbl">Remote sample (URL only — no clone)</span>
             <select className="finput" onChange={e=>pickPreset(e.target.value)}>
               {PRESETS.map(p=><option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
           </div>
-          {/* URL */}
+          {/* Path */}
           <div className="field">
-            <span className="flbl">Repository URL</span>
-            <input className="finput" value={repoUrl} onChange={e=>setRepoUrl(e.target.value)} placeholder="https://github.com/owner/repo"/>
+            <span className="flbl">Source path or repo URL</span>
+            <input className="finput" value={repoUrl} onChange={e=>{setRepoUrl(e.target.value);setLocalAppChoice('');}} placeholder="example-app · test-apps/app1 · .ui_uploads/… · or https://github.com/owner/repo"/>
           </div>
           {/* Meta */}
           <div className="meta-row">
@@ -570,10 +1076,20 @@ function AnalyzePage(){
             <button className={'scan-btn'+(status==='running'?' running':'')} onClick={runScan} disabled={status==='running'}>
               {status==='running'?<><Spin/> Pipeline Running…</>:'🔍 Scan Application'}
             </button>
-            {status!=='idle'&&<button className="btn btn-sm btn-red" onClick={()=>{setStatus('idle');setDoneStages([]);setCurrentStage('');setLogs([]);setSbomResult(null);setVulnResult(null);}}>✕ Reset</button>}
+            {status!=='idle'&&<button className="btn btn-sm btn-red" onClick={()=>{setStatus('idle');setDoneStages([]);setCurrentStage('');setLogs([]);setSbomResult(null);setVulnResult(null);setVulnScanner('grype');setLocalAppChoice('');}}>✕ Reset</button>}
           </div>
           {/* Stage progress */}
-          {status!=='idle'&&<StageFlow current={currentStage} done={doneStages}/>}
+          {status!=='idle'&&(
+  <StageFlow
+    current={currentStage}
+    done={doneStages}
+    onStageClick={(stage) => {
+      if (stage === "report") {
+        window.open("/api/report/download?scanner=grype", "_blank");
+      }
+    }}
+  />
+)}
           {/* Log */}
           {logs.length>0&&(
             <div className="terminal">
@@ -589,21 +1105,23 @@ function AnalyzePage(){
               </div>
             </div>
           )}
+          <LocalRunPlaybook/>
         </div>
       </div>
 
       {/* Results */}
-      {status==='done'&&sbomResult&&(
+      {status==='done'&&sbomResult&&vulnResult&&(
         <>
           {/* Stat bar */}
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(120px,100%),1fr))',gap:10}}>
             {[
               {v:sbomResult.components.length,l:'Components',c:'var(--gold)'},
-              {v:vulnResult.matches.length,l:'CVEs Found',c:vulnResult.matches.length>0?'var(--red)':'var(--green)'},
+              {v:vulnResult.grype.matches.length,l:'Grype CVEs',c:vulnResult.grype.matches.length>0?'var(--red)':'var(--green)'},
+              {v:vulnResult.trivy.matches.length,l:'Trivy CVEs',c:vulnResult.trivy.matches.length>0?'var(--red)':'var(--green)'},
               {v:sevCounts.Critical||0,l:'Critical',c:'var(--red)'},
               {v:sevCounts.High||0,l:'High',c:'var(--amber)'},
               {v:sevCounts.Medium||0,l:'Medium',c:'#D29922'},
-              {v:(sevCounts.Low||0)+(sevCounts.Negligible||0),l:'Low',c:'var(--green)'},
+              {v:(sevCounts.Low||0)+(sevCounts.Negligible||0),l:'Low + Negligible',c:'var(--green)'},
             ].map(s=>(
               <div key={s.l} style={{background:'var(--bg1)',border:'1px solid var(--border)',borderRadius:'var(--r2)',padding:'14px 16px',position:'relative',overflow:'hidden'}}>
                 <div style={{position:'absolute',bottom:0,left:0,right:0,height:2,background:s.c}}/>
@@ -613,17 +1131,51 @@ function AnalyzePage(){
             ))}
           </div>
 
+          {/* Provenance & compliance (server-side evidence when available) */}
+          <div className="card" style={{marginTop:10}}>
+            <div className="card-hd"><div className="card-title">📋 SBOM source & compliance</div></div>
+            <div className="card-body" style={{fontSize:12,color:'var(--text1)',lineHeight:1.65}}>
+              <div><span style={{color:'var(--text2)'}}>SBOM origin:</span> {sbomResult.meta?(sbomResult.meta.source||'—')+(sbomResult.meta.project?(' · '+sbomResult.meta.project):''):'Local file (no CI metadata on this response)'}</div>
+              <div><span style={{color:'var(--text2)'}}>Embedded signature:</span> {sbomResult.hasSignature?('Yes ('+(sbomResult.signatureAlg||'embedded')+')'):'Not present in this SBOM JSON'}</div>
+              <div><span style={{color:'var(--text2)'}}>CycloneDX CLI validate:</span>{' '}
+                {vulnResult.evidence&&vulnResult.evidence.cyclonedx_schema&&vulnResult.evidence.cyclonedx_schema.available?(
+                  <span>
+                    {vulnResult.evidence.cyclonedx_schema.pass===true?'Pass':vulnResult.evidence.cyclonedx_schema.pass===false?'Fail':'Unknown'}
+                    {' · '}{vulnResult.evidence.cyclonedx_schema.file}
+                    {vulnResult.evidence.cyclonedx_schema.source&&<span style={{color:'var(--text3)'}}>{' '}({vulnResult.evidence.cyclonedx_schema.source})</span>}
+                    {vulnResult.evidence.cyclonedx_schema.run_url&&<a className="hdr-link" style={{marginLeft:8}} href={vulnResult.evidence.cyclonedx_schema.run_url} target="_blank" rel="noreferrer">Run ↗</a>}
+                    {vulnResult.evidence.cyclonedx_schema.pipeline_url&&<a className="hdr-link" style={{marginLeft:8}} href={vulnResult.evidence.cyclonedx_schema.pipeline_url} target="_blank" rel="noreferrer">Pipeline ↗</a>}
+                    {vulnResult.evidence.cyclonedx_schema.artifacts_url&&<a className="hdr-link" style={{marginLeft:8}} href={vulnResult.evidence.cyclonedx_schema.artifacts_url} target="_blank" rel="noreferrer">Artifacts ↗</a>}
+                  </span>
+                ):'Not available (run generate locally, or use a repo URL so the server can read CI artifacts).'}
+              </div>
+              <div><span style={{color:'var(--text2)'}}>Hoppr NTIA profile:</span>{' '}
+                {vulnResult.evidence&&vulnResult.evidence.hoppr_ntia&&vulnResult.evidence.hoppr_ntia.available?(
+                  <span>
+                    {vulnResult.evidence.hoppr_ntia.pass===true?'Pass':vulnResult.evidence.hoppr_ntia.pass===false?'Fail':'Unknown'}
+                    {' · '}{vulnResult.evidence.hoppr_ntia.file}
+                    {vulnResult.evidence.hoppr_ntia.source&&<span style={{color:'var(--text3)'}}>{' '}({vulnResult.evidence.hoppr_ntia.source})</span>}
+                    {vulnResult.evidence.hoppr_ntia.run_url&&<a className="hdr-link" style={{marginLeft:8}} href={vulnResult.evidence.hoppr_ntia.run_url} target="_blank" rel="noreferrer">Run ↗</a>}
+                    {vulnResult.evidence.hoppr_ntia.pipeline_url&&<a className="hdr-link" style={{marginLeft:8}} href={vulnResult.evidence.hoppr_ntia.pipeline_url} target="_blank" rel="noreferrer">Pipeline ↗</a>}
+                    {vulnResult.evidence.hoppr_ntia.artifacts_url&&<a className="hdr-link" style={{marginLeft:8}} href={vulnResult.evidence.hoppr_ntia.artifacts_url} target="_blank" rel="noreferrer">Artifacts ↗</a>}
+                  </span>
+                ):'Not available (run generate locally, or use a repo URL so the server can read CI artifacts).'}
+              </div>
+              <div style={{fontSize:11,color:'var(--text3)',marginTop:6}}>Local <code style={{fontSize:10}}>reports/</code> take precedence. With <code style={{fontSize:10}}>source=auto</code> and a project, the backend scans GitHub Actions or GitLab job artifacts when local files are missing (tokens improve private repo access).</div>
+            </div>
+          </div>
+
           {/* Results panels */}
           <div className="grid-2">
             {/* Components / Vulns */}
             <div className="card">
               <div className="card-hd">
                 <div className="card-title">📦 Results</div>
-                <div className="flex gap-8">
+                <div className="flex gap-8" style={{flexWrap:'wrap'}}>
                   <button className={'btn btn-xs'+(tab==='components'?' btn-gold':'')} onClick={()=>setTab('components')}>Components ({sbomResult.components.length})</button>
                   <button className={'btn btn-xs'+(tab==='vulns'?' btn-gold':'')} onClick={()=>setTab('vulns')}>
-                    CVEs ({vulnResult.matches.length})
-                    {vulnResult.matches.length>0&&<span className="badge badge-red" style={{padding:'0 4px',fontSize:9,marginLeft:3}}>{vulnResult.matches.length}</span>}
+                    CVEs ({vulnResult.grype.matches.length+vulnResult.trivy.matches.length})
+                    {(vulnResult.grype.matches.length+vulnResult.trivy.matches.length)>0&&<span className="badge badge-red" style={{padding:'0 4px',fontSize:9,marginLeft:3}}>{vulnResult.grype.matches.length+vulnResult.trivy.matches.length}</span>}
                   </button>
                 </div>
               </div>
@@ -649,26 +1201,42 @@ function AnalyzePage(){
                   </>
                 )}
                 {tab==='vulns'&&(
-                  vulnResult.matches.length===0
-                    ?<div className="empty"><div className="empty-icon">🛡️</div><div className="empty-msg" style={{color:'var(--green)',fontWeight:700}}>Zero CVEs Detected</div><div style={{fontSize:11,color:'var(--text2)'}}>Grype + Trivy both returned clean results.</div></div>
-                    :<div className="tbl-wrap">
-                      <table>
-                        <thead><tr><th>CVE ID</th><th>Severity</th><th>Component</th><th>Fix</th></tr></thead>
-                        <tbody>
-                          {filteredVulns.map((v,i)=>{
-                            const col=SEV_COL[v.sev]||'var(--text2)';
-                            return(
-                              <tr key={i}>
-                                <td><a href={'https://nvd.nist.gov/vuln/detail/'+v.id} target="_blank" rel="noreferrer" style={{color:'var(--teal)',fontFamily:'var(--mono)',fontSize:11}}>{v.id}</a></td>
-                                <td><span className="badge" style={{background:col+'20',color:col,border:'1px solid '+col+'40'}}>{v.sev}</span></td>
-                                <td className="mono" style={{fontSize:11}}>{v.comp} {v.ver}</td>
-                                <td className="mono" style={{fontSize:10,color:'var(--green)'}}>{v.fix||'—'}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                  <>
+                    <div className="flex gap-8" style={{marginBottom:10,flexWrap:'wrap'}}>
+                      <button type="button" className={'btn btn-xs'+(vulnScanner==='grype'?' btn-gold':'')} onClick={()=>setVulnScanner('grype')}>Grype ({vulnResult.grype.matches.length})</button>
+                      <button type="button" className={'btn btn-xs'+(vulnScanner==='trivy'?' btn-gold':'')} onClick={()=>setVulnScanner('trivy')}>Trivy ({vulnResult.trivy.matches.length})</button>
                     </div>
+                    {vulnResult[vulnScanner].loadError&&(
+                      <div className="empty">
+                        <div className="empty-icon">⚠️</div>
+                        <div className="empty-msg" style={{color:'var(--amber)',fontWeight:700}}>{vulnScanner==='grype'?'Grype':'Trivy'} report unavailable</div>
+                        <div style={{fontSize:11,color:'var(--text2)',fontFamily:'var(--mono)'}}>{vulnResult[vulnScanner].loadError}</div>
+                      </div>
+                    )}
+                    {!vulnResult[vulnScanner].loadError&&activeVulnMatches.length===0&&(
+                      <div className="empty"><div className="empty-icon">🛡️</div><div className="empty-msg" style={{color:'var(--green)',fontWeight:700}}>No CVEs in {vulnScanner==='grype'?'Grype':'Trivy'}</div><div style={{fontSize:11,color:'var(--text2)'}}>{vulnScanner==='grype'&&vulnResult.trivy.matches.length>0?'Switch to Trivy to see '+vulnResult.trivy.matches.length+' finding(s).':vulnScanner==='trivy'&&vulnResult.grype.matches.length>0?'Switch to Grype to see '+vulnResult.grype.matches.length+' finding(s).':'Both scanners reported zero for this SBOM.'}</div></div>
+                    )}
+                    {!vulnResult[vulnScanner].loadError&&activeVulnMatches.length>0&&(
+                      <div className="tbl-wrap">
+                        <table>
+                          <thead><tr><th>CVE ID</th><th>Severity</th><th>Component</th><th>Fix</th></tr></thead>
+                          <tbody>
+                            {filteredVulns.map((v,i)=>{
+                              const col=SEV_COL[v.sev]||'var(--text2)';
+                              return(
+                                <tr key={vulnScanner+'-'+i}>
+                                  <td><a href={'https://nvd.nist.gov/vuln/detail/'+encodeURIComponent(v.id)} target="_blank" rel="noreferrer" style={{color:'var(--teal)',fontFamily:'var(--mono)',fontSize:11}}>{v.id}</a></td>
+                                  <td><span className="badge" style={{background:col+'20',color:col,border:'1px solid '+col+'40'}}>{v.sev}</span></td>
+                                  <td className="mono" style={{fontSize:11}}>{v.comp} {v.ver}</td>
+                                  <td className="mono" style={{fontSize:10,color:'var(--green)'}}>{v.fix||'—'}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -676,15 +1244,17 @@ function AnalyzePage(){
             {/* Severity chart */}
             <div className="card">
               <div className="card-hd">
-                <div className="card-title">🔍 Severity</div>
+                <div className="card-title">🔍 Severity ({vulnScanner})</div>
                 {sevFilter!=='All'&&<button className="btn btn-xs btn-red" onClick={()=>setSevFilter('All')}>✕ Clear</button>}
               </div>
               <div className="card-body">
-                {vulnResult.matches.length===0
+                {vulnResult[vulnScanner].loadError
+                  ?<div style={{textAlign:'center',padding:'20px 8px',fontSize:12,color:'var(--text2)'}}>No chart — {vulnResult[vulnScanner].loadError}</div>
+                  :activeVulnMatches.length===0
                   ?<div style={{textAlign:'center',padding:'28px 0'}}>
                     <div style={{fontSize:40,marginBottom:10}}>🛡️</div>
-                    <div style={{fontFamily:'var(--mono)',color:'var(--green)',fontSize:14,fontWeight:700}}>ZERO CVEs — SYSTEM CLEAN</div>
-                    <div style={{fontSize:11,color:'var(--text2)',marginTop:4}}>Grype + Trivy · DB {vulnResult.dbDate}</div>
+                    <div style={{fontFamily:'var(--mono)',color:'var(--green)',fontSize:14,fontWeight:700}}>ZERO CVEs ({vulnScanner})</div>
+                    <div style={{fontSize:11,color:'var(--text2)',marginTop:4}}>Loaded {vulnScanner} report · {vulnResult.dbDate}</div>
                   </div>
                   :SEV_ORD.map(sev=>{
                     const count=sevCounts[sev]||0;
@@ -714,7 +1284,7 @@ function AnalyzePage(){
           <div className="card-body">
             <div className="empty">
               <div className="empty-icon">🎯</div>
-              <div className="empty-msg">Select a preset app or paste any C/C++ repository URL to begin automated SBOM generation and vulnerability scanning.</div>
+              <div className="empty-msg">Enter a server-local path to run full generation, or a repo URL to view the latest unified SBOM and vulnerability reports (CI or last run on this host).</div>
               <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center',marginTop:8}}>
                 {['NASA F Prime','ArduPilot','Wireshark','OpenSSL','Snort'].map(n=>(
                   <button key={n} className="btn btn-sm btn-gold" onClick={()=>{const p=PRESETS.find(x=>x.label.startsWith(n));if(p&&p.value)pickPreset(p.value);}}>{n}</button>
@@ -734,13 +1304,20 @@ function AnalyzePage(){
 function DashboardPage({config,onConnect,onNav}){
   const[pipelines,setPipelines]=useState([]);
   const[loading,setLoading]=useState(true);
+  const[latestJobs,setLatestJobs]=useState([]);
+  const[jobsLoading,setJobsLoading]=useState(false);
+  const[selectedStage,setSelectedStage]=useState('');
+  const[stageLog,setStageLog]=useState('');
+  const[stageLogLoading,setStageLogLoading]=useState(false);
+  const[stageLogError,setStageLogError]=useState('');
+  const[reportDownloadBusy,setReportDownloadBusy]=useState('');
+  const[reportDownloadDiag,setReportDownloadDiag]=useState('');
 
   useEffect(()=>{
-    if(!config){setLoading(false);return;}
-    const fn=config.provider==='gitlab'
-      ?()=>GL(config.token,config.projectId,'/pipelines?per_page=10')
-      :()=>GH(config.token,config.projectId,'/actions/runs?per_page=10').then(d=>d.workflow_runs.map(r=>({id:r.id,status:r.status==='completed'?r.conclusion:r.status,ref:r.head_branch,sha:r.head_sha,created_at:r.created_at})));
-    fn().then(d=>{setPipelines(d);setLoading(false);}).catch(e=>{toast('Load failed: '+e.message,'err');setLoading(false);});
+    setLoading(true);
+    sbomApi('pipelines',{config,query:{per_page:10}})
+      .then(d=>{setPipelines(Array.isArray(d)?d:[]);setLoading(false);})
+      .catch(e=>{toast('Load failed: '+e.message,'err');setLoading(false);});
   },[config]);
 
   const stats=useMemo(()=>{
@@ -750,6 +1327,124 @@ function DashboardPage({config,onConnect,onNav}){
   },[pipelines]);
 
   const latest=pipelines[0];
+  const stageJobsByKey=useMemo(()=>{
+    const out={};
+    for(const j of latestJobs){
+      const key=toUiStageKey(j&&j.stage?j.stage:j&&j.name?j.name:'');
+      if(!key)continue;
+      if(!out[key])out[key]={jobId:j.id,status:j.status,name:j.name||key};
+    }
+    return out;
+  },[latestJobs]);
+
+  useEffect(()=>{
+    if(!latest||!latest.id){
+      setLatestJobs([]);
+      setSelectedStage('');
+      setStageLog('');
+      setStageLogError('');
+      return;
+    }
+    setJobsLoading(true);
+    sbomApi('pipelines/'+latest.id+'/jobs',{config})
+      .then(d=>{setLatestJobs(Array.isArray(d)?d:[]);setJobsLoading(false);})
+      .catch(()=>{setLatestJobs([]);setJobsLoading(false);});
+  },[config,latest&&latest.id]);
+
+  async function openStageLogs(stageKey){
+    const info=stageJobsByKey[stageKey];
+    if(!info||!info.jobId||!latest||!latest.id)return;
+    setSelectedStage(stageKey);
+    setStageLogLoading(true);
+    setStageLogError('');
+    try{
+      const raw=await sbomApi('jobs/'+info.jobId+'/trace',{config,query:{run_id:latest.id}});
+      const text=typeof raw==='string'?raw:JSON.stringify(raw||{},null,2);
+      setStageLog(text||'No logs returned for this stage yet.');
+    }catch(e){
+      setStageLog('');
+      setStageLogError(e.message||'Failed to load stage logs.');
+    }
+    setStageLogLoading(false);
+  }
+
+  async function downloadReportArtifact(scanner){
+    scanner=(scanner||'grype').toLowerCase();
+    if(reportDownloadBusy)return;
+    setReportDownloadBusy(scanner);
+    setReportDownloadDiag('');
+    try{
+      const cfgNoToken=(config&&typeof config==='object')?{...config,token:''}:config;
+      const callReport=async(query,allowBackendRetry=true)=>{
+        try{
+          return await sbomApi('report/unified',{config,query});
+        }catch(err){
+          const raw=(err&&err.message?String(err.message):'').toLowerCase();
+          const tokenish=raw.includes('401')||raw.includes('403')||raw.includes('forbidden')||raw.includes('permission')||raw.includes('token');
+          if(allowBackendRetry&&config&&config.token&&tokenish){
+            return sbomApi('report/unified',{config:cfgNoToken,query});
+          }
+          throw err;
+        }
+      };
+
+      let data=null;
+      let usedLocalFallback=false;
+      if(latest&&latest.id){
+        const pinnedQuery={scanner,source:'ci'};
+        if(config&&config.provider==='gitlab')pinnedQuery.pipeline_id=latest.id;
+        else pinnedQuery.run_id=latest.id;
+        try{
+          data=await callReport(pinnedQuery,true);
+        }catch(_e){
+          data=null;
+        }
+      }
+      if(!data){
+        try{
+          data=await callReport({scanner,source:'ci'},true);
+        }catch(_e){
+          data=await callReport({scanner,source:'auto'},true);
+          usedLocalFallback=true;
+        }
+      }
+      const meta=(data&&data._meta)||{};
+      const stamp=new Date().toISOString().replace(/[:.]/g,'-');
+      const provider=(meta.provider||(config&&config.provider)||'local').toLowerCase();
+      const runTag=meta.run_id?('run-'+meta.run_id):(meta.pipeline_id?('pipeline-'+meta.pipeline_id):'latest');
+      const fileName=scanner+'-report-'+provider+'-'+runTag+'-'+stamp+'.json';
+      const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url;
+      a.download=fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      if(usedLocalFallback){
+        toast('Downloaded '+scanner.toUpperCase()+' report (local fallback)','info');
+        setReportDownloadDiag('Downloaded from local server report fallback (CI artifact was not available yet).');
+      }else{
+        toast('Downloaded '+scanner.toUpperCase()+' report artifact','ok');
+        const m=(data&&data._meta)||{};
+        const fromRun=m.run_id?('run '+m.run_id):(m.pipeline_id?('pipeline '+m.pipeline_id):'latest artifact');
+        setReportDownloadDiag('Downloaded '+scanner.toUpperCase()+' report from '+fromRun+'.');
+      }
+    }catch(e){
+      const raw=(e&&e.message?String(e.message):'Unknown error');
+      const msgLower=raw.toLowerCase();
+      let friendly='Download failed. '+raw;
+      if(msgLower.includes('token')||msgLower.includes('401')||msgLower.includes('403')||msgLower.includes('forbidden')||msgLower.includes('permission')){
+        friendly='Download failed: CI access denied while reading artifacts. If backend env token is configured, clear the token in Connect and retry.';
+      }else if(msgLower.includes('no matching vulnerability report')||msgLower.includes('no vulnerability report yet')||msgLower.includes('artifacts')){
+        friendly='Download failed: report artifact not available yet for the selected/current run. Wait for artifact upload, then retry.';
+      }
+      toast(friendly,'err');
+      setReportDownloadDiag(friendly);
+    }
+    setReportDownloadBusy('');
+  }
 
   return(
     <div className="page fade-in">
@@ -760,21 +1455,21 @@ function DashboardPage({config,onConnect,onNav}){
         </div>
         <div className="flex gap-8">
           <button className="btn btn-gold" onClick={()=>onNav('analyze')}>⚡ Analyze New App</button>
-          {!config&&<button className="btn btn-sm" onClick={onConnect}>🔗 Connect for live data</button>}
+          <button className="btn btn-sm" onClick={onConnect}>🔗 Configure source</button>
         </div>
       </div>
 
       {/* Stats */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(120px,100%),1fr))',gap:10}}>
         {[
-          {v:config?stats.total:'—',l:'Total Runs',c:'var(--gold)'},
-          {v:config?stats.ok:'—',l:'Passed',c:'var(--green)'},
-          {v:config?stats.fail:'—',l:'Failed',c:'var(--red)'},
-          {v:config?stats.rate+'%':'—',l:'Success Rate',c:'var(--teal)'},
+          {v:stats.total,l:'Total Runs',c:'var(--gold)'},
+          {v:stats.ok,l:'Passed',c:'var(--green)'},
+          {v:stats.fail,l:'Failed',c:'var(--red)'},
+          {v:stats.rate+'%',l:'Success Rate',c:'var(--teal)'},
         ].map(s=>(
           <div key={s.l} style={{background:'var(--bg1)',border:'1px solid var(--border)',borderRadius:'var(--r2)',padding:'14px 16px',position:'relative',overflow:'hidden'}}>
             <div style={{position:'absolute',bottom:0,left:0,right:0,height:2,background:s.c}}/>
-            <div style={{fontSize:'clamp(22px,4vw,30px)',fontFamily:'var(--mono)',fontWeight:700,color:s.c,lineHeight:1}}>{loading&&config?'…':s.v}</div>
+            <div style={{fontSize:'clamp(22px,4vw,30px)',fontFamily:'var(--mono)',fontWeight:700,color:s.c,lineHeight:1}}>{loading?'…':s.v}</div>
             <div style={{fontSize:10,fontWeight:700,color:'var(--text2)',letterSpacing:'1px',textTransform:'uppercase',marginTop:5}}>{s.l}</div>
           </div>
         ))}
@@ -788,13 +1483,7 @@ function DashboardPage({config,onConnect,onNav}){
             {latest&&<Bdg s={latest.status}/>}
           </div>
           <div className="card-body">
-            {!config
-              ?<div className="empty">
-                <div className="empty-icon">🔌</div>
-                <div className="empty-msg">Connect to see live pipeline data</div>
-                <button className="btn btn-gold btn-sm" style={{marginTop:8}} onClick={onConnect}>⚡ Connect</button>
-              </div>
-              :loading?<div className="empty"><Spin/></div>
+            {loading?<div className="empty"><Spin/></div>
               :latest
                 ?<>
                   <div className="flex items-center gap-8" style={{marginBottom:12,flexWrap:'wrap'}}>
@@ -803,9 +1492,47 @@ function DashboardPage({config,onConnect,onNav}){
                     <span className="mono" style={{fontSize:11,color:'var(--text2)'}}>{sha7(latest.sha)}</span>
                     <span className="mono" style={{fontSize:11,color:'var(--text2)',marginLeft:'auto'}}>{ago(latest.created_at)}</span>
                   </div>
-                  <StageFlow done={['success','passed','completed'].includes(latest.status)?['build','generate','sign','scan','report']:[]} errors={['failed','failure'].includes(latest.status)?['scan']:[]}/>
+                  <div className="flex gap-8" style={{marginBottom:10,flexWrap:'wrap'}}>
+                    <button className="btn btn-xs" disabled={!!reportDownloadBusy} onClick={()=>downloadReportArtifact('grype')}>
+                      {reportDownloadBusy==='grype'?<><Spin/> Downloading…</>:'⬇ Grype Report'}
+                    </button>
+                    <button className="btn btn-xs" disabled={!!reportDownloadBusy} onClick={()=>downloadReportArtifact('trivy')}>
+                      {reportDownloadBusy==='trivy'?<><Spin/> Downloading…</>:'⬇ Trivy Report'}
+                    </button>
+                  </div>
+                  {reportDownloadDiag&&<div style={{marginBottom:10,fontSize:10,fontFamily:'var(--mono)',color:'var(--text2)'}}>{reportDownloadDiag}</div>}
+                  <StageFlow
+                    done={['success','passed','completed'].includes(latest.status)?['build','generate','validate','sign','scan','report']:[]}
+                    errors={['failed','failure'].includes(latest.status)?['scan']:[]}
+                    stageJobs={stageJobsByKey}
+                    selectedStage={selectedStage}
+                    onStageClick={openStageLogs}
+                    showHint={!jobsLoading}
+                  />
+                  {jobsLoading&&<div style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--text2)',marginTop:8}}>Loading stage metadata…</div>}
+                  {selectedStage&&(
+                    <div className="terminal" style={{marginTop:10}}>
+                      <div className="term-hd" style={{justifyContent:'space-between'}}>
+                        <div style={{display:'flex',alignItems:'center',gap:8}}>
+                          <div className="term-dot" style={{background:'#f43f5e'}}/>
+                          <div className="term-dot" style={{background:'#D29922'}}/>
+                          <div className="term-dot" style={{background:'#22d3a2'}}/>
+                          <span style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--text2)',marginLeft:6,textTransform:'uppercase'}}>{selectedStage} stage logs</span>
+                        </div>
+                        <div style={{display:'flex',gap:6}}>
+                          <button className="btn btn-xs" onClick={()=>openStageLogs(selectedStage)}>↻ Refresh</button>
+                          <button className="btn btn-xs" onClick={()=>{setSelectedStage('');setStageLog('');setStageLogError('');}}>✕ Close</button>
+                        </div>
+                      </div>
+                      <div className="term-body" style={{maxHeight:240,whiteSpace:'pre-wrap'}}>
+                        {stageLogLoading&&<div className="tl-info">Loading logs…</div>}
+                        {!stageLogLoading&&stageLogError&&<div className="tl-err">{stageLogError}</div>}
+                        {!stageLogLoading&&!stageLogError&&<div className="tl-cmd">{stageLog||'No logs returned yet.'}</div>}
+                      </div>
+                    </div>
+                  )}
                 </>
-                :<div className="empty"><div className="empty-icon">🔭</div><div className="empty-msg">No pipelines found</div></div>
+                :<div className="empty"><div className="empty-icon">🔭</div><div className="empty-msg">No pipelines found for this source</div><button className="btn btn-sm" onClick={onConnect}>Configure source</button></div>
             }
           </div>
         </div>
@@ -831,23 +1558,22 @@ function DashboardPage({config,onConnect,onNav}){
       </div>
 
       {/* Recent runs */}
-      {config&&(
-        <div className="card">
-          <div className="card-hd"><div className="card-title">📋 Recent Runs</div></div>
-          <div className="card-body" style={{padding:'8px 14px'}}>
-            {loading?<div className="empty"><Spin/></div>
-            :pipelines.map(p=>(
-              <div key={p.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',background:'var(--bg2)',border:'1px solid var(--border2)',borderRadius:'var(--r)',marginBottom:6}}>
-                <Bdg s={p.status}/>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:12,fontWeight:600,color:'var(--text0)'}}><span className="mono text-gold">#{p.id}</span> · {p.ref}</div>
-                  <div style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--text2)',marginTop:2}}>{sha7(p.sha)} · {ago(p.created_at)}</div>
-                </div>
+      <div className="card">
+        <div className="card-hd"><div className="card-title">📋 Recent Runs</div></div>
+        <div className="card-body" style={{padding:'8px 14px'}}>
+          {loading?<div className="empty"><Spin/></div>
+          :pipelines.map(p=>(
+            <div key={p.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',background:'var(--bg2)',border:'1px solid var(--border2)',borderRadius:'var(--r)',marginBottom:6}}>
+              <Bdg s={p.status}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:600,color:'var(--text0)'}}><span className="mono text-gold">#{p.id}</span> · {p.ref}</div>
+                <div style={{fontSize:10,fontFamily:'var(--mono)',color:'var(--text2)',marginTop:2}}>{sha7(p.sha)} · {ago(p.created_at)}</div>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
+          {!loading&&pipelines.length===0&&<div className="empty"><div className="empty-msg">No recent runs available.</div></div>}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -865,11 +1591,10 @@ function PipelinePage({config,onConnect}){
   const pollRef=useRef(null);
 
   const load=useCallback(()=>{
-    if(!config){setLoading(false);return;}
-    const fn=config.provider==='gitlab'
-      ?()=>GL(config.token,config.projectId,'/pipelines?per_page=15')
-      :()=>GH(config.token,config.projectId,'/actions/runs?per_page=15').then(d=>d.workflow_runs.map(r=>({id:r.id,status:r.status==='completed'?r.conclusion:r.status,ref:r.head_branch,sha:r.head_sha,created_at:r.created_at})));
-    fn().then(d=>{setPipelines(d);setLoading(false);}).catch(e=>{toast('Load failed: '+e.message,'err');setLoading(false);});
+    setLoading(true);
+    sbomApi('pipelines',{config,query:{per_page:15}})
+      .then(d=>{setPipelines(Array.isArray(d)?d:[]);setLoading(false);})
+      .catch(e=>{toast('Load failed: '+e.message,'err');setLoading(false);});
   },[config]);
 
   useEffect(()=>{load();},[load]);
@@ -882,13 +1607,12 @@ function PipelinePage({config,onConnect}){
   async function launch(){
     setLaunching(true);
     try{
-      if(config&&config.provider==='gitlab'){
-        const p=await GL(config.token,config.projectId,'/pipeline',{method:'POST',body:JSON.stringify({ref,variables:[{key:'APP_VERSION',value:ver,variable_type:'env_var'}]})});
-        toast('Pipeline #'+p.id+' launched','ok');
-        setPolling(true);setTimeout(load,1500);
-      }else{
-        toast('Connect to GitLab to trigger pipelines','info');
-      }
+      const body={ref,app_version:ver};
+      if(config&&config.provider)body.provider=config.provider;
+      if(config&&config.projectId)body.project=config.projectId;
+      const p=await sbomApi('pipeline',{method:'POST',body,config});
+      toast((p.message||('Pipeline #'+p.id+' launched')),'ok');
+      setPolling(true);setTimeout(load,1500);
     }catch(e){toast('Launch failed: '+e.message,'err');}
     setLaunching(false);
   }
@@ -903,7 +1627,7 @@ function PipelinePage({config,onConnect}){
         <div className="flex gap-8">
           {config&&<button className={'btn'+(polling?' btn-gold':'')} onClick={()=>setPolling(p=>!p)}>{polling?<><Spin/> Live</>:'🔄 Poll'}</button>}
           {config&&<button className="btn" onClick={load}>↻</button>}
-          {!config&&<button className="btn btn-gold btn-sm" onClick={onConnect}>⚡ Connect to trigger</button>}
+          {!config&&<button className="btn btn-gold btn-sm" onClick={onConnect}>⚡ Configure source</button>}
         </div>
       </div>
 
@@ -914,22 +1638,16 @@ function PipelinePage({config,onConnect}){
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(150px,100%),1fr))',gap:10,alignItems:'flex-end'}}>
             <div className="field"><span className="flbl">Branch</span><input className="finput" value={ref} onChange={e=>setRef(e.target.value)} placeholder="main"/></div>
             <div className="field"><span className="flbl">Version</span><input className="finput" value={ver} onChange={e=>setVer(e.target.value)} placeholder="1.0.0"/></div>
-            <button onClick={launch} disabled={launching} style={{height:40,padding:'0 20px',background:'var(--gold)',borderRadius:'var(--r)',color:'#000',fontSize:12,fontWeight:800,display:'flex',alignItems:'center',justifyContent:'center',gap:8,border:'none',cursor:launching?'not-allowed':'pointer',opacity:launching?.5:1}}>
+            <button onClick={launch} disabled={launching} style={{height:40,padding:'0 20px',background:'var(--gold)',borderRadius:'var(--r)',color:'#000',fontSize:12,fontWeight:800,display:'flex',alignItems:'center',justifyContent:'center',gap:8,border:'none',cursor:launching?'not-allowed':'pointer',opacity:launching?0.5:1}}>
               {launching?<><Spin/> Launching…</>:'▶ Launch'}
             </button>
           </div>
-          <div style={{marginTop:8,fontSize:10,fontFamily:'var(--mono)',color:'var(--text3)'}}>build → generate → sign → scan → report</div>
+          <div style={{marginTop:8,fontSize:10,fontFamily:'var(--mono)',color:'var(--text3)'}}>build → generate → validate → sign → scan → report</div>
         </div>
       </div>
 
       {/* List */}
-      {!config
-        ?<div className="card"><div className="card-body"><div className="empty">
-          <div className="empty-icon">🔌</div>
-          <div className="empty-msg">Connect to view live pipeline runs</div>
-          <button className="btn btn-gold btn-sm" style={{marginTop:8}} onClick={onConnect}>⚡ Connect</button>
-        </div></div></div>
-        :loading?<div className="empty"><Spin/></div>
+      {loading?<div className="empty"><Spin/></div>
         :<div style={{display:'flex',flexDirection:'column',gap:6}}>
           {pipelines.map(p=>(
             <div key={p.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--bg1)',border:'1px solid var(--border)',borderRadius:'var(--r)'}}>
@@ -940,6 +1658,7 @@ function PipelinePage({config,onConnect}){
               </div>
             </div>
           ))}
+          {pipelines.length===0&&<div className="card"><div className="card-body"><div className="empty"><div className="empty-msg">No pipeline runs found for this source.</div><button className="btn btn-sm" onClick={onConnect}>Configure source</button></div></div></div>}
         </div>
       }
     </div>
@@ -1034,7 +1753,14 @@ const PAGES=[
 ];
 
 function App(){
-  const[config,setConfig]=useState(()=>{try{return JSON.parse(sessionStorage.getItem('sbom_cfg')||'null');}catch{return null;}});
+  const[config,setConfig]=useState(()=>{
+    try{
+      const raw=localStorage.getItem('sbom_cfg')||sessionStorage.getItem('sbom_cfg')||'null';
+      const cfg=JSON.parse(raw);
+      if(cfg&&raw!==localStorage.getItem('sbom_cfg'))localStorage.setItem('sbom_cfg',JSON.stringify(cfg));
+      return cfg;
+    }catch{return null;}
+  });
   const[nav,setNav]=useState('analyze');
   const[showConnect,setShowConnect]=useState(false);
 
@@ -1050,7 +1776,7 @@ function App(){
     window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h);
   },[]);
 
-  function disconnect(){sessionStorage.removeItem('sbom_cfg');setConfig(null);toast('Disconnected','info');}
+  function disconnect(){sessionStorage.removeItem('sbom_cfg');localStorage.removeItem('sbom_cfg');setConfig(null);toast('Disconnected','info');}
   function openConnect(){setShowConnect(true);}
 
   const renderPage=()=>{
@@ -1064,7 +1790,7 @@ function App(){
   return(
     <>
       <Toasts/>
-      {showConnect&&<ConnectModal onConnect={cfg=>{setConfig(cfg);setShowConnect(false);}} onClose={()=>setShowConnect(false)}/>}
+      {showConnect&&<ConnectModal initialConfig={config} onConnect={cfg=>{setConfig(cfg);setShowConnect(false);}} onClose={()=>setShowConnect(false)}/>} 
       <div className="root">
         {/* Header */}
         <header className="header">
@@ -1128,7 +1854,70 @@ function App(){
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+if(!window.__showBootError){
+  window.__showBootError=function(title,detail){
+    var root=document.getElementById('root');
+    if(!root)return;
+    root.innerHTML='<div class="boot-error"><div class="boot-error-card"><div class="boot-error-title">'+String(title||'Startup error')+'</div><div class="boot-error-text">The UI did not initialize. Open browser developer console for detailed errors.</div>'+(detail?'<div class="boot-error-detail">'+String(detail)+'</div>':'')+'</div></div>';
+  };
+}
+
+if(!window.React||!window.ReactDOM){
+  if(window.__showBootError){
+    window.__showBootError(
+      'UI libraries failed to load.',
+      'Could not load React/ReactDOM from CDN. Check internet access or firewall/proxy rules for unpkg.com.'
+    );
+  }
+}else{
+  try{
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  }catch(err){
+    if(window.__showBootError){
+      window.__showBootError('App failed to start.',err&&err.stack?err.stack:String(err));
+    }
+  }
+}
+</script>
+<script>
+(function(){
+  function escapeHtml(v){
+    return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+  function showBootError(title,detail){
+    var root=document.getElementById('root');
+    if(!root)return;
+    root.innerHTML='<div class="boot-error"><div class="boot-error-card"><div class="boot-error-title">'+escapeHtml(title)+'</div><div class="boot-error-text">The UI did not initialize. Open browser developer console for detailed errors.</div>'+(detail?'<div class="boot-error-detail">'+escapeHtml(detail)+'</div>':'')+'</div></div>';
+  }
+  window.__showBootError=showBootError;
+  ['react-cdn','react-dom-cdn','babel-cdn'].forEach(function(id){
+    var s=document.getElementById(id);
+    if(s){
+      s.addEventListener('error',function(){
+        showBootError('CDN script failed to load.','Failed loading '+id+'. Check internet access or firewall/proxy rules for unpkg.com.');
+      });
+    }
+  });
+  window.addEventListener('error',function(e){
+    if(e&&e.message){
+      showBootError('Runtime error during startup.',e.message);
+    }
+  });
+  window.addEventListener('unhandledrejection',function(e){
+    var msg=(e&&e.reason&&e.reason.message)?e.reason.message:String(e&&e.reason?e.reason:'Unknown promise rejection');
+    showBootError('Unhandled startup rejection.',msg);
+  });
+  window.addEventListener('load',function(){
+    setTimeout(function(){
+      var root=document.getElementById('root');
+      if(root && !root.firstElementChild){
+        if(!window.Babel)showBootError('Babel failed to load.','Could not load @babel/standalone from CDN (unpkg.com).');
+        else if(!window.React||!window.ReactDOM)showBootError('React libraries failed to load.','Could not load React/ReactDOM from CDN (unpkg.com).');
+        else showBootError('UI render did not mount.','A startup script error likely prevented app initialization.');
+      }
+    },300);
+  });
+})();
 </script>
 </body>
 </html>
