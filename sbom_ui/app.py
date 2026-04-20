@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tarfile
 import threading
+import time
 import uuid
 import zipfile
 from hashlib import sha1
@@ -37,6 +38,7 @@ STATIC_DIR = REPO_ROOT / "sbom_ui" / "static"
 UPLOAD_DIR = REPO_ROOT / ".ui_uploads"
 TOOLS_BIN_DIR = REPO_ROOT / ".tools" / "bin"
 SOURCE_DIAG_PATH = REPORT_DIR / "source-diagnostics.json"
+LOCAL_RUN_STATE_DIR = REPORT_DIR / "local-runs"
 STAGE_NAMES = ["Build", "Generate", "Sign", "Scan", "Report"]
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
@@ -64,6 +66,54 @@ def _prune_local_runs():
                 del LOCAL_RUNS[run_id]
             except KeyError:
                 pass
+
+
+def _local_run_state_path(run_id: str) -> Path:
+    safe_id = re.sub(r"[^a-zA-Z0-9._-]+", "", str(run_id or "")).strip()
+    return LOCAL_RUN_STATE_DIR / f"{safe_id}.json"
+
+
+def _write_local_run_state(run_payload):
+    run_id = str((run_payload or {}).get("id") or "").strip()
+    if not run_id:
+        return
+    try:
+        ensure_dirs()
+        LOCAL_RUN_STATE_DIR.mkdir(parents=True, exist_ok=True)
+        target = _local_run_state_path(run_id)
+        tmp = target.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(run_payload, ensure_ascii=False, default=str), encoding="utf-8")
+        tmp.replace(target)
+    except Exception:
+        pass
+
+
+def _read_local_run_state(run_id: str):
+    try:
+        p = _local_run_state_path(run_id)
+        if not p.exists():
+            return None
+        payload = json.loads(p.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def _list_local_run_states():
+    out = []
+    try:
+        if not LOCAL_RUN_STATE_DIR.exists():
+            return out
+        for p in LOCAL_RUN_STATE_DIR.glob("local-*.json"):
+            try:
+                payload = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if isinstance(payload, dict) and payload.get("id"):
+                out.append(payload)
+    except Exception:
+        return out
+    return out
 
 
 def run_cmd(cmd, env_extra=None):
@@ -639,6 +689,7 @@ def _hints_from_sbom_payload(payload):
 def ensure_dirs():
     SBOM_DIR.mkdir(parents=True, exist_ok=True)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    LOCAL_RUN_STATE_DIR.mkdir(parents=True, exist_ok=True)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     TOOLS_BIN_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1923,7 +1974,11 @@ def _local_run_worker(run_id, body):
         run["status"] = "running"
         run["started_at"] = started.isoformat()
         LOCAL_RUNS[run_id] = run
+        _write_local_run_state(run)
+    last_disk_sync = 0.0
+
     def _append_live_log(chunk):
+        nonlocal last_disk_sync
         if not chunk:
             return
         with LOCAL_RUNS_LOCK:
@@ -1934,6 +1989,10 @@ def _local_run_worker(run_id, body):
             next_log = (current + chunk)[-cap:]
             run["log"] = next_log
             LOCAL_RUNS[run_id] = run
+            now = time.time()
+            if (now - last_disk_sync) >= 1.5:
+                _write_local_run_state(run)
+                last_disk_sync = now
 
     result = run_generate_pipeline(body, log_callback=_append_live_log)
     finished = datetime.now(timezone.utc)
@@ -1955,6 +2014,7 @@ def _local_run_worker(run_id, body):
             }
         )
         LOCAL_RUNS[run_id] = run
+        _write_local_run_state(run)
 
 
 def safe_extract_zip(zip_path, target_dir):
@@ -3383,6 +3443,7 @@ def start_local_run():
             "source_path": body.get("source_path") or "",
             "app_name": body.get("app_name") or "",
         }
+        _write_local_run_state(LOCAL_RUNS[run_id])
     t = threading.Thread(target=_local_run_worker, args=(run_id, body), daemon=True)
     t.start()
     _prune_local_runs()
@@ -3403,8 +3464,17 @@ def list_local_runs():
     with LOCAL_RUNS_LOCK:
         if run_id:
             run = LOCAL_RUNS.get(run_id)
+            if not run:
+                run = _read_local_run_state(run_id)
             return jsonify([_trim_run_payload(run)] if run else [])
         runs = [_trim_run_payload(run) for run in LOCAL_RUNS.values()]
+    seen = {str((run or {}).get("id") or "") for run in runs}
+    for run in _list_local_run_states():
+        rid = str((run or {}).get("id") or "")
+        if not rid or rid in seen:
+            continue
+        runs.append(_trim_run_payload(run))
+        seen.add(rid)
     runs.sort(key=lambda r: (r.get("created_at") or ""), reverse=True)
     return jsonify(runs[:30])
 
