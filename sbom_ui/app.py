@@ -1597,22 +1597,15 @@ def run_generate_pipeline(body, log_callback=None):
         if mode == "container":
             ok_eng, eng_name, eng_detail = _container_engine_reachable_for_mode(runtime)
             if not ok_eng:
-                _cleanup_temp_metadata()
-                source_diag.update(
-                    {
-                        "execution_path": "container-preflight",
-                        "status": "error",
-                        "container_engine": eng_name or None,
-                    }
-                )
-                write_source_diagnostics(source_diag)
-                return {
-                    "status": "error",
-                    "message": "Container mode needs a working Docker or Podman daemon.",
-                    "log": eng_detail,
-                    "exit_code": 1,
-                    "source_diagnostics": source_diag,
-                }
+                # Auto-downgrade to native so hosted environments (e.g. Render)
+                # don't fail when the user leaves the mode selector on 'container'.
+                mode = "native"
+                if log_callback:
+                    log_callback(
+                        "==> No Docker/Podman daemon found — falling back to native build mode.\n"
+                        f"    Reason: {eng_detail}\n"
+                    )
+                source_diag["container_fallback"] = "native"
 
         pwsh_cmd = shutil.which("pwsh") or shutil.which("powershell")
         if pwsh_cmd:
