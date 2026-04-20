@@ -12,9 +12,25 @@ Enable another engineer or team to clone this repo, point it at their own C/C++ 
 - Vulnerability evidence from Grype and Trivy (with DB freshness artifacts)
 - CI/CD pipeline artifacts from both GitHub and GitLab
 
+## Clone this repository
+
+Primary (GitHub):
+
+```bash
+git clone https://github.com/Richmansolom/SBOM-ATTESTATION.git
+cd SBOM-ATTESTATION
+```
+
+Mirror (GitLab):
+
+```bash
+git clone https://gitlab.com/Richmansolom/SBOM-ATTESTATION.git
+cd SBOM-ATTESTATION
+```
+
 ## Project description
 
-This work supports **trusted SBOM** practice for **C/C++** software: combine **Syft, Trivy, Distro2SBOM, CycloneDX-CLI, Hoppr, Grype**, and **repository-maintained application metadata** (JSON, CSV, or XML via `merge-sbom.ps1`) into **holistic CycloneDX** documents. **NTIA minimum elements** are checked with `check-ntia.ps1` and **Hoppr**. **Embedded signing** uses `scripts/sign-sbom.sh` (OpenSSL; key handling unchanged here). **GitHub Actions** and **GitLab CI** run the **same pipeline shape**: clean outputs → build → generate → enrich → validate → sign → scan → report → upload artifacts.
+This work supports **trusted SBOM** practice for **C/C++** software: combine **Syft, Trivy, Distro2SBOM, CycloneDX-CLI, Hoppr, Grype**, and **repository-maintained application metadata** (JSON, CSV, or XML via `merge-sbom.ps1`) into **holistic CycloneDX** documents. **NTIA minimum elements** are checked with `check-ntia.ps1` and **Hoppr**. **Embedded signing** uses `scripts/sign-sbom.sh` (OpenSSL), with optional PKI hierarchy bootstrapping from `scripts/setup-pki.sh`. **GitHub Actions** and **GitLab CI** run the **same pipeline shape**: clean outputs → build → generate → enrich → validate → sign → scan → report → upload artifacts.
 
 **Using your own C/C++ tree:** point the **local** script at `-SourcePath` and `-AppMetadataPath`, and set **CI** variables **`APP_DIR`** and **`APP_METADATA`** (see [CI/CD parity](#ci-cd-parity)). Replace the **build** step (`make -C $APP_DIR`) with your generator if you do not use Make.
 
@@ -214,7 +230,7 @@ Mission Control behavior implemented:
 
 - GitHub and GitLab pipeline trigger from the same UI (`Pipelines -> Launch`)
 - GitHub job log view with backend token fallback
-- GitLab single-job pipelines mapped to logical stage strip (`Build -> Generate -> Sign -> Scan -> Report`) by parsing trace markers
+- GitLab multi-stage pipelines (`Build -> Generate -> Validate -> Sign -> Scan -> Report`) with artifact handoff between jobs
 - Saved API base override via `?api=...` and Connect modal `API Base URL`
 
 Recommended backend env vars (remote API host):
@@ -250,9 +266,43 @@ Stages (both providers):
 
 - Build
 - Generate
+- Validate
 - Sign
 - Scan
 - Report
+
+### Local GitLab CI emulation
+
+Use the helper script to preview or execute the same stage flow locally:
+
+```bash
+# Print stage commands only (no execution)
+make ci-local-dry-run
+
+# One-command smoke execution
+make ci-local-smoke
+
+# Fuller local execution path
+make ci-local-full
+```
+
+Helper script:
+
+- `scripts/gitlab-ci-local-dry-run.sh --dry-run`
+- `scripts/gitlab-ci-local-dry-run.sh --smoke`
+- `scripts/gitlab-ci-local-dry-run.sh --full`
+
+PowerShell wrapper (native Windows PowerShell entrypoint):
+
+- `powershell -ExecutionPolicy Bypass -File .\scripts\gitlab-ci-local-dry-run.ps1 -Mode dry-run`
+- `powershell -ExecutionPolicy Bypass -File .\scripts\gitlab-ci-local-dry-run.ps1 -Mode smoke`
+- `powershell -ExecutionPolicy Bypass -File .\scripts\gitlab-ci-local-dry-run.ps1 -Mode full`
+
+Optional Make aliases for PowerShell:
+
+- `make ci-local-dry-run-ps`
+- `make ci-local-smoke-ps`
+- `make ci-local-full-ps`
 
 ## Current Implementation Status
 

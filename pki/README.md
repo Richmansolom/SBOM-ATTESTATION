@@ -1,68 +1,57 @@
-# Key Distribution Infrastructure for SBOM Attestation
+# PKI Key Distribution for SBOM Attestation
 
-This directory holds the PKI setup for global attestation of signed SBOMs.
+This directory implements a practical PKI model for globally verifiable SBOM signatures.
 
-## Approach
+## Security Profile
 
-Per the requirement: *"Create a key distribution infrastructure to enable global attestation of signed SBOMs... PKI which can be implemented using OpenSSL."*
+- Signature algorithm: `RS384` (`RSA-3072` + `SHA-384`)
+- Baseline: CNSA 1.0 compatible profile (widely available in OpenSSL today)
+- CNSA 2.0 readiness: keep SHA-384 canonicalization and certificate chain distribution in place so a future PQ/hybrid signer can replace leaf keys without redesigning the pipeline
 
-### Current Implementation (Proof of Concept)
+## What is provided
 
-- **RSA 3072-bit** keys (CNSA 2.0/1.0 aligned)
-- **RS384** (RSA-SHA384) signatures
-- **Embedded signature** in SBOM (CycloneDX 1.6 JSON format)
-- Keys generated with: `openssl genrsa -aes256 -out sbom_private_key.pem 3072 -passout pass:""`
-- Public key extracted: `openssl rsa -in sbom_private_key.pem -pubout -out sbom_public_key.pem`
+- `scripts/setup-pki.sh`: generates an offline root CA, an intermediate CA, and a leaf SBOM signer cert/key
+- `scripts/sign-sbom.sh`: embeds CycloneDX signature directly in SBOM JSON
+- GitLab CI support for key injection via `SBOM_PRIVATE_KEY_PEM` (recommended for protected runners)
 
-Blank passphrase for CI/testing. **For production**: use a strong passphrase or HSM.
+## Global attestation model
 
-### Production: Root CA (Chain of Trust)
+1. Keep `root-ca.key.pem` offline.
+2. Publish `root-ca.cert.pem` and `intermediate-ca.cert.pem` through your enterprise trust distribution channel.
+3. Use `sbom-signer.key.pem` only on controlled signing infrastructure.
+4. Verify chain + signature:
+   - trust root/intermediate certs
+   - validate SBOM schema (`cyclonedx-cli`)
+   - validate NTIA profile (`hoppr`)
+   - verify cryptographic signature (`openssl`)
 
-For full PKI, use a trusted root CA ([chain of trust](https://en.wikipedia.org/wiki/Root_certificate)):
+## Generate PKI hierarchy
 
-1. Create self-signed root CA
-2. Issue application-specific certs signed by root
-3. Distribute root CA public key for verification
-4. Each app SBOM signed with its own cert
-
-Example (simplified):
 ```bash
-# Root CA
-openssl req -x509 -sha384 -days 1825 -newkey rsa:4096 -keyout rootCA.key -out rootCA.crt -nodes -subj "/CN=SBOM-Root-CA"
-
-# App cert (signed by root)
-openssl req -new -newkey rsa:3072 -keyout app.key -out app.csr -nodes -subj "/CN=sbom-attestation"
-openssl x509 -req -CA rootCA.crt -CAkey rootCA.key -in app.csr -out app.crt -days 365 -sha384 -CAcreateserial
+bash scripts/setup-pki.sh sbom/pki
 ```
 
-## Key Protection
+Generated files:
 
-- **Private keys**: Never commit to repo. CI generates ephemeral keys per run.
-- **Public keys**: Distributed with SBOM; recipients use for verification.
-- Algorithms/strengths: CNSA 2.0 (RSA 3072, SHA-384).
+- `root-ca.key.pem`, `root-ca.cert.pem`
+- `intermediate-ca.key.pem`, `intermediate-ca.cert.pem`
+- `sbom-signer.key.pem`, `sbom-signer.cert.pem`
+- `ca-chain.cert.pem` (intermediate + root)
+- `sbom_public_key.pem` (for CycloneDX embedded signature verification)
 
-## CycloneDX Signature Format
+## Key protection requirements
 
-Signatures are embedded per [CycloneDX Authenticity Verification](https://cyclonedx.org/use-cases/authenticity-verification/):
+- Never commit private keys.
+- Protect root and intermediate private keys with passphrases and offline storage.
+- Use CI secret variables or HSM-backed signing where available.
+- Rotate leaf signing certificates regularly and revoke on compromise.
 
-```json
-{
-  "signature": {
-    "algorithm": "RS384",
-    "publicKey": {"kty": "RSA", "n": "<base64url>", "e": "AQAB"},
-    "value": "<base64 signature>"
-  }
-}
-```
+## Signature validation sequence
 
-Signed payload: canonical JSON of BOM *without* the signature object.
-
-## Validation
-
-- **CycloneDX-CLI**: Validates schema (including signature object)
-- **Hoppr**: Can validate SBOM structure
-- **Manual (OpenSSL)**: Remove signature from JSON, canonicalize, verify:
-  ```bash
-  jq -c -S 'del(.signature)' signed-sbom.json > canonical.json
-  openssl dgst -sha384 -verify sbom_public_key.pem -signature sig.bin canonical.json
-  ```
+1. CycloneDX schema validation:
+   - `cyclonedx-cli validate --input-file sbom/sbom-source.enriched.json`
+2. NTIA minimum elements:
+   - `hopctl validate sbom --sbom sbom/sbom-source.enriched.json --profile ntia`
+3. Cryptographic verification:
+   - canonicalize payload by removing `.signature`
+   - verify with `openssl dgst -sha384 -verify sbom/pki/sbom_public_key.pem ...`
