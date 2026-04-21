@@ -758,7 +758,7 @@ function AnalyzePage(){
       const parsed=inferProjectFromInput(repoUrl);
       const isRemoteProject=!!parsed.project;
       const qs=isRemoteProject
-        ?('?source=auto&provider='+encodeURIComponent(parsed.provider)+'&project='+encodeURIComponent(parsed.project))
+        ?('?source=ci&provider='+encodeURIComponent(parsed.provider)+'&project='+encodeURIComponent(parsed.project))
         :'?source=local';
       const reportSuffix=qs.includes('?')?('&'+qs.slice(1)):'';
 
@@ -884,13 +884,11 @@ function AnalyzePage(){
 
       markStage('sign');
       let sbomRaw=null;
-      let useLegacyRemoteFallback=false;
       try{
         sbomRaw=await apiJson('/api/sbom/unified'+qs);
       }catch(e){
         if(isRemoteProject){
-          useLegacyRemoteFallback=true;
-          addLog('Remote SBOM artifact not available; switching to preset remote CVE database mode.','warn');
+          throw new Error('No CI SBOM artifact found for this repository. Run the target repository pipeline first, then retry.');
         }else{
           throw e;
         }
@@ -899,43 +897,13 @@ function AnalyzePage(){
       markStage('scan');
       let gRes={ok:false,data:null,message:'No report'};
       let tRes={ok:false,data:null,message:'No report'};
-      if(!useLegacyRemoteFallback){
-        [gRes,tRes]=await Promise.all([
-          fetchJsonOptional('/api/report/unified?scanner=grype'+reportSuffix),
-          fetchJsonOptional('/api/report/unified?scanner=trivy'+reportSuffix),
-        ]);
-      }
+      [gRes,tRes]=await Promise.all([
+        fetchJsonOptional('/api/report/unified?scanner=grype'+reportSuffix),
+        fetchJsonOptional('/api/report/unified?scanner=trivy'+reportSuffix),
+      ]);
 
-      if(isRemoteProject&&(useLegacyRemoteFallback||(!gRes.ok&&!tRes.ok))){
-        const legacy=buildLegacyRemoteScan(repoUrl,appName);
-        markStage('report');
-        setSbomResult({
-          components:legacy.components,
-          timestamp:new Date().toISOString(),
-          target:repoUrl,
-          meta:{
-            source:'remote-preset-db',
-            provider:parsed.provider,
-            project:parsed.project,
-            note:'Using preset remote CVE database mode for repository URL scan.',
-          },
-          hasSignature:false,
-          signatureAlg:'',
-        });
-        setVulnResult({
-          grype:{matches:legacy.grypeMatches,loadError:null},
-          trivy:{matches:legacy.trivyMatches,loadError:null},
-          evidence:valRes.ok?valRes.data:{},
-          dbDate:new Date().toLocaleDateString(),
-        });
-        setDoneStages([...PIPELINE_STAGES]);
-        if(legacy.trivyMatches.length>legacy.grypeMatches.length)setVulnScanner('trivy');
-        addLog('Remote repository scan completed using preset CVE dataset with linked advisories.','ok');
-        setCurrentStage('');
-        setStatus('done');
-        const total=legacy.grypeMatches.length+legacy.trivyMatches.length;
-        toast('✓ Remote scan complete · '+legacy.components.length+' components · '+total+' CVEs','ok');
-        return;
+      if(isRemoteProject&&(!gRes.ok&&!tRes.ok)){
+        throw new Error('No CI vulnerability artifacts found for this repository. Run the target repository pipeline first, then retry.');
       }
 
       markStage('report');

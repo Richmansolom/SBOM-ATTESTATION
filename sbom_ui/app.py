@@ -3277,9 +3277,12 @@ def validation_summary():
         "cyclonedx_schema": {"available": False, "pass": None, "file": ""},
         "hoppr_ntia": {"available": False, "pass": None, "file": ""},
     }
-    _fill_validation_from_disk(out)
-
     source = (request.args.get("source") or "auto").strip().lower()
+    explicit_remote = bool((request.args.get("project") or "").strip())
+
+    if not (source in ("auto", "ci") and explicit_remote):
+        _fill_validation_from_disk(out)
+
     if source == "local":
         return jsonify(out)
 
@@ -3292,8 +3295,8 @@ def validation_summary():
     run_id = (request.args.get("run_id") or "").strip()
     pipeline_id = (request.args.get("pipeline_id") or "").strip()
 
-    need_cx = not out["cyclonedx_schema"]["available"]
-    need_hp = not out["hoppr_ntia"]["available"]
+    need_cx = True if explicit_remote else (not out["cyclonedx_schema"]["available"])
+    need_hp = True if explicit_remote else (not out["hoppr_ntia"]["available"])
     if (need_cx or need_hp) and repo:
         ci_dict = None
         if provider == "gitlab":
@@ -3780,6 +3783,7 @@ def get_unified_sbom():
     token = get_requested_token()
     run_id = (request.args.get("run_id") or "").strip()
     pipeline_id = (request.args.get("pipeline_id") or "").strip()
+    explicit_remote = bool((request.args.get("project") or "").strip())
 
     local_path = get_latest_sbom_path()
 
@@ -3836,6 +3840,13 @@ def get_unified_sbom():
                 return jsonify({"status": "error", "message": ci_error or "No CI SBOM found"}), 404
 
     if source == "auto":
+        if explicit_remote:
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "No CI SBOM available for this repository yet. Run the pipeline on the target repository and retry.",
+                }
+            ), 404
         # CI had nothing: show last server-side SBOM so upload+Generate works without manual source=local.
         if local_path and local_path.exists():
             payload = parse_json(local_path)
@@ -3924,6 +3935,7 @@ def get_unified_report():
     token = get_requested_token()
     run_id = (request.args.get("run_id") or "").strip()
     pipeline_id = (request.args.get("pipeline_id") or "").strip()
+    explicit_remote = bool((request.args.get("project") or "").strip())
 
     local_paths = {
         "grype": REPORT_DIR / "grype-report.json",
@@ -4003,6 +4015,17 @@ def get_unified_report():
             return jsonify({"status": "error", "message": ci_error or "No CI report found"}), 404
 
     if source == "auto":
+        if explicit_remote:
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": (
+                        "No CI vulnerability report available for this repository yet. "
+                        "Run the pipeline on the target repository and retry."
+                        + (f" CI detail: {ci_error}" if ci_error else "")
+                    ),
+                }
+            ), 404
         # CI had nothing: show last server-side scan so upload+Generate works without manual source=local.
         if local_path.exists():
             payload = parse_json(local_path)
