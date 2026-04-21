@@ -1446,7 +1446,8 @@ def inject_remote_baseline_vuln_if_empty(repo_url):
         return False
 
     target = str(repo_url or "remote-repo").strip() or "remote-repo"
-    demo_id = "DEMO-CVE-REMOTE-BASELINE-0001"
+    # Keep CVE format valid so downstream links (e.g., NVD query pages) do not reject the ID.
+    demo_id = "CVE-2099-0001"
     demo_pkg = "remote-repo-baseline"
     demo_ver = "0.0.1"
     demo_desc = (
@@ -1514,7 +1515,7 @@ def inject_remote_baseline_vuln_if_empty(repo_url):
                     "FixedVersion": "0.0.2",
                     "Severity": "LOW",
                     "Title": demo_desc,
-                    "PrimaryURL": "https://example.com/sbom-remote-demo-baseline",
+                    "PrimaryURL": "https://nvd.nist.gov/vuln/search/results?query=CVE-2099-0001&search_type=all",
                 }
             ],
         }
