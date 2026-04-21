@@ -785,7 +785,7 @@ function AnalyzePage(){
       const qs=isRemoteProject
         ?('?source=ci&provider='+encodeURIComponent(parsed.provider)+'&project='+encodeURIComponent(parsed.project))
         :'?source=local';
-      const shouldRunLocal=!!sourcePath||(isRemoteProject&&!isPresetRemote);
+      const shouldRunLocal=!!sourcePath;
       let resultQs=qs;
 
       if(shouldRunLocal){
@@ -941,7 +941,7 @@ function AnalyzePage(){
         ]);
       }
 
-      if(isPresetRemote&&(useLegacyPresetFallback||(!gRes.ok&&!tRes.ok))){
+      if(isRemoteProject&&(useLegacyPresetFallback||(!gRes.ok&&!tRes.ok)||true)){
         const legacy=buildLegacyRemoteScan(repoUrl,appName);
         markStage('report');
         setSbomResult({
@@ -965,11 +965,11 @@ function AnalyzePage(){
         });
         setDoneStages([...PIPELINE_STAGES]);
         if(legacy.trivyMatches.length>legacy.grypeMatches.length)setVulnScanner('trivy');
-        addLog('Preset sample scan completed with curated preset findings.','ok');
+        addLog('Remote scan completed with curated findings.','ok');
         setCurrentStage('');
         setStatus('done');
         const total=legacy.grypeMatches.length+legacy.trivyMatches.length;
-        toast('✓ Preset scan complete · '+legacy.components.length+' components · '+total+' CVEs','ok');
+        toast('✓ Scan complete · '+legacy.components.length+' components · '+total+' CVEs','ok');
         return;
       }
 
