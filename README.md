@@ -73,15 +73,13 @@ sbom-attestation/
 |-- generate-sbom.ps1                    # Local orchestrator (native/container mode)
 |-- merge-sbom.ps1                       # Inject custom app metadata into SBOM
 |-- check-ntia.ps1                       # NTIA minimum-elements check
-|-- run-mission-control.ps1              # Quick start: Flask UI on $env:PORT (default 5000)
-|-- start-ui-local.ps1                   # Picks a free port, prints URL, starts Flask
+|-- start-ui-local.ps1                   # Smart Flask startup: finds free port, prints URL
 |-- Dockerfile                           # Container image for the UI/API (see also Procfile)
 |-- Procfile                             # Process entry for compatible PaaS hosts
 |-- render.yaml                          # Example Render service definition
 |-- .github/workflows/sbom-pipeline.yml  # GitHub Actions pipeline
 |-- .github/workflows/pages-ui.yml       # Optional: publish static UI to GitHub Pages
 |-- .gitlab-ci.yml                       # GitLab CI pipeline
-|-- FREE_HOSTING_SETUP.md                # Optional: Pages + remote API wiring (not required for local use)
 `-- README.md
 ```
 
@@ -188,11 +186,9 @@ The primary UI lives in `sbom_ui/static/index.html` (React loaded in-page). It t
 pwsh -ExecutionPolicy Bypass -File .\start-ui-local.ps1
 ```
 
-The script chooses a free port (or `5000`/`$env:PORT` when set), binds `0.0.0.0`, and prints the URL. Alternatives:
+The script chooses a free port (or `5000`/`$env:PORT` when set), binds `0.0.0.0`, and prints the URL. Alternative (direct Python):
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File .\run-mission-control.ps1
-# or
 python .\sbom_ui\app.py
 ```
 
@@ -214,8 +210,6 @@ Use the **Connect** modal’s **API Base URL** field to point at any reachable b
 **Optional local hostname:** add `127.0.0.1 www.sbomcontrol.com` to your hosts file, then open `http://www.sbomcontrol.com:<port>/` (match the port Flask prints). Remove or comment that line when you are not running the local server to avoid confusing browser errors.
 
 **Standalone SBOM viewer:** the `viewer/` folder is a separate static page that loads a CycloneDX JSON file and a Grype JSON report from disk—useful for inspecting artifacts without the Mission Control backend.
-
-**Optional remote hosting** (GitHub Pages static UI + API elsewhere) is documented in `FREE_HOSTING_SETUP.md` only if you need that deployment model; it is not required for local development.
 
 ### UI Provider Modes (GitHub + GitLab)
 
@@ -318,7 +312,7 @@ The following is implemented and validated in this repository:
 - **Validation:** CycloneDX schema checks, local NTIA checks, and Hoppr NTIA validation are in place.
 - **Attestation:** Embedded SBOM signature generation + verification is implemented via OpenSSL-based flow.
 - **Vulnerability analysis:** Grype and Trivy scans produce JSON/table outputs and combined summary evidence.
-- **Mission Control UI:** Flask-served UI plus APIs support GitHub and GitLab pipeline trigger/monitor flow; optional static hosting is described in `FREE_HOSTING_SETUP.md`.
+- **Mission Control UI:** Flask-served UI plus APIs support GitHub and GitLab pipeline trigger/monitor flow.
 - **Security hardening applied:** CI supports `SBOM_PRIVATE_KEY_PEM` secret injection and excludes private key material from CI artifact upload.
 
 ## Real-World Threat Relevance
