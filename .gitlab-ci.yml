@@ -364,10 +364,47 @@ analyze_vulnerabilities:
 
       echo ""
       cat "$REPORT_DIR/vulnerability-analysis.txt"
+
+    - |
+      echo "==> Package essential + evidence bundles"
+      rm -rf artifact-bundles
+      mkdir -p artifact-bundles/essential/sbom artifact-bundles/essential/reports artifact-bundles/evidence/sbom artifact-bundles/evidence/reports
+
+      cp -R "$APP_DIR/build" artifact-bundles/essential/build
+
+      for file in \
+        sbom-source.enriched.json \
+        sbom-source.enriched.unsigned.v14.json \
+        sbom-build.enriched.json \
+        sbom-build.enriched.unsigned.v14.json
+      do
+        if [ -f "$SBOM_DIR/$file" ]; then cp "$SBOM_DIR/$file" "artifact-bundles/essential/sbom/$file"; fi
+      done
+
+      if [ -d "$SBOM_DIR/pki" ]; then
+        mkdir -p artifact-bundles/essential/sbom/pki
+        find "$SBOM_DIR/pki" -maxdepth 1 -type f ! -name 'sbom_private_key.pem' -exec cp {} artifact-bundles/essential/sbom/pki/ \;
+      fi
+
+      for file in \
+        grype-report.json \
+        trivy-sbom-report.json \
+        vulnerability-analysis.txt \
+        requirements-summary.txt \
+        cyclonedx-validate.txt \
+        cyclonedx-signed-validate.txt
+      do
+        if [ -f "$REPORT_DIR/$file" ]; then cp "$REPORT_DIR/$file" "artifact-bundles/essential/reports/$file"; fi
+      done
+
+      cp -R "$SBOM_DIR/." artifact-bundles/evidence/sbom/
+      cp -R "$REPORT_DIR/." artifact-bundles/evidence/reports/
+      rm -f artifact-bundles/evidence/sbom/pki/sbom_private_key.pem
   artifacts:
     when: always
     paths:
-      - ${APP_DIR}/build/
+      - artifact-bundles/essential/
+      - artifact-bundles/evidence/
       - ${SBOM_DIR}/
       - ${REPORT_DIR}/
     exclude:

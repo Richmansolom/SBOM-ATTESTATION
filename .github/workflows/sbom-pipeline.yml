@@ -207,13 +207,53 @@ jobs:
             echo "Low: $trivy_low"
           } >> "$REPORT_DIR/vulnerability-analysis.txt"
 
-      - name: Upload artifacts
+      - name: Package artifact bundles
+        run: |
+          rm -rf artifact-bundles
+          mkdir -p artifact-bundles/essential/sbom artifact-bundles/essential/reports artifact-bundles/evidence/sbom artifact-bundles/evidence/reports
+
+          cp -R "$APP_DIR/build" "artifact-bundles/essential/build"
+
+          for file in \
+            sbom-build.enriched.json \
+            sbom-build.enriched.unsigned.v16.json \
+            sbom-source.enriched.json \
+            sbom-source.enriched.unsigned.json \
+            sbom-source.signed.json
+          do
+            if [ -f "$SBOM_DIR/$file" ]; then cp "$SBOM_DIR/$file" "artifact-bundles/essential/sbom/$file"; fi
+          done
+
+          if [ -d "$SBOM_DIR/pki" ]; then
+            mkdir -p artifact-bundles/essential/sbom/pki
+            find "$SBOM_DIR/pki" -maxdepth 1 -type f ! -name 'sbom_private_key.pem' -exec cp {} artifact-bundles/essential/sbom/pki/ \;
+          fi
+
+          for file in \
+            grype-report.json \
+            trivy-sbom-report.json \
+            vulnerability-analysis.txt \
+            requirements-summary.txt \
+            cyclonedx-validate.txt \
+            cyclonedx-signed-validate.txt
+          do
+            if [ -f "$REPORT_DIR/$file" ]; then cp "$REPORT_DIR/$file" "artifact-bundles/essential/reports/$file"; fi
+          done
+
+          cp -R "$SBOM_DIR/." artifact-bundles/evidence/sbom/
+          cp -R "$REPORT_DIR/." artifact-bundles/evidence/reports/
+          rm -f artifact-bundles/evidence/sbom/pki/sbom_private_key.pem
+
+      - name: Upload essential artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sbom-pipeline-artifacts
-          path: |
-            ${{ env.APP_DIR }}/build/
-            sbom/
-            reports/
-            !sbom/pki/sbom_private_key.pem
+          name: sbom-pipeline-essential
+          path: artifact-bundles/essential/
+          retention-days: 7
+
+      - name: Upload evidence artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-pipeline-evidence
+          path: artifact-bundles/evidence/
           retention-days: 7

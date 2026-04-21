@@ -173,6 +173,11 @@ After a successful run, confirm these key files exist:
 - `reports/vulnerability-analysis.txt`
 - `reports/grype-db-status.txt`
 
+CI uploads these outputs in two bundles:
+
+- `sbom-pipeline-essential`: the files Mission Control and most consumers need first (enriched SBOMs, public-key/signature evidence, validation summary, primary Grype/Trivy JSON, vulnerability summary, and build output)
+- `sbom-pipeline-evidence`: the full `sbom/` + `reports/` evidence set for audit and troubleshooting
+
 ## Mission Control UI
 
 The primary UI lives in `sbom_ui/static/index.html` (React loaded in-page). It talks to the Flask backend in `sbom_ui/app.py` for local generate/sign/scan, uploads, and GitHub/GitLab pipeline triggers.
@@ -352,6 +357,11 @@ If another team wants to claim "same implementation class", they should produce 
 - Grype report and DB status/provider files
 - Trivy report and DB status/update evidence
 - Combined vulnerability summary report
+
+CI now publishes these as two downloadable bundles:
+
+- `essential`: quick-consumption bundle for scanners, UI flows, and reviewer handoff
+- `evidence`: full audit bundle with raw logs, DB freshness artifacts, validation logs, and supporting reports
 
 ## How to adapt this for another C/C++ project
 
