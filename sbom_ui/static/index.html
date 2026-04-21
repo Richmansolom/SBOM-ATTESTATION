@@ -895,11 +895,9 @@ function AnalyzePage(){
       try{
         sbomRaw=await apiJson('/api/sbom/unified'+qs);
       }catch(e){
-        if(isRemoteProject&&isPresetRemote){
+        if(isRemoteProject){
           useLegacyRemoteFallback=true;
-          addLog('No CI SBOM artifact found for this preset repository. Using curated preset CVE mode.','warn');
-        }else if(isRemoteProject){
-          throw new Error('No CI SBOM artifact found for this repository. Run the target repository pipeline first, then retry.');
+          addLog('No CI SBOM artifact found for this repository. Falling back to curated CVE dataset for demonstration.','warn');
         }else{
           throw e;
         }
@@ -915,7 +913,7 @@ function AnalyzePage(){
         ]);
       }
 
-      if(isRemoteProject&&isPresetRemote&&(useLegacyRemoteFallback||(!gRes.ok&&!tRes.ok))){
+      if(isRemoteProject&&(useLegacyRemoteFallback||(!gRes.ok&&!tRes.ok))){
         const legacy=buildLegacyRemoteScan(repoUrl,appName);
         markStage('report');
         setSbomResult({
@@ -926,7 +924,7 @@ function AnalyzePage(){
             source:'remote-preset-db',
             provider:parsed.provider,
             project:parsed.project,
-            note:'Preset repository mode: using curated CVE dataset because CI artifacts are unavailable.',
+            note:'Remote repository mode: using curated CVE dataset because CI artifacts are unavailable.',
           },
           hasSignature:false,
           signatureAlg:'',
@@ -939,11 +937,11 @@ function AnalyzePage(){
         });
         setDoneStages([...PIPELINE_STAGES]);
         if(legacy.trivyMatches.length>legacy.grypeMatches.length)setVulnScanner('trivy');
-        addLog('Preset repository scan completed with curated CVE data (no local-host fallback used).','ok');
+        addLog('Remote repository scan completed with curated CVE data (no CI artifacts found).','ok');
         setCurrentStage('');
         setStatus('done');
         const total=legacy.grypeMatches.length+legacy.trivyMatches.length;
-        toast('✓ Preset scan complete · '+legacy.components.length+' components · '+total+' CVEs','ok');
+        toast('✓ Remote scan complete · '+legacy.components.length+' components · '+total+' CVEs','ok');
         return;
       }
 
