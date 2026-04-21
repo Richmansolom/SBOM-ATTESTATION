@@ -746,6 +746,7 @@ function AnalyzePage(){
       const sourcePath=sourcePathFromInput(repoUrl);
       const parsed=inferProjectFromInput(repoUrl);
       const isRemoteProject=!!parsed.project;
+      const isPresetRemote=isRemoteProject&&isKnownPresetRepoUrl(repoUrl);
       const qs=isRemoteProject
         ?('?source=ci&provider='+encodeURIComponent(parsed.provider)+'&project='+encodeURIComponent(parsed.project))
         :'?source=local';
@@ -766,6 +767,7 @@ function AnalyzePage(){
         const payload={
           source_path:sourcePath,
           repo_url:isRemoteProject?repoUrl:undefined,
+          disable_remote_baseline:isPresetRemote?true:undefined,
           app_name:appName||undefined,
           app_version:appVer||undefined,
           supplier:supplier||undefined,

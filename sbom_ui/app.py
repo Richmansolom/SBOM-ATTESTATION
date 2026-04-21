@@ -2137,7 +2137,7 @@ def run_generate_pipeline(body, log_callback=None):
             else:
                 log_callback(f"==> Vulnerability lookup ({mode}): queried={qn}, matches={mn}\n")
 
-        if body.get("repo_url"):
+        if body.get("repo_url") and not bool(body.get("disable_remote_baseline")):
             if inject_remote_baseline_vuln_if_empty(body.get("repo_url")):
                 if log_callback:
                     log_callback(
