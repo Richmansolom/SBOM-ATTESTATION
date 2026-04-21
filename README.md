@@ -297,11 +297,11 @@ Helper script:
 - `scripts/gitlab-ci-local-dry-run.sh --smoke`
 - `scripts/gitlab-ci-local-dry-run.sh --full`
 
-PowerShell wrapper (native Windows PowerShell entrypoint):
+PowerShell wrapper:
 
-- `powershell -ExecutionPolicy Bypass -File .\scripts\gitlab-ci-local-dry-run.ps1 -Mode dry-run`
-- `powershell -ExecutionPolicy Bypass -File .\scripts\gitlab-ci-local-dry-run.ps1 -Mode smoke`
-- `powershell -ExecutionPolicy Bypass -File .\scripts\gitlab-ci-local-dry-run.ps1 -Mode full`
+- `pwsh -ExecutionPolicy Bypass -File .\scripts\gitlab-ci-local-dry-run.ps1 -Mode dry-run`
+- `pwsh -ExecutionPolicy Bypass -File .\scripts\gitlab-ci-local-dry-run.ps1 -Mode smoke`
+- `pwsh -ExecutionPolicy Bypass -File .\scripts\gitlab-ci-local-dry-run.ps1 -Mode full`
 
 Optional Make aliases for PowerShell:
 

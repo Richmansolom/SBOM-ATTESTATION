@@ -462,8 +462,8 @@ function StageFlow({current,done,errors,stageJobs,selectedStage,onStageClick,sho
 function LocalRunPlaybook(){
   const cmdBashDry='make ci-local-dry-run';
   const cmdBashSmoke='make ci-local-smoke';
-  const cmdPsDry='powershell -ExecutionPolicy Bypass -File .\\scripts\\gitlab-ci-local-dry-run.ps1 -Mode dry-run';
-  const cmdPsSmoke='powershell -ExecutionPolicy Bypass -File .\\scripts\\gitlab-ci-local-dry-run.ps1 -Mode smoke';
+  const cmdPsDry='pwsh -ExecutionPolicy Bypass -File .\\scripts\\gitlab-ci-local-dry-run.ps1 -Mode dry-run';
+  const cmdPsSmoke='pwsh -ExecutionPolicy Bypass -File .\\scripts\\gitlab-ci-local-dry-run.ps1 -Mode smoke';
   return(
     <div className="card" style={{marginTop:4}}>
       <div className="card-hd">
@@ -559,7 +559,25 @@ function AnalyzePage(){
       setLocalAppChoice('');
       if(d.detected_app_name)setAppName(d.detected_app_name);
       toast('Folder selected — click Scan to run the pipeline','ok');
-    }catch(e){toast(e.message||'Browse failed','err');}
+    }catch(e){
+      const msg=e&&e.message?e.message:'Browse failed';
+      if(/picker unavailable|headless|no display|_tkinter/i.test(msg)){
+        const manual=window.prompt(
+          'Desktop picker is unavailable here. Paste a project path visible to the backend (for example test-apps/app1 or /abs/path):',
+          repoUrl||''
+        );
+        if(manual&&manual.trim()){
+          const p=manual.trim().replace(/\\/g,'/');
+          setRepoUrl(p);
+          setLocalAppChoice('');
+          const seg=p.split('/').filter(Boolean);
+          if(seg.length)setAppName(String(seg[seg.length-1]).replace(/[-_]+/g,' '));
+          toast('Using manual folder path - click Scan to run the pipeline','ok');
+          return;
+        }
+      }
+      toast(msg,'err');
+    }
     finally{setPickFolderBusy(false);}
   }
 
@@ -1047,7 +1065,7 @@ function AnalyzePage(){
                 {pickFolderBusy?<><Spin/> Opening…</>:'📁 Browse folder…'}
               </button>
             </div>
-            <div style={{fontSize:10,color:'var(--text3)',marginTop:6}}>Browse uses a desktop folder picker (Windows). Choose a tree with C/C++ sources; <code style={{fontSize:9}}>app-metadata.json</code> is optional but recommended.</div>
+            <div style={{fontSize:10,color:'var(--text3)',marginTop:6}}>Browse uses a desktop picker when available. In headless/devcontainer environments, paste the path manually. Choose a tree with C/C++ sources; <code style={{fontSize:9}}>app-metadata.json</code> is optional but recommended.</div>
           </div>
           {/* Remote URL presets */}
           <div className="field">

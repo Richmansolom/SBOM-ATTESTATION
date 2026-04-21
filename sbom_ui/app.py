@@ -3621,25 +3621,138 @@ def upload_metadata():
     )
 
 
-@app.route("/api/pick-folder", methods=["POST"])
-def pick_folder():
+class PickerCancelledError(Exception):
+    pass
+
+
+class PickerUnavailableError(Exception):
+    pass
+
+
+def _run_picker_cmd(cmd):
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        shell=False,
+    )
+    output = (proc.stdout or "").strip()
+    if proc.returncode == 0:
+        return output
+    if proc.returncode == 1:
+        raise PickerCancelledError("Folder selection cancelled")
+    err = ((proc.stderr or "") + "\n" + (proc.stdout or "")).strip()
+    raise RuntimeError(err or f"picker command failed with exit code {proc.returncode}")
+
+
+def _pick_path_with_dialog(dialog_type):
+    if dialog_type not in ("folder", "metadata"):
+        raise ValueError("dialog_type must be 'folder' or 'metadata'")
+
+    title = "Select C/C++ project folder" if dialog_type == "folder" else "Select app metadata (JSON, CSV, or XML)"
+    errors = []
+
+    # Tkinter works well on desktop Python installs when the Tk runtime is present.
     try:
         import tkinter as tk
         from tkinter import filedialog
-    except Exception as exc:
-        return jsonify({"status": "error", "message": f"Folder picker unavailable: {exc}"}), 500
 
-    try:
         root = tk.Tk()
         root.withdraw()
         root.attributes("-topmost", True)
-        selected = filedialog.askdirectory(title="Select C/C++ project folder")
+        if dialog_type == "folder":
+            selected = filedialog.askdirectory(title=title)
+        else:
+            selected = filedialog.askopenfilename(
+                title=title,
+                filetypes=[
+                    ("App metadata", "*.json *.csv *.xml"),
+                    ("JSON", "*.json"),
+                    ("CSV", "*.csv"),
+                    ("XML", "*.xml"),
+                    ("All files", "*.*"),
+                ],
+            )
         root.destroy()
+        if not selected:
+            raise PickerCancelledError("Folder selection cancelled")
+        return selected
+    except PickerCancelledError:
+        raise
     except Exception as exc:
-        return jsonify({"status": "error", "message": f"Failed to open folder picker: {exc}"}), 500
+        errors.append(f"tkinter: {exc}")
 
-    if not selected:
+    if shutil.which("zenity"):
+        try:
+            if dialog_type == "folder":
+                return _run_picker_cmd(["zenity", "--file-selection", "--directory", "--title", title])
+            return _run_picker_cmd(
+                [
+                    "zenity",
+                    "--file-selection",
+                    "--title",
+                    title,
+                    "--file-filter",
+                    "App metadata | *.json *.csv *.xml",
+                ]
+            )
+        except PickerCancelledError:
+            raise
+        except Exception as exc:
+            errors.append(f"zenity: {exc}")
+
+    if shutil.which("kdialog"):
+        try:
+            if dialog_type == "folder":
+                return _run_picker_cmd(["kdialog", "--getexistingdirectory", str(REPO_ROOT), "--title", title])
+            return _run_picker_cmd(
+                [
+                    "kdialog",
+                    "--getopenfilename",
+                    str(REPO_ROOT),
+                    "*.json *.csv *.xml",
+                    "--title",
+                    title,
+                ]
+            )
+        except PickerCancelledError:
+            raise
+        except Exception as exc:
+            errors.append(f"kdialog: {exc}")
+
+    if platform.system() == "Darwin" and shutil.which("osascript"):
+        try:
+            if dialog_type == "folder":
+                script = 'POSIX path of (choose folder with prompt "Select C/C++ project folder")'
+            else:
+                script = (
+                    'POSIX path of (choose file with prompt "Select app metadata (JSON, CSV, or XML)" '
+                    'of type {"public.json", "public.comma-separated-values-text", "public.xml"})'
+                )
+            return _run_picker_cmd(["osascript", "-e", script])
+        except PickerCancelledError:
+            raise
+        except Exception as exc:
+            errors.append(f"osascript: {exc}")
+
+    detail = " ; ".join(errors) if errors else "No supported desktop picker found"
+    raise PickerUnavailableError(
+        "Folder picker unavailable in this environment. "
+        "Use a path already available to the backend (for example test-apps/app1 or /abs/path). "
+        f"Details: {detail}"
+    )
+
+
+@app.route("/api/pick-folder", methods=["POST"])
+def pick_folder():
+    try:
+        selected = _pick_path_with_dialog("folder")
+    except PickerCancelledError:
         return jsonify({"status": "error", "message": "Folder selection cancelled"}), 400
+    except PickerUnavailableError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 500
 
     source_dir = Path(selected)
     meta = source_dir / "app-metadata.json"
@@ -3659,31 +3772,12 @@ def pick_folder():
 @app.route("/api/pick-metadata", methods=["POST"])
 def pick_metadata():
     try:
-        import tkinter as tk
-        from tkinter import filedialog
-    except Exception as exc:
-        return jsonify({"status": "error", "message": f"Metadata picker unavailable: {exc}"}), 500
-
-    try:
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        selected = filedialog.askopenfilename(
-            title="Select app metadata (JSON, CSV, or XML)",
-            filetypes=[
-                ("App metadata", "*.json *.csv *.xml"),
-                ("JSON", "*.json"),
-                ("CSV", "*.csv"),
-                ("XML", "*.xml"),
-                ("All files", "*.*"),
-            ],
-        )
-        root.destroy()
-    except Exception as exc:
-        return jsonify({"status": "error", "message": f"Failed to open metadata picker: {exc}"}), 500
-
-    if not selected:
+        selected = _pick_path_with_dialog("metadata")
+    except PickerCancelledError:
         return jsonify({"status": "error", "message": "Metadata selection cancelled"}), 400
+    except PickerUnavailableError as exc:
+        return jsonify({"status": "error", "message": str(exc).replace("Folder", "Metadata")}), 500
+
     return jsonify({"status": "ok", "app_metadata_path": str(Path(selected))})
 
 
