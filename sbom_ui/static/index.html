@@ -506,6 +506,7 @@ const PRESETS=[
   {label:'Snort (IDS/IPS)',value:'https://github.com/snort3/snort3'},
   {label:'MAVLink (UAV messaging)',value:'https://github.com/mavlink/mavlink'},
 ];
+const PRESET_REPO_URLS=new Set(PRESETS.map(p=>String(p.value||'').trim().toLowerCase()).filter(Boolean));
 
 function AnalyzePage(){
   const[repoUrl,setRepoUrl]=useState('');
@@ -569,6 +570,11 @@ function AnalyzePage(){
       const name=v.split('/').pop().replace(/[-_]/g,' ');
       setAppName(name);
     }
+  }
+
+  function isKnownPresetRepoUrl(v){
+    const key=String(v||'').trim().toLowerCase();
+    return PRESET_REPO_URLS.has(key);
   }
 
   function addLog(line,type){
@@ -757,6 +763,7 @@ function AnalyzePage(){
       const sourcePath=sourcePathFromInput(repoUrl);
       const parsed=inferProjectFromInput(repoUrl);
       const isRemoteProject=!!parsed.project;
+      const isPresetRemote=isRemoteProject&&isKnownPresetRepoUrl(repoUrl);
       const qs=isRemoteProject
         ?('?source=ci&provider='+encodeURIComponent(parsed.provider)+'&project='+encodeURIComponent(parsed.project))
         :'?source=local';
@@ -884,10 +891,14 @@ function AnalyzePage(){
 
       markStage('sign');
       let sbomRaw=null;
+      let useLegacyRemoteFallback=false;
       try{
         sbomRaw=await apiJson('/api/sbom/unified'+qs);
       }catch(e){
-        if(isRemoteProject){
+        if(isRemoteProject&&isPresetRemote){
+          useLegacyRemoteFallback=true;
+          addLog('No CI SBOM artifact found for this preset repository. Using curated preset CVE mode.','warn');
+        }else if(isRemoteProject){
           throw new Error('No CI SBOM artifact found for this repository. Run the target repository pipeline first, then retry.');
         }else{
           throw e;
@@ -897,10 +908,44 @@ function AnalyzePage(){
       markStage('scan');
       let gRes={ok:false,data:null,message:'No report'};
       let tRes={ok:false,data:null,message:'No report'};
-      [gRes,tRes]=await Promise.all([
-        fetchJsonOptional('/api/report/unified?scanner=grype'+reportSuffix),
-        fetchJsonOptional('/api/report/unified?scanner=trivy'+reportSuffix),
-      ]);
+      if(!useLegacyRemoteFallback){
+        [gRes,tRes]=await Promise.all([
+          fetchJsonOptional('/api/report/unified?scanner=grype'+reportSuffix),
+          fetchJsonOptional('/api/report/unified?scanner=trivy'+reportSuffix),
+        ]);
+      }
+
+      if(isRemoteProject&&isPresetRemote&&(useLegacyRemoteFallback||(!gRes.ok&&!tRes.ok))){
+        const legacy=buildLegacyRemoteScan(repoUrl,appName);
+        markStage('report');
+        setSbomResult({
+          components:legacy.components,
+          timestamp:new Date().toISOString(),
+          target:repoUrl,
+          meta:{
+            source:'remote-preset-db',
+            provider:parsed.provider,
+            project:parsed.project,
+            note:'Preset repository mode: using curated CVE dataset because CI artifacts are unavailable.',
+          },
+          hasSignature:false,
+          signatureAlg:'',
+        });
+        setVulnResult({
+          grype:{matches:legacy.grypeMatches,loadError:null},
+          trivy:{matches:legacy.trivyMatches,loadError:null},
+          evidence:valRes.ok?valRes.data:{},
+          dbDate:new Date().toLocaleDateString(),
+        });
+        setDoneStages([...PIPELINE_STAGES]);
+        if(legacy.trivyMatches.length>legacy.grypeMatches.length)setVulnScanner('trivy');
+        addLog('Preset repository scan completed with curated CVE data (no local-host fallback used).','ok');
+        setCurrentStage('');
+        setStatus('done');
+        const total=legacy.grypeMatches.length+legacy.trivyMatches.length;
+        toast('✓ Preset scan complete · '+legacy.components.length+' components · '+total+' CVEs','ok');
+        return;
+      }
 
       if(isRemoteProject&&(!gRes.ok&&!tRes.ok)){
         throw new Error('No CI vulnerability artifacts found for this repository. Run the target repository pipeline first, then retry.');
