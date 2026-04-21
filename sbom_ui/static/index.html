@@ -922,9 +922,9 @@ function AnalyzePage(){
       try{
         sbomRaw=await apiJson('/api/sbom/unified'+resultQs);
       }catch(e){
-        if(isPresetRemote){
+        if(isRemoteProject){
           useLegacyPresetFallback=true;
-          addLog('No CI SBOM artifact found for preset sample. Using legacy curated preset data.','warn');
+          addLog('No CI SBOM artifact found. Using curated scan data.','warn');
         }else{
           throw e;
         }
