@@ -36,6 +36,7 @@ ARTIFACT_RUNS_DIR = REPO_ROOT / "artifacts" / "runs"
 SCAN_MANIFEST_PATH = REPORT_DIR / "scan-manifest.json"
 STATIC_DIR = REPO_ROOT / "sbom_ui" / "static"
 UPLOAD_DIR = REPO_ROOT / ".ui_uploads"
+REMOTE_CLONE_DIR = UPLOAD_DIR / "remote-clones"
 TOOLS_BIN_DIR = REPO_ROOT / ".tools" / "bin"
 SOURCE_DIAG_PATH = REPORT_DIR / "source-diagnostics.json"
 LOCAL_RUN_STATE_DIR = REPORT_DIR / "local-runs"
@@ -691,6 +692,7 @@ def ensure_dirs():
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     LOCAL_RUN_STATE_DIR.mkdir(parents=True, exist_ok=True)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    REMOTE_CLONE_DIR.mkdir(parents=True, exist_ok=True)
     TOOLS_BIN_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -979,6 +981,89 @@ def normalize_path_for_script(path_value):
         return os.path.relpath(str(p), str(REPO_ROOT))
     except Exception:
         return str(path_value)
+
+
+def _sanitize_remote_repo_url(repo_url):
+    raw = str(repo_url or "").strip()
+    if not raw:
+        raise ValueError("Missing repo_url")
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Remote repository URL must start with http:// or https://")
+    if not parsed.netloc:
+        raise ValueError("Remote repository URL is missing a host")
+    if parsed.username or parsed.password:
+        raise ValueError("Remote repository URL must not embed credentials")
+    return raw
+
+
+def _derive_remote_clone_slug(repo_url):
+    parsed = urlparse(repo_url)
+    host = re.sub(r"[^a-zA-Z0-9._-]+", "-", parsed.netloc.lower()).strip("-") or "remote"
+    parts = [p for p in parsed.path.split("/") if p]
+    tail = "-".join(parts[-2:] if len(parts) >= 2 else parts[-1:])
+    tail = tail[:-4] if tail.lower().endswith(".git") else tail
+    tail = re.sub(r"[^a-zA-Z0-9._-]+", "-", tail).strip("-") or "repo"
+    return f"{host}-{tail}"[:96]
+
+
+def clone_remote_repository(repo_url, log_callback=None):
+    ensure_dirs()
+    repo_url = _sanitize_remote_repo_url(repo_url)
+    git_bin = shutil.which("git")
+    if not git_bin:
+        raise RuntimeError("git is not available on the server, so remote repository cloning cannot run")
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    slug = _derive_remote_clone_slug(repo_url)
+    clone_dir = (REMOTE_CLONE_DIR / f"{ts}-{slug}").resolve()
+    if not _path_under_repo(clone_dir):
+        raise RuntimeError("Refusing to clone outside the workspace")
+
+    clone_cmd = [git_bin, "clone", "--depth", "1", repo_url, str(clone_dir)]
+    if log_callback:
+        log_callback(f"==> Cloning remote repository: {repo_url}\n")
+        code, output = run_cmd_stream(clone_cmd, on_output=log_callback)
+    else:
+        code, output = run_cmd(clone_cmd)
+    if code != 0:
+        try:
+            if clone_dir.exists():
+                shutil.rmtree(clone_dir)
+        except Exception:
+            pass
+        snippet = (output or "").strip()[-1200:]
+        raise RuntimeError(f"git clone failed for {repo_url}: {snippet or f'exit {code}'}")
+
+    rel = rel_to_repo(clone_dir).replace("\\", "/")
+    return {"repo_url": repo_url, "clone_dir": clone_dir, "source_dir": clone_dir, "source_path": rel}
+
+
+def prepare_generate_request(body, log_callback=None):
+    prepared = dict(body or {})
+    cleanup_paths = []
+
+    source_path = str(prepared.get("source_path") or "").strip()
+    if source_path:
+        prepared["source_path"] = source_path
+    else:
+        repo_url = str(prepared.get("repo_url") or "").strip()
+        if repo_url:
+            clone_info = clone_remote_repository(repo_url, log_callback=log_callback)
+            prepared["source_path"] = clone_info["source_path"]
+            prepared["repo_url"] = clone_info["repo_url"]
+            prepared.setdefault("app_name", clone_info["source_dir"].name)
+            cleanup_paths.append(clone_info["clone_dir"])
+
+    def _cleanup():
+        for path in cleanup_paths:
+            try:
+                if path.exists():
+                    shutil.rmtree(path)
+            except Exception:
+                pass
+
+    return prepared, _cleanup
 
 
 def build_temp_metadata(app_name, source_path):
@@ -1575,16 +1660,19 @@ def write_osv_vuln_reports_from_sbom(sbom_path):
 
 def run_generate_pipeline(body, log_callback=None):
     body = body or {}
-
-    source_path = body.get("source_path")
-    if not source_path:
-        return {
-            "status": "error",
-            "message": "Missing source_path",
-            "exit_code": 1
-        }
+    request_cleanup = lambda: None
 
     try:
+        body, request_cleanup = prepare_generate_request(body, log_callback=log_callback)
+
+        source_path = body.get("source_path")
+        if not source_path:
+            return {
+                "status": "error",
+                "message": "Missing source_path",
+                "exit_code": 1
+            }
+
         ensure_dirs()
         clear_previous_build_artifacts()
 
@@ -1710,6 +1798,7 @@ def run_generate_pipeline(body, log_callback=None):
                 "source_path": source_path,
                 "app_metadata_path": app_meta_rel,
                 "source_diagnostics": source_diag,
+                "repo_url": body.get("repo_url") or "",
             }
 
         # Docker + bash: same pipeline as GitLab / generate-sbom.ps1 native (Syft+Trivy+merge+Grype+Trivy vuln), no host PowerShell.
@@ -1806,6 +1895,7 @@ def run_generate_pipeline(body, log_callback=None):
                     "source_path": source_path,
                     "app_metadata_path": app_meta_rel,
                     "source_diagnostics": source_diag,
+                    "repo_url": body.get("repo_url") or "",
                 }
             if log_callback:
                 log_callback(
@@ -1957,6 +2047,7 @@ def run_generate_pipeline(body, log_callback=None):
             "source_path": source_path,
             "app_metadata_path": app_meta_rel,
             "source_diagnostics": source_diag,
+            "repo_url": body.get("repo_url") or "",
         }
 
     except Exception as e:
@@ -1965,6 +2056,8 @@ def run_generate_pipeline(body, log_callback=None):
             "message": str(e),
             "exit_code": 1
         }
+    finally:
+        request_cleanup()
 
 
 def _local_run_worker(run_id, body):
@@ -2009,8 +2102,9 @@ def _local_run_worker(run_id, body):
                 "duration": duration,
                 "exit_code": result.get("exit_code"),
                 "log": final_log,
-                "source_path": result.get("source_path"),
+                "source_path": result.get("source_path") or run.get("source_path"),
                 "app_metadata_path": result.get("app_metadata_path"),
+                "repo_url": result.get("repo_url"),
             }
         )
         LOCAL_RUNS[run_id] = run
@@ -3433,6 +3527,7 @@ def start_local_run():
     body = request.get_json(silent=True) or {}
     run_id = f"local-{uuid.uuid4().hex[:10]}"
     now = datetime.now(timezone.utc).isoformat()
+    display_target = body.get("source_path") or body.get("repo_url") or ""
     with LOCAL_RUNS_LOCK:
         LOCAL_RUNS[run_id] = {
             "id": run_id,
@@ -3443,7 +3538,7 @@ def start_local_run():
             "duration": None,
             "exit_code": None,
             "log": "",
-            "source_path": body.get("source_path") or "",
+            "source_path": display_target,
             "app_name": body.get("app_name") or "",
         }
         _write_local_run_state(LOCAL_RUNS[run_id])

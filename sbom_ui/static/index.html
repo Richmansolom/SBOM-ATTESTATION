@@ -718,55 +718,20 @@ function AnalyzePage(){
     return{ok:true,data:payload};
   }
 
-  function computeAnalyzeStages({sourcePath,gen,sbomCore,grypeLoaded,trivyLoaded,valSum}){
+  function computeAnalyzeStages({gen,sbomCore,grypeLoaded,trivyLoaded,valSum}){
     const done=[];
-    if(sourcePath&&gen&&gen.status==='ok')done.push('build','generate');
+    if(gen&&gen.status==='ok')done.push('build','generate');
     const cx=valSum&&valSum.cyclonedx_schema;
     const hp=valSum&&valSum.hoppr_ntia;
     if((cx&&cx.pass===true)||(hp&&hp.pass===true)){
       done.push('validate');
-    }else if(sourcePath&&gen&&gen.status==='ok'&&((cx&&cx.available)||(hp&&hp.available))){
+    }else if(gen&&gen.status==='ok'&&((cx&&cx.available)||(hp&&hp.available))){
       done.push('validate');
     }
     if(sbomCore&&sbomCore.signature&&sbomCore.signature.value)done.push('sign');
     if(grypeLoaded||trivyLoaded)done.push('scan');
     if(sbomCore)done.push('report');
     return done;
-  }
-
-  function buildLegacyRemoteScan(repoUrlValue, appNameValue){
-    const seed=String(repoUrlValue||appNameValue||'remote').split('').reduce((a,ch)=>a+ch.charCodeAt(0),0);
-    const pick=(arr,count)=>{
-      const out=[];
-      for(let i=0;i<count;i++)out.push(arr[(seed+i*3)%arr.length]);
-      return out;
-    };
-    const compPool=[
-      {name:'openssl',version:'3.0.8',type:'library',license:'Apache-2.0',source:'Scanner'},
-      {name:'zlib',version:'1.2.13',type:'library',license:'Zlib',source:'Scanner'},
-      {name:'curl',version:'7.85.0',type:'library',license:'curl',source:'Scanner'},
-      {name:'libxml2',version:'2.10.3',type:'library',license:'MIT',source:'Scanner'},
-      {name:'nghttp2',version:'1.50.0',type:'library',license:'MIT',source:'Scanner'},
-      {name:'openssh',version:'9.2p1',type:'application',license:'BSD-2-Clause',source:'Scanner'},
-      {name:'repo-core',version:'1.0.0',type:'application',license:'MIT',source:'Source inventory'},
-    ];
-    const cvePool=[
-      {id:'CVE-2023-44487',sev:'High',comp:'nghttp2',ver:'1.50.0',fix:'1.57.0',desc:'HTTP/2 Rapid Reset DoS attack'},
-      {id:'CVE-2023-38408',sev:'Critical',comp:'openssh',ver:'9.2p1',fix:'9.3p2',desc:'Remote code execution via ssh-agent'},
-      {id:'CVE-2022-42916',sev:'High',comp:'curl',ver:'7.85.0',fix:'7.86.0',desc:'HSTS bypass via IDN redirect'},
-      {id:'CVE-2023-45853',sev:'Critical',comp:'zlib',ver:'1.2.13',fix:'1.3',desc:'Integer overflow in MiniZip'},
-      {id:'CVE-2021-3711',sev:'Critical',comp:'openssl',ver:'1.1.1l',fix:'1.1.1m',desc:'SM2 decryption buffer overflow'},
-      {id:'CVE-2023-2650',sev:'High',comp:'openssl',ver:'3.0.8',fix:'3.0.9',desc:'ASN.1 object identifier DoS'},
-      {id:'CVE-2023-29469',sev:'Medium',comp:'libxml2',ver:'2.10.3',fix:'2.11.0',desc:'Use-after-free in dict strings'},
-      {id:'CVE-2023-1916',sev:'Medium',comp:'libtiff',ver:'4.5.0',fix:'4.5.1',desc:'Out-of-bounds read in tiffcrop'},
-      {id:'CVE-2023-0361',sev:'Low',comp:'gnutls',ver:'3.7.9',fix:'3.8.0',desc:'RSA-PSK timing side-channel'},
-    ];
-    const components=pick(compPool,5+seed%2);
-    const gCount=2+(seed%3);
-    const tCount=1+((seed+1)%2);
-    const grypeMatches=pick(cvePool,gCount);
-    const trivyMatches=pick(cvePool.slice().reverse(),tCount);
-    return{components,grypeMatches,trivyMatches};
   }
 
   async function runScan(){
@@ -781,20 +746,26 @@ function AnalyzePage(){
       const sourcePath=sourcePathFromInput(repoUrl);
       const parsed=inferProjectFromInput(repoUrl);
       const isRemoteProject=!!parsed.project;
-      const isPresetRemote=isRemoteProject&&isKnownPresetRepoUrl(repoUrl);
       const qs=isRemoteProject
         ?('?source=ci&provider='+encodeURIComponent(parsed.provider)+'&project='+encodeURIComponent(parsed.project))
         :'?source=local';
-      const reportSuffix=qs.includes('?')?('&'+qs.slice(1)):'';
+      const shouldRunLocal=!!sourcePath||isRemoteProject;
+      let resultQs=qs;
 
-      if(sourcePath){
+      if(shouldRunLocal){
         markStage('build');
-        addLog('$ source_path='+sourcePath,'cmd');
-        addLog('Starting backend generate pipeline (Syft, Trivy, Distro2SBOM, merge, validate, scan)…','info');
+        if(sourcePath){
+          addLog('$ source_path='+sourcePath,'cmd');
+          addLog('Starting backend generate pipeline (Syft, Trivy, Distro2SBOM, merge, validate, scan)…','info');
+        }else{
+          addLog('$ repo_url='+repoUrl,'cmd');
+          addLog('Cloning remote repository and running backend generate pipeline…','info');
+        }
 
         markStage('generate');
         const payload={
           source_path:sourcePath,
+          repo_url:isRemoteProject?repoUrl:undefined,
           app_name:appName||undefined,
           app_version:appVer||undefined,
           supplier:supplier||undefined,
@@ -900,71 +871,26 @@ function AnalyzePage(){
         if(gen.status==='error'){
           throw new Error(gen.message||'SBOM generate pipeline failed');
         }
+        resultQs='?source=local';
       }else{
         addLog('No local source path — skipping POST /api/generate. Loading CI artifacts for this repository URL.','warn');
       }
 
       markStage('validate');
-      const valRes=await fetchJsonOptional('/api/validation-summary'+qs);
+      const valRes=await fetchJsonOptional('/api/validation-summary'+resultQs);
 
       markStage('sign');
-      let sbomRaw=null;
-      let useLegacyRemoteFallback=false;
-      try{
-        sbomRaw=await apiJson('/api/sbom/unified'+qs);
-      }catch(e){
-        if(isRemoteProject){
-          useLegacyRemoteFallback=true;
-          addLog('No CI SBOM artifact found for this repository. Falling back to curated CVE dataset for demonstration.','warn');
-        }else{
-          throw e;
-        }
-      }
+      const sbomRaw=await apiJson('/api/sbom/unified'+resultQs);
 
       markStage('scan');
-      let gRes={ok:false,data:null,message:'No report'};
-      let tRes={ok:false,data:null,message:'No report'};
-      if(!useLegacyRemoteFallback){
-        [gRes,tRes]=await Promise.all([
-          fetchJsonOptional('/api/report/unified?scanner=grype'+reportSuffix),
-          fetchJsonOptional('/api/report/unified?scanner=trivy'+reportSuffix),
-        ]);
-      }
-
-      if(isRemoteProject&&(useLegacyRemoteFallback||(!gRes.ok&&!tRes.ok))){
-        const legacy=buildLegacyRemoteScan(repoUrl,appName);
-        markStage('report');
-        setSbomResult({
-          components:legacy.components,
-          timestamp:new Date().toISOString(),
-          target:repoUrl,
-          meta:{
-            source:'remote-preset-db',
-            provider:parsed.provider,
-            project:parsed.project,
-            note:'Remote repository mode: using curated CVE dataset because CI artifacts are unavailable.',
-          },
-          hasSignature:false,
-          signatureAlg:'',
-        });
-        setVulnResult({
-          grype:{matches:legacy.grypeMatches,loadError:null},
-          trivy:{matches:legacy.trivyMatches,loadError:null},
-          evidence:valRes.ok?valRes.data:{},
-          dbDate:new Date().toLocaleDateString(),
-        });
-        setDoneStages([...PIPELINE_STAGES]);
-        if(legacy.trivyMatches.length>legacy.grypeMatches.length)setVulnScanner('trivy');
-        addLog('Remote repository scan completed with curated CVE data (no CI artifacts found).','ok');
-        setCurrentStage('');
-        setStatus('done');
-        const total=legacy.grypeMatches.length+legacy.trivyMatches.length;
-        toast('✓ Remote scan complete · '+legacy.components.length+' components · '+total+' CVEs','ok');
-        return;
-      }
+      const reportSuffix=resultQs.includes('?')?('&'+resultQs.slice(1)):'';
+      const [gRes,tRes]=await Promise.all([
+        fetchJsonOptional('/api/report/unified?scanner=grype'+reportSuffix),
+        fetchJsonOptional('/api/report/unified?scanner=trivy'+reportSuffix),
+      ]);
 
       if(isRemoteProject&&(!gRes.ok&&!tRes.ok)){
-        throw new Error('No CI vulnerability artifacts found for this repository. Run the target repository pipeline first, then retry.');
+        throw new Error('Repository scan completed, but no vulnerability reports were produced by the backend. Check the pipeline log for scanner errors.');
       }
 
       markStage('report');
@@ -993,7 +919,6 @@ function AnalyzePage(){
         dbDate:new Date().toLocaleDateString(),
       });
       setDoneStages(computeAnalyzeStages({
-        sourcePath,
         gen,
         sbomCore,
         grypeLoaded,
