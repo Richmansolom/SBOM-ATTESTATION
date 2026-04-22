@@ -246,6 +246,7 @@ $script:SPDX_LICENSES = @{
   "Apache-1.1" = @{ name = "Apache Software License 1.1"; url = "https://spdx.org/licenses/Apache-1.1.html" }
   "BSD-2-Clause" = @{ name = "BSD 2-Clause License"; url = "https://spdx.org/licenses/BSD-2-Clause.html" }
   "BSD-3-Clause" = @{ name = "BSD 3-Clause License"; url = "https://spdx.org/licenses/BSD-3-Clause.html" }
+  "BSD-4-Clause" = @{ name = "BSD 4-Clause License"; url = "https://spdx.org/licenses/BSD-4-Clause.html" }
   "GPL-2.0-only" = @{ name = "GNU General Public License v2.0 only"; url = "https://spdx.org/licenses/GPL-2.0-only.html" }
   "GPL-2.0" = @{ name = "GNU General Public License v2.0"; url = "https://spdx.org/licenses/GPL-2.0.html" }
   "GPL-3.0" = @{ name = "GNU General Public License v3.0"; url = "https://spdx.org/licenses/GPL-3.0.html" }
@@ -254,7 +255,40 @@ $script:SPDX_LICENSES = @{
   "LGPL-3.0" = @{ name = "GNU Lesser General Public License v3.0"; url = "https://spdx.org/licenses/LGPL-3.0.html" }
   "MPL-2.0" = @{ name = "Mozilla Public License 2.0"; url = "https://spdx.org/licenses/MPL-2.0.html" }
   "ISC" = @{ name = "ISC License"; url = "https://spdx.org/licenses/ISC.html" }
+  "X11" = @{ name = "X11 License"; url = "https://spdx.org/licenses/X11.html" }
+  "Unicode-DFS-2016" = @{ name = "Unicode License Agreement - Data Files and Software (2016)"; url = "https://spdx.org/licenses/Unicode-DFS-2016.html" }
+  "SDBM" = @{ name = "SDBM License"; url = "https://spdx.org/licenses/SDBM.html" }
+  "BZip2-1.0.6" = @{ name = "bzip2 and libbzip2 License v1.0.6"; url = "https://spdx.org/licenses/BZip2-1.0.6.html" }
+  "Artistic-2.0" = @{ name = "Artistic License 2.0"; url = "https://spdx.org/licenses/Artistic-2.0.html" }
   "Unlicense" = @{ name = "The Unlicense"; url = "https://spdx.org/licenses/Unlicense.html" }
+}
+
+$script:SPDX_LICENSE_ALIASES = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($pair in @{
+  "MIT-X11" = "MIT"
+  "Artistic-2" = "Artistic-2.0"
+  "BSD-3-clause-GENERIC" = "BSD-3-Clause"
+  "BSD-4-clause-POWERDOG" = "BSD-4-Clause"
+  "BZIP" = "BZip2-1.0.6"
+  "Unicode" = "Unicode-DFS-2016"
+  "SDBM-PUBLIC-DOMAIN" = "SDBM"
+}.GetEnumerator()) {
+  $script:SPDX_LICENSE_ALIASES[$pair.Key] = $pair.Value
+}
+
+function Resolve-SpdxLicenseId([string]$licenseInput) {
+  $raw = [string]$licenseInput
+  if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+
+  $id = $raw.Trim()
+  if ($script:SPDX_LICENSES.ContainsKey($id)) { return $id }
+  if ($script:SPDX_LICENSE_ALIASES.ContainsKey($id)) { return $script:SPDX_LICENSE_ALIASES[$id] }
+
+  $canonical = $id -replace '_', '-' -replace '\s+', ''
+  if ($script:SPDX_LICENSES.ContainsKey($canonical)) { return $canonical }
+  if ($script:SPDX_LICENSE_ALIASES.ContainsKey($canonical)) { return $script:SPDX_LICENSE_ALIASES[$canonical] }
+
+  return $null
 }
 
 function ToCycloneDxLicenseEntry($licenseInput) {
@@ -262,14 +296,11 @@ function ToCycloneDxLicenseEntry($licenseInput) {
   if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq "unknown") {
     return @{ license = @{ name = "unknown" } }
   }
-  $id = $raw.Trim()
-  if ($script:SPDX_LICENSES.ContainsKey($id)) {
+  $id = Resolve-SpdxLicenseId $raw
+  if ($id) {
     return @{ license = @{ id = $id } }
   }
-  if ($id -notmatch '\s' -and $id -match '^[A-Za-z0-9.+_\-]+$') {
-    return @{ license = @{ id = $id } }
-  }
-  return @{ license = @{ name = $id } }
+  return @{ license = @{ name = $raw.Trim() } }
 }
 
 function Normalize-ComponentLicenses($component) {
