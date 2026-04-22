@@ -4678,7 +4678,7 @@ def trigger_pipeline():
             json_body={
                 "ref": ref_full,
                 "inputs": {
-                    "app_dir": app_dir,
+                    "app_path": app_dir,
                     "app_version": app_version,
                 },
             },

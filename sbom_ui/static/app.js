@@ -1,4 +1,6 @@
-const BASE_URL = "https://YOUR-NEW-DOCKER-URL.onrender.com";
+const BASE_URL = window.location.origin.startsWith("http") && !window.location.hostname.includes("localhost") && !window.location.hostname.includes("127.0.0.1")
+  ? window.location.origin
+  : "";
 const logOutput = document.getElementById("logOutput");
 const envBadge = document.getElementById("envBadge");
 const repoName = document.getElementById("repoName");
