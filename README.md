@@ -157,6 +157,90 @@ PowerShell wrappers are also available in the same Makefile.
 
 You can include custom component graphs via metadata and they will be merged into the final CycloneDX SBOM.
 
+## Current implementation status
+
+The following is implemented and validated in this repository:
+
+- SBOM generation: Syft + Trivy + Distro2SBOM are merged via CycloneDX for source/build targets.
+- Metadata enrichment: custom C/C++ application metadata is merged into generated SBOMs.
+- Validation: CycloneDX schema checks, local NTIA checks, and Hoppr NTIA validation are in place.
+- Attestation: embedded SBOM signature generation and verification are implemented via OpenSSL-based flow.
+- Vulnerability analysis: Grype and Trivy scans produce JSON/table outputs and combined summary evidence.
+- Mission Control UI: Flask-served UI and APIs support GitHub/GitLab trigger and monitoring workflows.
+- Security hardening: CI supports `SBOM_PRIVATE_KEY_PEM` injection and excludes private key material from uploaded artifacts.
+
+## Real-world threat relevance
+
+Security tooling is part of the software supply chain and can itself be targeted. This repository reflects that operational reality with the following controls:
+
+- Prefer pinned scanner references where possible.
+- Treat CI credentials and tokens as high-risk secrets and apply least privilege.
+- Keep signing key material out of artifacts and inject keys via protected CI variables.
+- Preserve auditable evidence (validation logs, scan outputs, DB status) for incident response and attestation.
+
+## Attestation and validation model
+
+This implementation combines multiple layers:
+
+1. CycloneDX structural validation
+2. NTIA minimum-elements validation (`check-ntia.ps1`)
+3. Hoppr NTIA profile validation
+4. Signature generation and verification
+5. Dual vulnerability scanner cross-check (Grype + Trivy)
+6. Vulnerability DB freshness evidence capture
+
+## Required artifact set for reproducibility
+
+For another team to reproduce this implementation class, retain at minimum:
+
+- Enriched SBOMs (`sbom-source.enriched.json`, `sbom-build.enriched.json`, or image variant in container mode)
+- Signed SBOM and signature/public-key evidence
+- NTIA check output
+- Hoppr output (`reports/hoppr-ntia.log`, `reports/hoppr-ntia-results.json`)
+- Grype report and DB status/provider files
+- Trivy report and DB update/status evidence
+- Combined vulnerability summary (`reports/vulnerability-analysis.txt`)
+
+CI publishes two bundles:
+
+- `essential`: quick-consumption bundle for scanners, UI flows, and reviewer handoff
+- `evidence`: full audit bundle with raw logs, DB freshness artifacts, validation logs, and supporting reports
+
+## How to adapt this to another C/C++ project
+
+1. Replace `example-app/` with your project (or point `APP_DIR` / `-SourcePath` at your tree).
+2. Update metadata (`app-metadata.json`, `.csv`, or `.xml`) for supplier identity, application info, and optional `custom_components` graph.
+3. Set `APP_DIR` and `APP_METADATA` in GitHub workflow and GitLab CI to match your project paths.
+4. Replace the build command if you do not use Make (for example CMake or Ninja).
+5. For local runs, use `generate-sbom.ps1` with `-SourcePath` and `-AppMetadataPath` as needed.
+6. Keep SBOM/report output naming stable if downstream automation or UI flows depend on those paths.
+7. Re-run pipeline after `git pull`; use `-NoClean` only for intentional debugging.
+
+## Quality gate checklist
+
+- Build succeeds
+- SBOM generated for intended target
+- Metadata enrichment merged correctly
+- CycloneDX validation passes
+- NTIA checks pass (local + Hoppr)
+- Signature verification passes
+- Grype and Trivy reports are generated
+- DB status evidence is present and current
+- Artifacts are uploaded and downloadable
+
+## Data usage and management (current pipeline)
+
+All generated SBOM and scan outputs should be handled as sensitive supply-chain records.
+
+- Source authority: GitHub repository is primary; GitLab pipeline mirrors are supported.
+- Artifact publication: `sbom/` and `reports/` outputs are included in CI artifact bundles.
+- Retention: GitHub Actions uses 7-day retention; GitLab CI uses 1-week retention.
+- Vulnerability reports: Grype/Trivy JSON and text outputs are archived under `reports/`.
+- Cryptographic keys: signing keys can be injected via `SBOM_PRIVATE_KEY_PEM`; private key upload is excluded from CI artifacts.
+- Credentials and tokens: UI can pass provider tokens to backend via `X-SBOM-TOKEN`; use least-privilege tokens.
+- External data flows: pipeline pulls scanner images and vulnerability databases from upstream registries.
+- PII: pipeline is designed for software/component metadata and does not intentionally process PII.
+
 ## Troubleshooting
 
 ### CycloneDX license validation errors
